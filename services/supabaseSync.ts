@@ -24,23 +24,24 @@ export async function loadSupabaseData() {
     { data: profiles, error: pErr },
     { data: orders, error: oErr },
     { data: menu, error: mErr },
+    { data: holidays, error: hErr },
   ] = await Promise.all([
     supabase.from('profiles').select('*'),
     supabase
       .from('orders')
-      .select(
-        'id,employee_id,ordered_for,status,created_at,updated_at,cancelled_at,order_items(id,item_code,quantity,unit_price)'
-      )
+      .select('id,employee_id,ordered_for,status,created_at,updated_at,cancelled_at,order_items(id,item_code,quantity,unit_price)')
       .order('ordered_for', { ascending: false }),
     supabase
       .from('menu_prices')
       .select('item_code,item_name,unit_price,active,updated_at')
       .order('item_code'),
+    supabase.from('holidays').select('holiday_date,reason').order('holiday_date'),
   ]);
 
   if (pErr) throw pErr;
   if (oErr) throw oErr;
   if (mErr) throw mErr;
+  if (hErr) throw hErr;
 
   const users: User[] = (profiles || []).map((p: any) => ({
     id: p.employee_code || p.sr_number || p.id,
@@ -54,31 +55,32 @@ export async function loadSupabaseData() {
 
   const profileByUuid = new Map((profiles || []).map((p: any) => [p.id, p]));
 
-  const mappedOrders: Order[] = (orders || []).map((o: any) => {
-    const items: OrderItems = {
-      morningTea: false,
-      lunchMeals: false,
-      lunchEgg: false,
-      lunchFishMeat: false,
-      eveningTea: false,
-    };
+  const mappedOrders: Order[] = (orders || [])
+    .filter((o: any) => o.status !== 'cancelled')
+    .map((o: any) => {
+      const items: OrderItems = {
+        morningTea: false,
+        lunchMeals: false,
+        lunchEgg: false,
+        lunchFishMeat: false,
+        eveningTea: false,
+      };
 
-    (o.order_items || []).forEach((i: any) => {
-      if (i.item_code in items) {
-        items[i.item_code as keyof OrderItems] = Number(i.quantity) > 0;
-      }
+      (o.order_items || []).forEach((i: any) => {
+        if (i.item_code in items) {
+          items[i.item_code as keyof OrderItems] = Number(i.quantity) > 0;
+        }
+      });
+
+      const ep: any = profileByUuid.get(o.employee_id);
+
+      return {
+        id: o.id,
+        employeeId: ep?.employee_code || ep?.sr_number || o.employee_id,
+        date: o.ordered_for,
+        items,
+      };
     });
-
-    const ep: any = profileByUuid.get(o.employee_id);
-
-    return {
-      id: o.id,
-      employeeId:
-        ep?.employee_code || ep?.sr_number || o.employee_id,
-      date: o.ordered_for,
-      items,
-    };
-  });
 
   const prices: Prices = {
     morningTea: 8,
@@ -95,14 +97,19 @@ export async function loadSupabaseData() {
 
     return {
       itemCode: r.item_code,
-      itemName:
-        r.item_name || defaultNames[r.item_code] || r.item_code,
+      itemName: r.item_name || defaultNames[r.item_code] || r.item_code,
       unitPrice: Number(r.unit_price),
       active: Boolean(r.active),
     };
   });
 
-  return { users, orders: mappedOrders, prices, menuItems };
+  return {
+    users,
+    orders: mappedOrders,
+    prices,
+    menuItems,
+    holidays: (holidays || []).map((h: any) => String(h.holiday_date)),
+  };
 }
 
 export async function upsertOrder(order: Order, prices: Prices) {
@@ -111,25 +118,21 @@ export async function upsertOrder(order: Order, prices: Prices) {
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id')
-    .or(
-      `employee_code.eq.${order.employeeId},sr_number.eq.${order.employeeId}`
-    )
+    .or(`employee_code.eq.${order.employeeId},sr_number.eq.${order.employeeId}`)
     .maybeSingle();
 
   if (profileError) throw profileError;
   if (!profile) return;
 
-  const { error: orderError } = await supabase
-    .from('orders')
-    .upsert(
-      {
-        id: order.id,
-        employee_id: profile.id,
-        ordered_for: order.date,
-        status: 'active',
-      },
-      { onConflict: 'id' }
-    );
+  const { error: orderError } = await supabase.from('orders').upsert(
+    {
+      id: order.id,
+      employee_id: profile.id,
+      ordered_for: order.date,
+      status: 'active',
+    },
+    { onConflict: 'id' }
+  );
 
   if (orderError) throw orderError;
 
@@ -150,10 +153,7 @@ export async function upsertOrder(order: Order, prices: Prices) {
     }));
 
   if (rows.length) {
-    const { error: insertError } = await supabase
-      .from('order_items')
-      .insert(rows);
-
+    const { error: insertError } = await supabase.from('order_items').insert(rows);
     if (insertError) throw insertError;
   }
 }
@@ -163,28 +163,18 @@ export async function cancelOrder(order: Order) {
 
   const { error } = await supabase
     .from('orders')
-    .update({
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-    })
+    .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
     .eq('id', order.id);
 
   if (error) throw error;
 }
 
-export async function upsertPrices(
-  prices: Prices,
-  menuItems: MenuItem[] = []
-) {
+export async function upsertPrices(prices: Prices, menuItems: MenuItem[] = []) {
   if (!supabaseEnabled || !supabase) return;
 
-  const existingItems = new Map(
-    menuItems.map(item => [item.itemCode, item])
-  );
-
+  const existingItems = new Map(menuItems.map(item => [item.itemCode, item]));
   const rows = itemCodes.map(k => {
     const item = existingItems.get(k);
-
     return {
       item_code: k,
       item_name: item?.itemName || defaultNames[k] || k,
@@ -203,40 +193,45 @@ export async function upsertPrices(
 export async function saveMenuItem(item: MenuItem) {
   if (!supabaseEnabled || !supabase) return;
 
-  const { error } = await supabase
-    .from('menu_prices')
-    .upsert(
-      {
-        item_code: item.itemCode,
-        item_name: item.itemName,
-        unit_price: item.unitPrice,
-        active: item.active,
-      },
-      { onConflict: 'item_code' }
-    );
+  const { error } = await supabase.from('menu_prices').upsert(
+    {
+      item_code: item.itemCode,
+      item_name: item.itemName,
+      unit_price: item.unitPrice,
+      active: item.active,
+    },
+    { onConflict: 'item_code' }
+  );
 
   if (error) throw error;
 }
 
 export async function deactivateMenuItem(itemCode: string) {
   if (!supabaseEnabled || !supabase) return;
-
-  const { error } = await supabase
-    .from('menu_prices')
-    .update({ active: false })
-    .eq('item_code', itemCode);
-
+  const { error } = await supabase.from('menu_prices').update({ active: false }).eq('item_code', itemCode);
   if (error) throw error;
 }
 
 export async function activateMenuItem(itemCode: string) {
   if (!supabaseEnabled || !supabase) return;
+  const { error } = await supabase.from('menu_prices').update({ active: true }).eq('item_code', itemCode);
+  if (error) throw error;
+}
 
-  const { error } = await supabase
-    .from('menu_prices')
-    .update({ active: true })
-    .eq('item_code', itemCode);
+export async function saveHoliday(holidayDate: string, reason = '') {
+  if (!supabaseEnabled || !supabase) return;
+
+  const { error } = await supabase.from('holidays').upsert(
+    { holiday_date: holidayDate, reason: reason || null },
+    { onConflict: 'holiday_date' }
+  );
 
   if (error) throw error;
 }
 
+export async function removeHoliday(holidayDate: string) {
+  if (!supabaseEnabled || !supabase) return;
+
+  const { error } = await supabase.from('holidays').delete().eq('holiday_date', holidayDate);
+  if (error) throw error;
+}
