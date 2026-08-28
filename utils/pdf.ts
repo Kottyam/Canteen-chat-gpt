@@ -25,14 +25,7 @@ export function orderText(order: Order) {
   );
 }
 
-function addWrappedText(
-  doc: jsPDF,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight = 5
-) {
+function addWrappedText(doc: jsPDF, text: string, x: number, y: number, maxWidth: number, lineHeight = 5) {
   const lines = doc.splitTextToSize(text, maxWidth) as string[];
   doc.text(lines, x, y);
   return y + lines.length * lineHeight;
@@ -46,23 +39,33 @@ function addPageIfNeeded(doc: jsPDF, y: number, required = 10) {
   return y;
 }
 
-export function downloadDailyPdf(
-  date: string,
-  users: User[],
-  orders: Order[],
-  prices: Prices
-) {
+// jsPDF.save() is unreliable inside some Capacitor Android WebViews.
+// Open the generated Blob URL first, with an anchor-download fallback.
+function deliverPdf(doc: jsPDF, filename: string) {
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+
+  if (!opened) {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  // Keep the URL alive long enough for Android/WebView to open the PDF.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export function downloadDailyPdf(date: string, users: User[], orders: Order[], prices: Prices) {
   const doc = new jsPDF();
   const day = orders.filter(o => o.date === date);
 
-  const counts = {
-    morningTea: 0,
-    lunchMeals: 0,
-    lunchEgg: 0,
-    lunchFishMeat: 0,
-    eveningTea: 0,
-  };
-
+  const counts = { morningTea: 0, lunchMeals: 0, lunchEgg: 0, lunchFishMeat: 0, eveningTea: 0 };
   let grandTotal = 0;
 
   day.forEach(order => {
@@ -74,91 +77,45 @@ export function downloadDailyPdf(
 
   doc.setFontSize(18);
   doc.text('GoCanteen - Daily Order Report', 14, 18);
-
   doc.setFontSize(10);
   doc.text(`Date: ${date}`, 14, 26);
 
   let y = 36;
-
   doc.setFontSize(11);
   doc.text(`Employees / Orders: ${day.length}`, 14, y);
   y += 7;
-
-  doc.text(
-    `Morning Tea: ${counts.morningTea}   Meals: ${counts.lunchMeals}   Egg: ${counts.lunchEgg}`,
-    14,
-    y
-  );
+  doc.text(`Morning Tea: ${counts.morningTea}   Meals: ${counts.lunchMeals}   Egg: ${counts.lunchEgg}`, 14, y);
   y += 6;
-
-  doc.text(
-    `Fish/Meat: ${counts.lunchFishMeat}   Evening Tea: ${counts.eveningTea}`,
-    14,
-    y
-  );
+  doc.text(`Fish/Meat: ${counts.lunchFishMeat}   Evening Tea: ${counts.eveningTea}`, 14, y);
   y += 7;
-
   doc.setFontSize(12);
   doc.text(`Total Amount: Rs.${grandTotal.toFixed(2)}`, 14, y);
   y += 10;
-
   doc.setFontSize(10);
 
   day.forEach((order, index) => {
     y = addPageIfNeeded(doc, y, 18);
-
     const employee = users.find(user => user.id === order.employeeId);
     const employeeName = employee?.name || order.employeeId;
 
     doc.setFont('helvetica', 'bold');
-    y = addWrappedText(
-      doc,
-      `${index + 1}. ${employeeName} | SR: ${order.employeeId}`,
-      14,
-      y,
-      182
-    );
-
+    y = addWrappedText(doc, `${index + 1}. ${employeeName} | SR: ${order.employeeId}`, 14, y, 182);
     doc.setFont('helvetica', 'normal');
-
-    y = addWrappedText(
-      doc,
-      `Items: ${orderText(order)}`,
-      18,
-      y + 1,
-      178
-    );
-
-    doc.text(
-      `Amount: Rs.${orderTotal(order, prices).toFixed(2)}`,
-      18,
-      y + 1
-    );
-
+    y = addWrappedText(doc, `Items: ${orderText(order)}`, 18, y + 1, 178);
+    doc.text(`Amount: Rs.${orderTotal(order, prices).toFixed(2)}`, 18, y + 1);
     y += 8;
   });
 
-  doc.save(`GoCanteen-Daily-${date}.pdf`);
+  deliverPdf(doc, `GoCanteen-Daily-${date}.pdf`);
 }
 
-export function downloadMonthlyPdf(
-  month: number,
-  year: number,
-  users: User[],
-  orders: Order[],
-  prices: Prices
-) {
+export function downloadMonthlyPdf(month: number, year: number, users: User[], orders: Order[], prices: Prices) {
   const doc = new jsPDF();
-
-  const monthName = new Date(year, month, 1).toLocaleString('en-IN', {
-    month: 'long',
-  });
-
+  const monthName = new Date(year, month, 1).toLocaleString('en-IN', { month: 'long' });
   const employees = users.filter(user => user.role === 'employee');
 
   doc.setFontSize(18);
   doc.text('GoCanteen - Monthly Employee Report', 14, 18);
-
   doc.setFontSize(10);
   doc.text(`${monthName} ${year}`, 14, 26);
 
@@ -168,59 +125,26 @@ export function downloadMonthlyPdf(
   employees.forEach((employee, index) => {
     const mine = orders.filter(order => {
       if (order.employeeId !== employee.id) return false;
-
       const date = new Date(`${order.date}T00:00:00`);
-
-      return (
-        date.getMonth() === month &&
-        date.getFullYear() === year
-      );
+      return date.getMonth() === month && date.getFullYear() === year;
     });
 
-    const total = mine.reduce(
-      (sum, order) => sum + orderTotal(order, prices),
-      0
-    );
-
+    const total = mine.reduce((sum, order) => sum + orderTotal(order, prices), 0);
     grandTotal += total;
-
     y = addPageIfNeeded(doc, y, 25);
 
     doc.setFont('helvetica', 'bold');
-    y = addWrappedText(
-      doc,
-      `${index + 1}. ${employee.name || '-'}`,
-      14,
-      y,
-      182
-    );
-
+    y = addWrappedText(doc, `${index + 1}. ${employee.name || '-'}`, 14, y, 182);
     doc.setFont('helvetica', 'normal');
-
-    y = addWrappedText(
-      doc,
-      `SR Number: ${employee.id}   Mobile: ${employee.mobile || '-'}`,
-      14,
-      y + 1,
-      182
-    );
-
-    doc.text(
-      `Orders: ${mine.length}   Food Amount: Rs.${total.toFixed(2)}`,
-      14,
-      y + 1
-    );
-
+    y = addWrappedText(doc, `SR Number: ${employee.id}   Mobile: ${employee.mobile || '-'}`, 14, y + 1, 182);
+    doc.text(`Orders: ${mine.length}   Food Amount: Rs.${total.toFixed(2)}`, 14, y + 1);
     y += 9;
   });
 
   y = addPageIfNeeded(doc, y, 20);
-
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.text(`Monthly Total: Rs.${grandTotal.toFixed(2)}`, 14, y + 5);
 
-  doc.save(
-    `GoCanteen-Monthly-${year}-${String(month + 1).padStart(2, '0')}.pdf`
-  );
+  deliverPdf(doc, `GoCanteen-Monthly-${year}-${String(month + 1).padStart(2, '0')}.pdf`);
 }
