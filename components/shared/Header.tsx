@@ -1,47 +1,67 @@
-
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 
 interface HeaderProps {
-    onChangePassword: () => void;
+  onChangePassword: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({ onChangePassword }) => {
-    const { user, logout } = useAuth();
+  const { user, logout } = useAuth();
 
-    return (
-        <header className="bg-white shadow-md">
-            <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-16">
-                    <div className="flex items-center">
-                        <svg className="w-8 h-8 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h18v2H3V3zm0 8h18v2H3v-2zm0 8h18v2H3v-2zM9 1h6v2H9V1zm0 8h6v2H9V9zm0 8h6v2H9v-2z" />
-                        </svg>
-                        <h1 className="ml-3 text-2xl font-bold text-primary-700">Go Canteen</h1>
-                    </div>
-                    <div className="flex items-center space-x-4">
-                        <div className="text-right">
-                           <p className="text-sm font-medium text-gray-700">Welcome, {user?.id}</p>
-                           <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
-                        </div>
-                        <button
-                            onClick={onChangePassword}
-                            className="px-3 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                        >
-                            Change Password
-                        </button>
-                        <button
-                            onClick={logout}
-                            className="px-3 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                        >
-                            Logout
-                        </button>
-                    </div>
-                </div>
+  return (
+    <header className="w-full overflow-hidden bg-white shadow-md">
+      <div className="mx-auto w-full max-w-7xl px-3 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
+          <div className="flex min-w-0 items-center">
+            <svg
+              className="h-8 w-8 shrink-0 text-primary-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M3 3h18v2H3V3zm0 8h18v2H3v-2zm0 8h18v2H3v-2z"
+              />
+            </svg>
+            <h1 className="ml-2 truncate text-2xl font-bold text-primary-700 sm:text-3xl">
+              Go Canteen
+            </h1>
+          </div>
+
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            <div className="min-w-0 flex-1 text-left sm:flex-none sm:text-right">
+              <p className="truncate text-sm font-medium text-gray-700">
+                Welcome, {user?.id}
+              </p>
+              <p className="text-xs capitalize text-gray-500">
+                {user?.role}
+              </p>
             </div>
-        </header>
-    );
+
+            <button
+              type="button"
+              onClick={onChangePassword}
+              className="whitespace-nowrap rounded-md bg-gray-100 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-200"
+            >
+              Change Password
+            </button>
+
+            <button
+              type="button"
+              onClick={logout}
+              className="whitespace-nowrap rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
 };
 
 export default Header;
-   
