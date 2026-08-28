@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { getMonthName, formatDate } from '../../utils/helpers';
@@ -7,56 +6,49 @@ import { Order, OrderItems } from '../../types';
 const WEEKEND = [0, 6];
 
 const AllOrdersCalendar: React.FC = () => {
-  const { orders, prices } = useData();
+  const { orders, prices, holidays, addHoliday, deleteHoliday } = useData();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [holidays, setHolidays] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('canteen_holidays') || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const startOfMonth = new Date(
-    currentDate.getFullYear(),
-    currentDate.getMonth(),
-    1
-  );
-  const daysInMonth = new Date(
-    currentDate.getFullYear(),
-    currentDate.getMonth() + 1,
-    0
-  ).getDate();
-  const startDay = startOfMonth.getDay();
-
-  const ordersByDate = useMemo(() => {
-    return orders.reduce((acc, order) => {
+  const ordersByDate = useMemo(
+    () => orders.reduce((acc, order) => {
       (acc[order.date] = acc[order.date] || []).push(order);
       return acc;
-    }, {} as Record<string, Order[]>);
-  }, [orders]);
+    }, {} as Record<string, Order[]>),
+    [orders]
+  );
 
   const isHoliday = (date: Date) =>
-    WEEKEND.includes(date.getDay()) ||
-    holidays.includes(formatDate(date));
+    WEEKEND.includes(date.getDay()) || holidays.includes(formatDate(date));
 
-  const setHoliday = (date: Date) => {
-    const dateString = formatDate(date);
+  const toggleHoliday = async (dateString: string) => {
+    const date = new Date(`${dateString}T00:00:00`);
+    if (WEEKEND.includes(date.getDay())) {
+      setMessage('Saturday and Sunday are automatically holidays.');
+      return;
+    }
 
-    if (WEEKEND.includes(date.getDay())) return;
-
-    const next = holidays.includes(dateString)
-      ? holidays.filter(d => d !== dateString)
-      : [...holidays, dateString];
-
-    setHolidays(next);
-    localStorage.setItem('canteen_holidays', JSON.stringify(next));
+    setSaving(true);
+    setMessage('');
+    try {
+      if (holidays.includes(dateString)) {
+        await deleteHoliday(dateString);
+        setMessage(`${dateString} holiday removed.`);
+      } else {
+        await addHoliday(dateString);
+        setMessage(`${dateString} declared as holiday.`);
+      }
+    } catch (error: any) {
+      console.error(error);
+      setMessage(`Holiday update failed: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const selectedOrders = selectedDate
-    ? ordersByDate[selectedDate] || []
-    : [];
+  const selectedOrders = selectedDate ? ordersByDate[selectedDate] || [] : [];
 
   const calculateOrderTotal = (items: OrderItems) => {
     let total = 0;
@@ -69,159 +61,81 @@ const AllOrdersCalendar: React.FC = () => {
   };
 
   const changeMonth = (offset: number) => {
-    setCurrentDate(
-      new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth() + offset,
-        1
-      )
-    );
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1));
     setSelectedDate(null);
   };
 
-  const renderDays = () => {
-    const days: React.ReactNode[] = [];
+  const firstDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
+  const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
 
-    for (let i = 0; i < startDay; i++) {
-      days.push(
-        <div key={`empty-${i}`} className="min-h-14 border bg-gray-50" />
-      );
-    }
+  const days: React.ReactNode[] = [];
+  for (let i = 0; i < firstDay; i++) {
+    days.push(<div key={`blank-${i}`} className="min-h-16 border bg-gray-50 sm:min-h-20" />);
+  }
 
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth(),
-        day
-      );
-      const dateString = formatDate(date);
-      const weekend = WEEKEND.includes(date.getDay());
-      const holiday = isHoliday(date);
-      const dayOrders = ordersByDate[dateString] || [];
-      const isToday = formatDate(new Date()) === dateString;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+    const dateString = formatDate(date);
+    const holiday = isHoliday(date);
+    const dayOrders = ordersByDate[dateString] || [];
+    const today = formatDate(new Date()) === dateString;
 
-      days.push(
-        <button
-          key={day}
-          type="button"
-          onClick={() => setSelectedDate(dateString)}
-          onContextMenu={e => {
-            e.preventDefault();
-            setHoliday(date);
-          }}
-          className={`min-h-14 border p-1 text-left transition sm:min-h-20 sm:p-2 ${
-            holiday
-              ? 'bg-gray-200 text-gray-500'
-              : dayOrders.length
-                ? 'bg-green-50 hover:bg-green-100'
-                : 'bg-white hover:bg-gray-50'
-          } ${isToday ? 'ring-2 ring-primary-400 ring-inset' : ''}`}
-          title={
-            weekend
-              ? 'Saturday/Sunday - Holiday'
-              : holiday
-                ? 'Holiday. Click to view; right-click to toggle holiday.'
-                : 'Click to view orders. Right-click to declare holiday.'
-          }
-        >
-          <span className={`block text-center text-xs sm:text-sm ${isToday ? 'font-bold' : ''}`}>
-            {day}
-          </span>
-
-          {holiday ? (
-            <span className="mt-1 block text-center text-[10px] font-medium sm:text-xs">
-              Holiday
-            </span>
-          ) : dayOrders.length > 0 ? (
-            <span className="mt-1 block text-center text-[10px] text-green-700 sm:text-xs">
-              {dayOrders.length} orders
-            </span>
-          ) : null}
-        </button>
-      );
-    }
-
-    return days;
-  };
+    days.push(
+      <button
+        key={day}
+        type="button"
+        onClick={() => setSelectedDate(dateString)}
+        className={`min-h-16 border p-1 text-left sm:min-h-20 sm:p-2 ${
+          holiday ? 'bg-gray-200 text-gray-500' : 'bg-white hover:bg-green-50'
+        } ${today ? 'ring-2 ring-primary-400 ring-inset' : ''}`}
+      >
+        <div className="text-center text-xs font-semibold sm:text-sm">{day}</div>
+        <div className="mt-1 text-center text-[9px] sm:text-xs">
+          {holiday ? 'Holiday' : dayOrders.length ? `${dayOrders.length} orders` : ''}
+        </div>
+      </button>
+    );
+  }
 
   return (
     <div className="w-full min-w-0">
-      <h3 className="mb-4 text-xl font-bold text-gray-800 sm:text-2xl">
-        Orders & Holiday Calendar
-      </h3>
+      <h3 className="mb-4 text-xl font-bold text-gray-800 sm:text-2xl">Orders & Holiday Calendar</h3>
 
-      <div className="mb-4 rounded-lg border bg-gray-50 p-3 text-sm text-gray-600 sm:p-4">
-        <p>
-          <strong>Saturday and Sunday</strong> are automatically holidays.
-        </p>
-        <p className="mt-1">
-          For another holiday, select the date and use{' '}
-          <strong>Declare / Remove Holiday</strong> below.
-        </p>
+      <div className="mb-4 rounded-lg border bg-gray-50 p-3 text-sm text-gray-600">
+        Saturday and Sunday are automatic holidays. Select a date to declare or remove another holiday.
       </div>
+
+      {message && (
+        <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">{message}</div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="min-w-0 rounded-lg bg-white p-3 shadow-sm sm:p-5 xl:col-span-2">
-          <div className="mb-4 flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => changeMonth(-1)}
-              className="rounded-md bg-gray-200 px-3 py-2 text-sm hover:bg-gray-300"
-            >
-              ←
-            </button>
-
-            <h4 className="text-base font-semibold sm:text-xl">
-              {getMonthName(currentDate.getMonth())}{' '}
-              {currentDate.getFullYear()}
-            </h4>
-
-            <button
-              type="button"
-              onClick={() => changeMonth(1)}
-              className="rounded-md bg-gray-200 px-3 py-2 text-sm hover:bg-gray-300"
-            >
-              →
-            </button>
+          <div className="mb-4 flex items-center justify-between">
+            <button type="button" onClick={() => changeMonth(-1)} className="rounded-md bg-gray-200 px-3 py-2">←</button>
+            <h4 className="text-base font-semibold sm:text-xl">{getMonthName(currentDate.getMonth())} {currentDate.getFullYear()}</h4>
+            <button type="button" onClick={() => changeMonth(1)} className="rounded-md bg-gray-200 px-3 py-2">→</button>
           </div>
 
           <div className="grid grid-cols-7 text-center text-[10px] font-bold text-gray-500 sm:text-xs">
-            <div>Sun</div>
-            <div>Mon</div>
-            <div>Tue</div>
-            <div>Wed</div>
-            <div>Thu</div>
-            <div>Fri</div>
-            <div>Sat</div>
+            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d}>{d}</div>)}
           </div>
-
-          <div className="mt-1 grid grid-cols-7 overflow-hidden rounded border">
-            {renderDays()}
-          </div>
+          <div className="mt-1 grid grid-cols-7 overflow-hidden rounded border">{days}</div>
 
           {selectedDate && (
             <div className="mt-4 rounded-lg border bg-gray-50 p-3">
-              <p className="font-semibold">Selected: {selectedDate}</p>
+              <p className="font-semibold">Selected date: {selectedDate}</p>
               <p className="mt-1 text-sm text-gray-600">
-                Status:{' '}
-                {isHoliday(new Date(`${selectedDate}T00:00:00`))
-                  ? 'Holiday'
-                  : 'Working day'}
+                {isHoliday(new Date(`${selectedDate}T00:00:00`)) ? 'Holiday' : 'Working day'}
               </p>
-
-              {!WEEKEND.includes(
-                new Date(`${selectedDate}T00:00:00`).getDay()
-              ) && (
+              {!WEEKEND.includes(new Date(`${selectedDate}T00:00:00`).getDay()) && (
                 <button
                   type="button"
-                  onClick={() =>
-                    setHoliday(new Date(`${selectedDate}T00:00:00`))
-                  }
-                  className="mt-3 w-full rounded-md bg-primary-600 px-4 py-2.5 text-sm font-medium text-white sm:w-auto"
+                  disabled={saving}
+                  onClick={() => toggleHoliday(selectedDate)}
+                  className="mt-3 min-h-11 w-full rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
                 >
-                  {holidays.includes(selectedDate)
-                    ? 'Remove Holiday'
-                    : 'Declare Holiday'}
+                  {saving ? 'Saving…' : holidays.includes(selectedDate) ? 'Remove Holiday' : 'Declare Holiday'}
                 </button>
               )}
             </div>
@@ -229,21 +143,12 @@ const AllOrdersCalendar: React.FC = () => {
         </div>
 
         <div className="min-w-0 rounded-lg bg-white p-3 shadow-sm sm:p-5">
-          <h4 className="mb-4 text-lg font-bold text-gray-800">
-            Orders for {selectedDate || 'selected date'}
-          </h4>
-
-          {selectedOrders.length > 0 ? (
+          <h4 className="mb-4 text-lg font-bold text-gray-800">Orders for {selectedDate || 'selected date'}</h4>
+          {selectedOrders.length ? (
             <div className="max-h-[32rem] space-y-3 overflow-y-auto">
               {selectedOrders.map(order => (
-                <div
-                  key={order.id}
-                  className="rounded-md border p-3"
-                >
-                  <p className="font-bold text-gray-700">
-                    SR: {order.employeeId}
-                  </p>
-
+                <div key={order.id} className="rounded-lg border p-3">
+                  <p className="font-bold">SR: {order.employeeId}</p>
                   <ul className="mt-1 text-sm text-gray-600">
                     {order.items.morningTea && <li>Morning Tea</li>}
                     {order.items.lunchMeals && <li>Meals</li>}
@@ -251,19 +156,12 @@ const AllOrdersCalendar: React.FC = () => {
                     {order.items.lunchFishMeat && <li>+ Fish/Meat</li>}
                     {order.items.eveningTea && <li>Evening Tea</li>}
                   </ul>
-
-                  <p className="mt-2 text-right font-semibold">
-                    Total: ₹{calculateOrderTotal(order.items).toFixed(2)}
-                  </p>
+                  <p className="mt-2 text-right font-semibold">₹{calculateOrderTotal(order.items).toFixed(2)}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-500">
-              {selectedDate
-                ? 'No orders for this date.'
-                : 'Select a date to see orders.'}
-            </p>
+            <p className="text-sm text-gray-500">{selectedDate ? 'No orders for this date.' : 'Select a date to see orders.'}</p>
           )}
         </div>
       </div>
@@ -272,4 +170,3 @@ const AllOrdersCalendar: React.FC = () => {
 };
 
 export default AllOrdersCalendar;
-   
