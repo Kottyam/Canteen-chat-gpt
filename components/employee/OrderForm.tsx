@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
+import { useData } from '../../context/DataContext';
 import { OrderItems, Order, MenuItem } from '../../types';
 import { formatDate } from '../../utils/helpers';
-import { cancelOrder } from '../../services/supabaseSync';
+import { cancelOrder, loadSupabaseData, upsertOrder } from '../../services/supabaseSync';
 
 const EMPTY: OrderItems = {
   morningTea: false,
@@ -17,15 +17,15 @@ const OrderForm: React.FC = () => {
   const { user } = useAuth();
   const { orders, setOrders, prices, menuItems, holidays } = useData();
   const today = formatDate(new Date());
-  const todayDate = new Date();
-  const weekend = todayDate.getDay() === 0 || todayDate.getDay() === 6;
+  const day = new Date();
+  const weekend = day.getDay() === 0 || day.getDay() === 6;
   const holiday = weekend || holidays.includes(today);
 
-  const [items, setItems] = useState<OrderItems>(EMPTY);
+  const [items, setItems] = useState<OrderItems>({ ...EMPTY });
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const activeItems = useMemo(() => {
+  const activeItems = useMemo<MenuItem[]>(() => {
     const fallback: MenuItem[] = [
       { itemCode: 'morningTea', itemName: 'Morning Tea', unitPrice: prices.morningTea, active: true },
       { itemCode: 'lunchMeals', itemName: 'Lunch: Meals', unitPrice: prices.lunchMeals, active: true },
@@ -37,34 +37,13 @@ const OrderForm: React.FC = () => {
   }, [menuItems, prices]);
 
   useEffect(() => {
-    const order = user
-      ? orders.find(o => o.employeeId === user.id && o.date === today)
-      : undefined;
+    const order = user ? orders.find(o => o.employeeId === user.id && o.date === today) : undefined;
     setItems(order ? { ...order.items } : { ...EMPTY });
   }, [user, orders, today]);
 
-  const change = (name: keyof OrderItems, checked: boolean) => {
-    if (holiday) return;
-
-    const next = { ...items, [name]: checked };
-    if (name === 'lunchEgg' && checked) next.lunchMeals = true;
-    if (name === 'lunchFishMeat' && checked) next.lunchMeals = true;
-    if (name === 'lunchMeals' && !checked) {
-      next.lunchEgg = false;
-      next.lunchFishMeat = false;
-    }
-    setItems(next);
-  };
-
-  const total = activeItems.reduce((sum, item) => {
-    const key = item.itemCode as keyof OrderItems;
-    return sum + (items[key] ? item.unitPrice : 0);
-  }, 0);
-
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!user) return;
-
     if (holiday) {
       setMsg('Today is a holiday. Ordering is not available.');
       return;
@@ -73,111 +52,111 @@ const OrderForm: React.FC = () => {
     setSaving(true);
     setMsg('');
 
-    const id = `${user.id}-${today}`;
-    const order: Order = { id, employeeId: user.id, date: today, items };
-    const existing = orders.findIndex(o => o.id === id);
+    const order: Order = {
+      id: `${user.id}-${today}`,
+      employeeId: user.id,
+      date: today,
+      items,
+    };
 
-    setOrders(prev =>
-      existing >= 0
-        ? prev.map((o, index) => (index === existing ? order : o))
-        : [...prev, order]
-    );
-
-    setMsg('Today’s order saved/updated.');
-    setSaving(false);
-  };
-
-  const removeItem = (key: keyof OrderItems) => {
-    if (!holiday) change(key, false);
-  };
-
-  const cancelToday = async () => {
-    if (!user) return;
-
-    const existing = orders.find(o => o.employeeId === user.id && o.date === today);
-    if (!existing) {
-      setItems({ ...EMPTY });
-      setMsg('There is no order for today.');
-      return;
-    }
-
-    if (!window.confirm('Cancel your complete order for today?')) return;
-
-    setSaving(true);
-    setMsg('');
     try {
-      await cancelOrder(existing);
-      setOrders(prev => prev.filter(o => o.id !== existing.id));
-      setItems({ ...EMPTY });
-      setMsg('Today’s order cancelled.');
-    } catch (error) {
+      await upsertOrder(order, prices);
+      setOrders(prev => {
+        const index = prev.findIndex(o => o.id === order.id);
+        return index >= 0
+          ? prev.map((o, i) => (i === index ? order : o))
+          : [...prev, order];
+      });
+      setMsg('Today’s order saved successfully.');
+    } catch (error: any) {
       console.error(error);
-      setMsg('Could not cancel the order. Please try again.');
+      setMsg(`Could not save order: ${error?.message || 'Please try again.'}`);
     } finally {
       setSaving(false);
     }
   };
 
+  const cancelToday = async () => {
+    if (!user || holiday) return;
+    const existing = orders.find(o => o.employeeId === user.id && o.date === today);
+    if (!existing) { setMsg('There is no order for today.'); return; }
+    if (!window.confirm('Cancel your complete order for today?')) return;
+
+    setSaving(true);
+    try {
+      await cancelOrder(existing);
+      setOrders(prev => prev.filter(o => o.id !== existing.id));
+      setItems({ ...EMPTY });
+      setMsg('Today’s order cancelled.');
+    } catch (error: any) {
+      console.error(error);
+      setMsg(`Could not cancel order: ${error?.message || 'Please try again.'}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const change = (key: keyof OrderItems, checked: boolean) => {
+    if (holiday) return;
+    const next = { ...items, [key]: checked };
+    if ((key === 'lunchEgg' || key === 'lunchFishMeat') && checked) next.lunchMeals = true;
+    if (key === 'lunchMeals' && !checked) { next.lunchEgg = false; next.lunchFishMeat = false; }
+    setItems(next);
+  };
+
+  const total = activeItems.reduce((sum, item) => {
+    const key = item.itemCode as keyof OrderItems;
+    return sum + (items[key] ? item.unitPrice : 0);
+  }, 0);
+
   return (
-    <div className="w-full min-w-0 rounded-lg bg-white p-3 shadow-md sm:p-6">
+    <div className="w-full min-w-0 rounded-xl bg-white p-3 shadow-sm sm:p-6">
       <div className="mb-4">
         <h3 className="text-xl font-bold text-gray-800">Today’s Order</h3>
         <p className="text-sm text-gray-500">{today}</p>
       </div>
 
-      {holiday ? (
+      {holiday && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <div className="text-lg font-bold text-amber-800">🎉 Holiday</div>
           <p className="mt-1 text-sm text-amber-700">
-            {weekend ? 'Saturday/Sunday is a holiday.' : 'Admin has declared today a holiday.'}
-            {' '}Orders cannot be placed or updated today.
+            {weekend ? 'Saturday and Sunday are holidays.' : 'Admin has declared today a holiday.'} Orders are closed.
           </p>
         </div>
-      ) : null}
+      )}
 
       <form onSubmit={save} className="space-y-3">
         {activeItems.map(item => {
           const key = item.itemCode as keyof OrderItems;
           const checked = Boolean(items[key]);
           return (
-            <div key={item.itemCode} className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${holiday ? 'opacity-60' : ''}`}>
-              <label className="flex min-w-0 flex-1 items-center gap-3">
-                <input
-                  type="checkbox"
-                  disabled={holiday}
-                  checked={checked}
-                  onChange={e => change(key, e.target.checked)}
-                  className="h-5 w-5 shrink-0"
-                />
-                <span className="min-w-0 truncate text-sm font-medium text-gray-700 sm:text-base">{item.itemName}</span>
-              </label>
-              <div className="flex shrink-0 items-center gap-2">
-                <span className="text-sm font-medium">₹{item.unitPrice}</span>
-                {checked && !holiday && (
-                  <button type="button" onClick={() => removeItem(key)} className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">Remove</button>
-                )}
-              </div>
-            </div>
+            <label key={item.itemCode} className={`flex min-h-14 items-center justify-between gap-3 rounded-xl border p-3 ${holiday ? 'opacity-60' : ''}`}>
+              <span className="flex min-w-0 items-center gap-3">
+                <input type="checkbox" disabled={holiday} checked={checked} onChange={e => change(key, e.target.checked)} className="h-5 w-5 shrink-0" />
+                <span className="min-w-0 break-words text-sm font-medium text-gray-700 sm:text-base">{item.itemName}</span>
+              </span>
+              <span className="shrink-0 text-sm font-semibold">₹{item.unitPrice}</span>
+            </label>
           );
         })}
 
         <div className="flex items-center justify-between border-t pt-3">
-          <span className="font-semibold text-gray-800">Today’s Total</span>
-          <span className="text-lg font-bold text-primary-700">₹{total}</span>
+          <span className="font-semibold">Today’s Total</span>
+          <span className="text-lg font-bold text-primary-700">₹{total.toFixed(2)}</span>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button type="submit" disabled={saving || holiday} className="w-full rounded-md bg-primary-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button type="submit" disabled={saving || holiday} className="min-h-12 w-full rounded-lg bg-primary-600 px-4 font-semibold text-white disabled:opacity-50">
             {holiday ? 'Ordering Closed' : saving ? 'Saving…' : 'Save / Update Order'}
           </button>
           {!holiday && (
-            <button type="button" disabled={saving} onClick={cancelToday} className="w-full rounded-md bg-red-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">
+            <button type="button" disabled={saving} onClick={cancelToday} className="min-h-12 w-full rounded-lg bg-red-600 px-4 font-semibold text-white disabled:opacity-50">
               Cancel Today’s Order
             </button>
           )}
         </div>
 
-        {msg && <p className="rounded-md bg-green-100 p-3 text-sm text-green-700">{msg}</p>}
+        {msg && <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{msg}</p>}
       </form>
     </div>
   );
