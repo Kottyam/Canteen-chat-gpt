@@ -51,6 +51,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const hydrated = useRef(false);
   const timer = useRef<number | undefined>(undefined);
+  const refreshTimer = useRef<number | undefined>(undefined);
 
   const hydrate = useCallback(async () => {
     if (!supabaseEnabled) { hydrated.current = true; return; }
@@ -74,7 +75,26 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  useEffect(() => { hydrate(); }, [hydrate]);
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
+  // Keep separate employee/admin app instances fresh from Supabase.
+  // This also fixes stale menu/price data when one device changes it and
+  // another device is already open.
+  useEffect(() => {
+    if (!supabaseEnabled) return;
+    const refresh = () => { void hydrate(); };
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    refreshTimer.current = interval;
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [hydrate]);
 
   useEffect(() => {
     if (!supabaseEnabled || !hydrated.current) return;
@@ -82,8 +102,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     timer.current = window.setTimeout(async () => {
       setCloudSyncing(true);
       try {
-        // Do not rewrite existing remote menu rows on every render unless their
-        // state really changed; menu CRUD uses explicit save functions.
         for (const order of orders) await upsertOrder(order, prices);
         if (menuItems.length) await upsertPrices(prices, menuItems);
       } catch (e) {
@@ -93,7 +111,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }, 900);
     return () => window.clearTimeout(timer.current);
-  }, [orders, prices]);
+  }, [orders, prices, menuItems]);
 
   const addHoliday = async (date: string) => {
     await saveHoliday(date);
