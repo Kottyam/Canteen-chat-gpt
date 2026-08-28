@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MenuItem } from '../../types';
-import { supabase, supabaseEnabled } from '../../supabase';
-import { loadSupabaseData, saveMenuItem, activateMenuItem, deactivateMenuItem } from '../../services/supabaseSync';
+import { loadSupabaseData, saveMenuItem, activateMenuItem, deactivateMenuItem, deleteMenuItem } from '../../services/supabaseSync';
 
 const fallbackItems: MenuItem[] = [
   { itemCode: 'morningTea', itemName: 'Morning Tea', unitPrice: 8, active: true },
@@ -64,15 +63,17 @@ const MenuManagement: React.FC = () => {
   };
 
   const remove = async (item: MenuItem) => {
-    if (!window.confirm(`Delete “${item.itemName}”?`)) return;
+    if (!window.confirm(`Remove “${item.itemName}” from the active menu?`)) return;
     setBusy(item.itemCode);
     try {
-      if (supabaseEnabled && supabase) {
-        const { error } = await supabase.from('menu_prices').delete().eq('item_code', item.itemCode);
-        if (error) throw error;
-      }
+      const result = await deleteMenuItem(item.itemCode);
+      // If historical order_items reference this code, the backend archives it by
+      // deactivating it so old reports remain valid. In both cases it disappears
+      // from the employee's active menu after reload.
       setItems(prev => prev.filter(i => i.itemCode !== item.itemCode));
-      setMessage('Menu item deleted permanently.');
+      setMessage(result === 'deactivated'
+        ? 'Item archived because it is used in order history.'
+        : 'Menu item deleted permanently.');
     } catch (error: any) {
       console.error(error);
       setMessage(`Delete failed: ${error?.message || 'Unknown error'}`);
