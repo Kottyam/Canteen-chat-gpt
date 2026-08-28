@@ -1,204 +1,225 @@
-import React, { useMemo, useState } from 'react';
-import { useData } from '../../context/DataContext';
-import { Prices } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { MenuItem } from '../../types';
+import { supabase, supabaseEnabled } from '../../supabase';
+import {
+  activateMenuItem,
+  deactivateMenuItem,
+  saveMenuItem,
+} from '../../services/supabaseSync';
 
-type MenuKey = keyof Prices;
-
-interface MenuItem {
-  key: MenuKey;
-  name: string;
-  price: number;
-}
-
-const DEFAULT_ITEMS: MenuItem[] = [
-  { key: 'morningTea', name: 'Morning Tea', price: 8 },
-  { key: 'lunchMeals', name: 'Lunch: Meals', price: 40 },
-  { key: 'lunchEgg', name: 'Lunch: Egg (add-on)', price: 10 },
-  { key: 'lunchFishMeat', name: 'Lunch: Fish/Meat (add-on)', price: 25 },
-  { key: 'eveningTea', name: 'Evening Tea', price: 8 },
+const fallbackItems: MenuItem[] = [
+  { itemCode: 'morningTea', itemName: 'Morning Tea', unitPrice: 8, active: true },
+  { itemCode: 'lunchMeals', itemName: 'Lunch: Meals', unitPrice: 40, active: true },
+  { itemCode: 'lunchEgg', itemName: 'Lunch: Egg (add-on)', unitPrice: 10, active: true },
+  { itemCode: 'lunchFishMeat', itemName: 'Lunch: Fish/Meat (add-on)', unitPrice: 25, active: true },
+  { itemCode: 'eveningTea', itemName: 'Evening Tea', unitPrice: 8, active: true },
 ];
 
 const MenuManagement: React.FC = () => {
-  const { prices, setPrices } = useData();
-  const [names, setNames] = useState<Record<MenuKey, string>>(() => {
-    const initial = {} as Record<MenuKey, string>;
-    DEFAULT_ITEMS.forEach(item => {
-      initial[item.key] = item.name;
-    });
-    return initial;
-  });
-  const [active, setActive] = useState<Record<MenuKey, boolean>>(() => {
-    const initial = {} as Record<MenuKey, boolean>;
-    DEFAULT_ITEMS.forEach(item => {
-      initial[item.key] = true;
-    });
-    return initial;
-  });
+  const [items, setItems] = useState<MenuItem[]>(fallbackItems);
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const items = useMemo<MenuItem[]>(() => {
-    return DEFAULT_ITEMS.map(item => ({
+  const loadItems = async () => {
+    if (!supabaseEnabled || !supabase) return;
+
+    const { data, error } = await supabase
+      .from('menu_prices')
+      .select('item_code,item_name,unit_price,active')
+      .order('item_code');
+
+    if (error) {
+      setMessage(`Menu load failed: ${error.message}`);
+      return;
+    }
+
+    if (data?.length) {
+      setItems(data.map((row: any) => ({
+        itemCode: row.item_code,
+        itemName: row.item_name,
+        unitPrice: Number(row.unit_price),
+        active: Boolean(row.active),
+      })));
+    }
+  };
+
+  useEffect(() => {
+    loadItems();
+  }, []);
+
+  const patch = (itemCode: string, next: Partial<MenuItem>) => {
+    setItems(prev => prev.map(item =>
+      item.itemCode === itemCode ? { ...item, ...next } : item
+    ));
+  };
+
+  const save = async (item: MenuItem) => {
+    const clean: MenuItem = {
       ...item,
-      name: names[item.key] || item.name,
-      price: prices[item.key],
-    }));
-  }, [names, prices]);
+      itemName: item.itemName.trim(),
+      unitPrice: Number(item.unitPrice),
+    };
 
-  const updatePrice = (key: MenuKey, value: string) => {
-    setPrices(prev => ({
-      ...prev,
-      [key]: Math.max(0, Number(value)),
-    }));
+    if (!clean.itemName || !Number.isFinite(clean.unitPrice) || clean.unitPrice < 0) {
+      setMessage('Enter a valid menu name and price.');
+      return;
+    }
+
+    setBusy(item.itemCode);
+    try {
+      await saveMenuItem(clean);
+      patch(item.itemCode, clean);
+      setMessage('Menu item saved successfully.');
+    } catch (error: any) {
+      console.error(error);
+      setMessage(`Save failed: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setBusy(null);
+    }
   };
 
-  const saveName = (key: MenuKey) => {
-    const value = names[key].trim();
-    if (!value) return;
-    setNames(prev => ({ ...prev, [key]: value }));
-    setMessage('Menu updated.');
-    window.setTimeout(() => setMessage(''), 2000);
+  const toggle = async (item: MenuItem) => {
+    setBusy(item.itemCode);
+    try {
+      if (item.active) {
+        await deactivateMenuItem(item.itemCode);
+      } else {
+        await activateMenuItem(item.itemCode);
+      }
+      patch(item.itemCode, { active: !item.active });
+      setMessage(item.active ? 'Menu item deactivated.' : 'Menu item activated.');
+    } catch (error: any) {
+      console.error(error);
+      setMessage(`Status update failed: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setBusy(null);
+    }
   };
 
-  const toggleItem = (key: MenuKey) => {
-    setActive(prev => ({ ...prev, [key]: !prev[key] }));
-    setMessage(active[key] ? 'Menu item deactivated.' : 'Menu item activated.');
-    window.setTimeout(() => setMessage(''), 2000);
+  const remove = async (item: MenuItem) => {
+    if (!window.confirm(`Delete “${item.itemName}”?`)) return;
+
+    setBusy(item.itemCode);
+    try {
+      if (supabaseEnabled && supabase) {
+        const { error } = await supabase
+          .from('menu_prices')
+          .delete()
+          .eq('item_code', item.itemCode);
+        if (error) throw error;
+      }
+
+      setItems(prev => prev.filter(i => i.itemCode !== item.itemCode));
+      setMessage('Menu item deleted.');
+    } catch (error: any) {
+      console.error(error);
+      setMessage(`Delete failed: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setBusy(null);
+    }
   };
 
-  const addMenuItem = (e: React.FormEvent) => {
-    e.preventDefault();
+  const add = async (event: React.FormEvent) => {
+    event.preventDefault();
+
     const name = newName.trim();
     const price = Number(newPrice);
+    if (!name || !Number.isFinite(price) || price < 0) {
+      setMessage('Enter a valid menu name and price.');
+      return;
+    }
 
-    if (!name || !Number.isFinite(price) || price < 0) return;
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'item';
+    let itemCode = base;
+    let n = 2;
+    while (items.some(item => item.itemCode === itemCode)) {
+      itemCode = `${base}_${n++}`;
+    }
 
-    setMessage(
-      'New menu item form saved locally. A new database item requires a unique item code.'
-    );
-    setNewName('');
-    setNewPrice('');
-    window.setTimeout(() => setMessage(''), 3500);
+    const item: MenuItem = {
+      itemCode,
+      itemName: name,
+      unitPrice: price,
+      active: true,
+    };
+
+    setBusy('new');
+    try {
+      await saveMenuItem(item);
+      setItems(prev => [...prev, item]);
+      setNewName('');
+      setNewPrice('');
+      setMessage('New menu item added.');
+    } catch (error: any) {
+      console.error(error);
+      setMessage(`Add failed: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
     <div className="w-full min-w-0">
-      <div className="mb-5">
-        <h3 className="text-xl font-bold text-gray-800 sm:text-2xl">
-          Menu Management
-        </h3>
-        <p className="mt-1 text-sm text-gray-500">
-          Edit menu names, prices, and active status.
-        </p>
-      </div>
+      <h3 className="text-2xl font-bold text-gray-800">Menu Management</h3>
+      <p className="mt-1 mb-5 text-sm text-gray-500">
+        Edit item name and price, add new items, activate/deactivate, or delete.
+      </p>
 
       {message && (
-        <div className="mb-4 rounded-md bg-green-100 p-3 text-sm text-green-700">
+        <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">
           {message}
         </div>
       )}
 
-      <div className="mb-6 space-y-3">
+      <div className="space-y-3">
         {items.map(item => (
-          <div
-            key={item.key}
-            className="rounded-lg border bg-white p-3 shadow-sm sm:p-4"
-          >
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_160px_auto] lg:items-end">
+          <div key={item.itemCode} className="rounded-xl border bg-white p-3 shadow-sm sm:p-4">
+            <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-gray-500">
-                  Menu name
-                </label>
+                <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">Item name</label>
                 <input
-                  value={names[item.key]}
-                  onChange={e =>
-                    setNames(prev => ({ ...prev, [item.key]: e.target.value }))
-                  }
-                  className="w-full rounded-md border px-3 py-2.5"
+                  value={item.itemName}
+                  onChange={e => patch(item.itemCode, { itemName: e.target.value })}
+                  className="min-h-12 w-full rounded-lg border px-3 text-base outline-none focus:border-primary-500"
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-gray-500">
-                  Price
-                </label>
-                <div className="flex">
-                  <span className="rounded-l-md border border-r-0 bg-gray-50 px-3 py-2.5 text-gray-500">
-                    ₹
-                  </span>
+                <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">Price</label>
+                <div className="flex min-w-0">
+                  <span className="flex min-h-12 shrink-0 items-center rounded-l-lg border border-r-0 bg-gray-50 px-4 text-gray-500">₹</span>
                   <input
                     type="number"
                     min="0"
                     step="0.5"
-                    value={item.price}
-                    onChange={e => updatePrice(item.key, e.target.value)}
-                    className="w-full rounded-r-md border px-3 py-2.5"
+                    inputMode="decimal"
+                    value={item.unitPrice}
+                    onChange={e => patch(item.itemCode, { unitPrice: Number(e.target.value) })}
+                    className="min-h-12 w-full min-w-0 rounded-r-lg border px-3 text-lg outline-none focus:border-primary-500"
                   />
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => saveName(item.key)}
-                  className="flex-1 rounded-md bg-primary-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-primary-700 lg:flex-none"
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleItem(item.key)}
-                  className={`flex-1 rounded-md px-3 py-2.5 text-sm font-medium text-white lg:flex-none ${
-                    active[item.key]
-                      ? 'bg-red-600 hover:bg-red-700'
-                      : 'bg-green-600 hover:bg-green-700'
-                  }`}
-                >
-                  {active[item.key] ? 'Deactivate' : 'Activate'}
-                </button>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <button type="button" disabled={busy === item.itemCode} onClick={() => save(item)} className="min-h-11 rounded-lg bg-primary-600 px-3 text-sm font-semibold text-white disabled:opacity-50">{busy === item.itemCode ? 'Saving…' : 'Save / Edit'}</button>
+                <button type="button" disabled={busy === item.itemCode} onClick={() => toggle(item)} className="min-h-11 rounded-lg bg-yellow-500 px-3 text-sm font-semibold text-white disabled:opacity-50">{item.active ? 'Deactivate' : 'Activate'}</button>
+                <button type="button" disabled={busy === item.itemCode} onClick={() => remove(item)} className="col-span-2 min-h-11 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-1">Delete</button>
               </div>
-            </div>
 
-            <p className="mt-2 text-xs text-gray-500">
-              Status: {active[item.key] ? 'Active' : 'Inactive'}
-            </p>
+              <div className="text-xs text-gray-500">Code: {item.itemCode} · Status: {item.active ? 'Active' : 'Inactive'}</div>
+            </div>
           </div>
         ))}
       </div>
 
-      <form
-        onSubmit={addMenuItem}
-        className="rounded-lg border bg-gray-50 p-3 sm:p-4"
-      >
-        <h4 className="mb-3 font-semibold text-gray-800">Add Menu Item</h4>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_160px_auto] sm:items-end">
-          <input
-            required
-            placeholder="New menu item name"
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-            className="w-full rounded-md border px-3 py-2.5"
-          />
-
-          <input
-            required
-            type="number"
-            min="0"
-            step="0.5"
-            placeholder="Price"
-            value={newPrice}
-            onChange={e => setNewPrice(e.target.value)}
-            className="w-full rounded-md border px-3 py-2.5"
-          />
-
-          <button
-            type="submit"
-            className="w-full rounded-md bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700 sm:w-auto"
-          >
-            Add Menu
-          </button>
+      <form onSubmit={add} className="mt-5 rounded-xl border bg-gray-50 p-3 sm:p-4">
+        <h4 className="mb-3 text-lg font-bold text-gray-800">Add New Menu Item</h4>
+        <div className="space-y-3">
+          <input required placeholder="Item name" value={newName} onChange={e => setNewName(e.target.value)} className="min-h-12 w-full rounded-lg border px-3 text-base" />
+          <input required type="number" min="0" step="0.5" placeholder="Price" value={newPrice} onChange={e => setNewPrice(e.target.value)} className="min-h-12 w-full rounded-lg border px-3 text-base" />
+          <button type="submit" disabled={busy === 'new'} className="min-h-12 w-full rounded-lg bg-primary-600 px-4 font-semibold text-white disabled:opacity-50">{busy === 'new' ? 'Adding…' : 'Add Menu Item'}</button>
         </div>
       </form>
     </div>
