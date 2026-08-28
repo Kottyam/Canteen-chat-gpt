@@ -1,11 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MenuItem } from '../../types';
 import { supabase, supabaseEnabled } from '../../supabase';
-import {
-  activateMenuItem,
-  deactivateMenuItem,
-  saveMenuItem,
-} from '../../services/supabaseSync';
+import { loadSupabaseData, saveMenuItem, activateMenuItem, deactivateMenuItem } from '../../services/supabaseSync';
 
 const fallbackItems: MenuItem[] = [
   { itemCode: 'morningTea', itemName: 'Morning Tea', unitPrice: 8, active: true },
@@ -23,127 +19,79 @@ const MenuManagement: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
 
   const loadItems = async () => {
-    if (!supabaseEnabled || !supabase) return;
-
-    const { data, error } = await supabase
-      .from('menu_prices')
-      .select('item_code,item_name,unit_price,active')
-      .order('item_code');
-
-    if (error) {
-      setMessage(`Menu load failed: ${error.message}`);
-      return;
-    }
-
-    if (data?.length) {
-      setItems(data.map((row: any) => ({
-        itemCode: row.item_code,
-        itemName: row.item_name,
-        unitPrice: Number(row.unit_price),
-        active: Boolean(row.active),
-      })));
+    try {
+      const cloud = await loadSupabaseData();
+      if (cloud?.menuItems?.length) setItems(cloud.menuItems);
+    } catch (error) {
+      console.error(error);
     }
   };
 
-  useEffect(() => {
-    loadItems();
-  }, []);
+  useEffect(() => { loadItems(); }, []);
 
   const patch = (itemCode: string, next: Partial<MenuItem>) => {
-    setItems(prev => prev.map(item =>
-      item.itemCode === itemCode ? { ...item, ...next } : item
-    ));
+    setItems(prev => prev.map(item => item.itemCode === itemCode ? { ...item, ...next } : item));
   };
 
   const save = async (item: MenuItem) => {
-    const clean: MenuItem = {
-      ...item,
-      itemName: item.itemName.trim(),
-      unitPrice: Number(item.unitPrice),
-    };
-
+    const clean = { ...item, itemName: item.itemName.trim(), unitPrice: Number(item.unitPrice) };
     if (!clean.itemName || !Number.isFinite(clean.unitPrice) || clean.unitPrice < 0) {
       setMessage('Enter a valid menu name and price.');
       return;
     }
-
     setBusy(item.itemCode);
     try {
       await saveMenuItem(clean);
       patch(item.itemCode, clean);
-      setMessage('Menu item saved successfully.');
+      setMessage('Menu item saved permanently.');
     } catch (error: any) {
       console.error(error);
-      setMessage(`Save failed: ${error?.message || 'Unknown error'}`);
-    } finally {
-      setBusy(null);
-    }
+      setMessage(`Save failed: ${error?.message || 'Please check admin access.'}`);
+    } finally { setBusy(null); }
   };
 
   const toggle = async (item: MenuItem) => {
     setBusy(item.itemCode);
     try {
-      if (item.active) {
-        await deactivateMenuItem(item.itemCode);
-      } else {
-        await activateMenuItem(item.itemCode);
-      }
+      if (item.active) await deactivateMenuItem(item.itemCode);
+      else await activateMenuItem(item.itemCode);
       patch(item.itemCode, { active: !item.active });
       setMessage(item.active ? 'Menu item deactivated.' : 'Menu item activated.');
     } catch (error: any) {
       console.error(error);
       setMessage(`Status update failed: ${error?.message || 'Unknown error'}`);
-    } finally {
-      setBusy(null);
-    }
+    } finally { setBusy(null); }
   };
 
   const remove = async (item: MenuItem) => {
     if (!window.confirm(`Delete “${item.itemName}”?`)) return;
-
     setBusy(item.itemCode);
     try {
       if (supabaseEnabled && supabase) {
-        const { error } = await supabase
-          .from('menu_prices')
-          .delete()
-          .eq('item_code', item.itemCode);
+        const { error } = await supabase.from('menu_prices').delete().eq('item_code', item.itemCode);
         if (error) throw error;
       }
-
       setItems(prev => prev.filter(i => i.itemCode !== item.itemCode));
-      setMessage('Menu item deleted.');
+      setMessage('Menu item deleted permanently.');
     } catch (error: any) {
       console.error(error);
       setMessage(`Delete failed: ${error?.message || 'Unknown error'}`);
-    } finally {
-      setBusy(null);
-    }
+    } finally { setBusy(null); }
   };
 
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
-
     const name = newName.trim();
     const price = Number(newPrice);
     if (!name || !Number.isFinite(price) || price < 0) {
       setMessage('Enter a valid menu name and price.');
       return;
     }
-
     const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'item';
     let itemCode = base;
     let n = 2;
-    while (items.some(item => item.itemCode === itemCode)) {
-      itemCode = `${base}_${n++}`;
-    }
-
-    const item: MenuItem = {
-      itemCode,
-      itemName: name,
-      unitPrice: price,
-      active: true,
-    };
+    while (items.some(item => item.itemCode === itemCode)) itemCode = `${base}_${n++}`;
+    const item: MenuItem = { itemCode, itemName: name, unitPrice: price, active: true };
 
     setBusy('new');
     try {
@@ -151,27 +99,21 @@ const MenuManagement: React.FC = () => {
       setItems(prev => [...prev, item]);
       setNewName('');
       setNewPrice('');
-      setMessage('New menu item added.');
+      setMessage('New menu item added permanently.');
     } catch (error: any) {
       console.error(error);
       setMessage(`Add failed: ${error?.message || 'Unknown error'}`);
-    } finally {
-      setBusy(null);
-    }
+    } finally { setBusy(null); }
   };
 
   return (
     <div className="w-full min-w-0">
       <h3 className="text-2xl font-bold text-gray-800">Menu Management</h3>
-      <p className="mt-1 mb-5 text-sm text-gray-500">
-        Edit item name and price, add new items, activate/deactivate, or delete.
+      <p className="mb-5 mt-1 text-sm text-gray-500">
+        Edit complete menu details and save them permanently to Supabase.
       </p>
 
-      {message && (
-        <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">
-          {message}
-        </div>
-      )}
+      {message && <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm text-green-700">{message}</div>}
 
       <div className="space-y-3">
         {items.map(item => (
@@ -208,7 +150,7 @@ const MenuManagement: React.FC = () => {
                 <button type="button" disabled={busy === item.itemCode} onClick={() => remove(item)} className="col-span-2 min-h-11 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white disabled:opacity-50 sm:col-span-1">Delete</button>
               </div>
 
-              <div className="text-xs text-gray-500">Code: {item.itemCode} · Status: {item.active ? 'Active' : 'Inactive'}</div>
+              <div className="text-xs text-gray-500">Code: {item.itemCode} · {item.active ? 'Active' : 'Inactive'}</div>
             </div>
           </div>
         ))}
@@ -217,8 +159,8 @@ const MenuManagement: React.FC = () => {
       <form onSubmit={add} className="mt-5 rounded-xl border bg-gray-50 p-3 sm:p-4">
         <h4 className="mb-3 text-lg font-bold text-gray-800">Add New Menu Item</h4>
         <div className="space-y-3">
-          <input required placeholder="Item name" value={newName} onChange={e => setNewName(e.target.value)} className="min-h-12 w-full rounded-lg border px-3 text-base" />
-          <input required type="number" min="0" step="0.5" placeholder="Price" value={newPrice} onChange={e => setNewPrice(e.target.value)} className="min-h-12 w-full rounded-lg border px-3 text-base" />
+          <input required value={newName} onChange={e => setNewName(e.target.value)} placeholder="Item name" className="min-h-12 w-full rounded-lg border px-3 text-base" />
+          <input required type="number" min="0" step="0.5" inputMode="decimal" value={newPrice} onChange={e => setNewPrice(e.target.value)} placeholder="Price" className="min-h-12 w-full rounded-lg border px-3 text-base" />
           <button type="submit" disabled={busy === 'new'} className="min-h-12 w-full rounded-lg bg-primary-600 px-4 font-semibold text-white disabled:opacity-50">{busy === 'new' ? 'Adding…' : 'Add Menu Item'}</button>
         </div>
       </form>
