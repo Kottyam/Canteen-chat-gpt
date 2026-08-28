@@ -15,8 +15,11 @@ const EMPTY: OrderItems = {
 
 const OrderForm: React.FC = () => {
   const { user } = useAuth();
-  const { orders, setOrders, prices, menuItems } = useData();
+  const { orders, setOrders, prices, menuItems, holidays } = useData();
   const today = formatDate(new Date());
+  const todayDate = new Date();
+  const weekend = todayDate.getDay() === 0 || todayDate.getDay() === 6;
+  const holiday = weekend || holidays.includes(today);
 
   const [items, setItems] = useState<OrderItems>(EMPTY);
   const [msg, setMsg] = useState('');
@@ -30,7 +33,6 @@ const OrderForm: React.FC = () => {
       { itemCode: 'lunchFishMeat', itemName: 'Lunch: Fish/Meat (add-on)', unitPrice: prices.lunchFishMeat, active: true },
       { itemCode: 'eveningTea', itemName: 'Evening Tea', unitPrice: prices.eveningTea, active: true },
     ];
-
     return (menuItems.length ? menuItems : fallback).filter(i => i.active);
   }, [menuItems, prices]);
 
@@ -38,21 +40,19 @@ const OrderForm: React.FC = () => {
     const order = user
       ? orders.find(o => o.employeeId === user.id && o.date === today)
       : undefined;
-
     setItems(order ? { ...order.items } : { ...EMPTY });
   }, [user, orders, today]);
 
   const change = (name: keyof OrderItems, checked: boolean) => {
-    const next = { ...items, [name]: checked };
+    if (holiday) return;
 
+    const next = { ...items, [name]: checked };
     if (name === 'lunchEgg' && checked) next.lunchMeals = true;
     if (name === 'lunchFishMeat' && checked) next.lunchMeals = true;
-
     if (name === 'lunchMeals' && !checked) {
       next.lunchEgg = false;
       next.lunchFishMeat = false;
     }
-
     setItems(next);
   };
 
@@ -65,17 +65,16 @@ const OrderForm: React.FC = () => {
     e.preventDefault();
     if (!user) return;
 
+    if (holiday) {
+      setMsg('Today is a holiday. Ordering is not available.');
+      return;
+    }
+
     setSaving(true);
     setMsg('');
 
     const id = `${user.id}-${today}`;
-    const order: Order = {
-      id,
-      employeeId: user.id,
-      date: today,
-      items,
-    };
-
+    const order: Order = { id, employeeId: user.id, date: today, items };
     const existing = orders.findIndex(o => o.id === id);
 
     setOrders(prev =>
@@ -89,16 +88,13 @@ const OrderForm: React.FC = () => {
   };
 
   const removeItem = (key: keyof OrderItems) => {
-    change(key, false);
+    if (!holiday) change(key, false);
   };
 
   const cancelToday = async () => {
     if (!user) return;
 
-    const existing = orders.find(
-      o => o.employeeId === user.id && o.date === today
-    );
-
+    const existing = orders.find(o => o.employeeId === user.id && o.date === today);
     if (!existing) {
       setItems({ ...EMPTY });
       setMsg('There is no order for today.');
@@ -109,61 +105,56 @@ const OrderForm: React.FC = () => {
 
     setSaving(true);
     setMsg('');
-
     try {
       await cancelOrder(existing);
+      setOrders(prev => prev.filter(o => o.id !== existing.id));
+      setItems({ ...EMPTY });
+      setMsg('Today’s order cancelled.');
     } catch (error) {
       console.error(error);
-      // Keep the local action usable even if cloud cancellation is unavailable.
+      setMsg('Could not cancel the order. Please try again.');
+    } finally {
+      setSaving(false);
     }
-
-    setOrders(prev => prev.filter(o => o.id !== existing.id));
-    setItems({ ...EMPTY });
-    setMsg('Today’s order cancelled.');
-    setSaving(false);
   };
 
   return (
     <div className="w-full min-w-0 rounded-lg bg-white p-3 shadow-md sm:p-6">
       <div className="mb-4">
         <h3 className="text-xl font-bold text-gray-800">Today’s Order</h3>
-        <p className="text-sm text-gray-500">
-          You can add, change or cancel an order only for today ({today}).
-        </p>
+        <p className="text-sm text-gray-500">{today}</p>
       </div>
+
+      {holiday ? (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="text-lg font-bold text-amber-800">🎉 Holiday</div>
+          <p className="mt-1 text-sm text-amber-700">
+            {weekend ? 'Saturday/Sunday is a holiday.' : 'Admin has declared today a holiday.'}
+            {' '}Orders cannot be placed or updated today.
+          </p>
+        </div>
+      ) : null}
 
       <form onSubmit={save} className="space-y-3">
         {activeItems.map(item => {
           const key = item.itemCode as keyof OrderItems;
           const checked = Boolean(items[key]);
-
           return (
-            <div
-              key={item.itemCode}
-              className="flex items-center justify-between gap-3 rounded-lg border p-3"
-            >
-              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+            <div key={item.itemCode} className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${holiday ? 'opacity-60' : ''}`}>
+              <label className="flex min-w-0 flex-1 items-center gap-3">
                 <input
                   type="checkbox"
+                  disabled={holiday}
                   checked={checked}
                   onChange={e => change(key, e.target.checked)}
                   className="h-5 w-5 shrink-0"
                 />
-                <span className="min-w-0 truncate text-sm font-medium text-gray-700 sm:text-base">
-                  {item.itemName}
-                </span>
+                <span className="min-w-0 truncate text-sm font-medium text-gray-700 sm:text-base">{item.itemName}</span>
               </label>
-
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-sm font-medium">₹{item.unitPrice}</span>
-                {checked && (
-                  <button
-                    type="button"
-                    onClick={() => removeItem(key)}
-                    className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700"
-                  >
-                    Remove
-                  </button>
+                {checked && !holiday && (
+                  <button type="button" onClick={() => removeItem(key)} className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">Remove</button>
                 )}
               </div>
             </div>
@@ -176,29 +167,17 @@ const OrderForm: React.FC = () => {
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full rounded-md bg-primary-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:w-auto"
-          >
-            {saving ? 'Saving…' : 'Save / Update Order'}
+          <button type="submit" disabled={saving || holiday} className="w-full rounded-md bg-primary-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">
+            {holiday ? 'Ordering Closed' : saving ? 'Saving…' : 'Save / Update Order'}
           </button>
-
-          <button
-            type="button"
-            disabled={saving}
-            onClick={cancelToday}
-            className="w-full rounded-md bg-red-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:w-auto"
-          >
-            Cancel Today’s Order
-          </button>
+          {!holiday && (
+            <button type="button" disabled={saving} onClick={cancelToday} className="w-full rounded-md bg-red-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50 sm:w-auto">
+              Cancel Today’s Order
+            </button>
+          )}
         </div>
 
-        {msg && (
-          <p className="rounded-md bg-green-100 p-3 text-sm text-green-700">
-            {msg}
-          </p>
-        )}
+        {msg && <p className="rounded-md bg-green-100 p-3 text-sm text-green-700">{msg}</p>}
       </form>
     </div>
   );
