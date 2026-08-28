@@ -1,21 +1,7 @@
-import React, {
-  createContext,
-  useContext,
-  ReactNode,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import React, { createContext, useContext, ReactNode, useEffect, useRef, useState, useCallback } from 'react';
 import { User, Order, Prices, Status, MenuItem } from '../types';
 import { ADMIN_USER_ID, DEFAULT_ADMIN_PASSWORD } from '../constants';
-import {
-  loadSupabaseData,
-  upsertOrder,
-  upsertPrices,
-  saveHoliday,
-  removeHoliday,
-} from '../services/supabaseSync';
+import { loadSupabaseData, upsertOrder, upsertPrices, saveHoliday, removeHoliday } from '../services/supabaseSync';
 import { supabaseEnabled } from '../supabase';
 
 interface DataContextType {
@@ -37,26 +23,17 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
-const initialUsers: User[] = [
-  {
-    id: ADMIN_USER_ID,
-    name: 'GoCanteen Administrator',
-    mobile: '',
-    password: DEFAULT_ADMIN_PASSWORD,
-    role: 'admin',
-    status: 'active' as Status,
-    isFirstLogin: false,
-  },
-];
+const initialUsers: User[] = [{
+  id: ADMIN_USER_ID,
+  name: 'GoCanteen Administrator',
+  mobile: '',
+  password: DEFAULT_ADMIN_PASSWORD,
+  role: 'admin',
+  status: 'active' as Status,
+  isFirstLogin: false,
+}];
 
-const initialPrices: Prices = {
-  morningTea: 8,
-  lunchMeals: 40,
-  lunchEgg: 10,
-  lunchFishMeat: 25,
-  eveningTea: 8,
-};
-
+const initialPrices: Prices = { morningTea: 8, lunchMeals: 40, lunchEgg: 10, lunchFishMeat: 25, eveningTea: 8 };
 const initialMenuItems: MenuItem[] = [
   { itemCode: 'morningTea', itemName: 'Morning Tea', unitPrice: 8, active: true },
   { itemCode: 'lunchMeals', itemName: 'Lunch: Meals', unitPrice: 40, active: true },
@@ -66,77 +43,59 @@ const initialMenuItems: MenuItem[] = [
 ];
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [users, setUsers] = useLocalStorage<User[]>('canteen_users', initialUsers);
-  const [orders, setOrders] = useLocalStorage<Order[]>('canteen_orders', []);
-  const [prices, setPrices] = useLocalStorage<Prices>('canteen_prices', initialPrices);
-  const [menuItems, setMenuItems] = useLocalStorage<MenuItem[]>('canteen_menu_items', initialMenuItems);
+  const [users, setUsers] = useState<User[]>(initialUsers);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [prices, setPrices] = useState<Prices>(initialPrices);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(initialMenuItems);
   const [holidays, setHolidays] = useState<string[]>([]);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const hydrated = useRef(false);
   const timer = useRef<number | undefined>(undefined);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      if (!supabaseEnabled) {
-        hydrated.current = true;
-        return;
+  const hydrate = useCallback(async () => {
+    if (!supabaseEnabled) { hydrated.current = true; return; }
+    try {
+      const cloud = await loadSupabaseData();
+      if (cloud) {
+        setUsers(prev => {
+          const map = new Map(prev.map(u => [u.id, u]));
+          cloud.users.forEach(u => map.set(u.id, { ...(map.get(u.id) || u), ...u }));
+          return Array.from(map.values());
+        });
+        setOrders(cloud.orders || []);
+        setPrices(cloud.prices || initialPrices);
+        setMenuItems(cloud.menuItems?.length ? cloud.menuItems : initialMenuItems);
+        setHolidays(cloud.holidays || []);
       }
+    } catch (e) {
+      console.warn('Supabase load failed; keeping local state.', e);
+    } finally {
+      hydrated.current = true;
+    }
+  }, []);
 
-      try {
-        const cloud = await loadSupabaseData();
-
-        if (!cancelled && cloud) {
-          setUsers(prev => {
-            const byId = new Map(prev.map(u => [u.id, u]));
-            cloud.users.forEach(u => {
-              const old = byId.get(u.id);
-              byId.set(u.id, {
-                ...(old || u),
-                ...u,
-                password: old?.password || u.password || '',
-              });
-            });
-            return Array.from(byId.values());
-          });
-
-          setOrders(cloud.orders);
-          setPrices(cloud.prices);
-          if (cloud.menuItems?.length) setMenuItems(cloud.menuItems);
-          if (Array.isArray(cloud.holidays)) setHolidays(cloud.holidays);
-        }
-      } catch (e) {
-        console.warn('Supabase sync unavailable; continuing with local data.', e);
-      } finally {
-        if (!cancelled) hydrated.current = true;
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [setUsers, setOrders, setPrices, setMenuItems]);
+  useEffect(() => { hydrate(); }, [hydrate]);
 
   useEffect(() => {
     if (!supabaseEnabled || !hydrated.current) return;
-
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(async () => {
       setCloudSyncing(true);
       try {
-        await Promise.all(orders.map(o => upsertOrder(o, prices)));
-        await upsertPrices(prices, menuItems);
+        // Do not rewrite existing remote menu rows on every render unless their
+        // state really changed; menu CRUD uses explicit save functions.
+        for (const order of orders) await upsertOrder(order, prices);
+        if (menuItems.length) await upsertPrices(prices, menuItems);
       } catch (e) {
-        console.warn('Supabase write failed; local data retained.', e);
+        console.warn('Background Supabase sync failed.', e);
       } finally {
         setCloudSyncing(false);
       }
-    }, 700);
-
+    }, 900);
     return () => window.clearTimeout(timer.current);
-  }, [orders, prices, menuItems]);
+  }, [orders, prices]);
 
   const addHoliday = async (date: string) => {
-    if (holidays.includes(date)) return;
     await saveHoliday(date);
     setHolidays(prev => prev.includes(date) ? prev : [...prev, date]);
   };
@@ -147,24 +106,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <DataContext.Provider
-      value={{
-        users,
-        setUsers,
-        orders,
-        setOrders,
-        prices,
-        setPrices,
-        menuItems,
-        setMenuItems,
-        holidays,
-        setHolidays,
-        addHoliday,
-        deleteHoliday,
-        cloudBackupEnabled: supabaseEnabled,
-        cloudSyncing,
-      }}
-    >
+    <DataContext.Provider value={{
+      users, setUsers, orders, setOrders, prices, setPrices,
+      menuItems, setMenuItems, holidays, setHolidays,
+      addHoliday, deleteHoliday,
+      cloudBackupEnabled: supabaseEnabled, cloudSyncing,
+    }}>
       {children}
     </DataContext.Provider>
   );
