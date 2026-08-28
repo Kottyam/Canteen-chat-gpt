@@ -15,7 +15,7 @@ export async function loadSupabaseData() {
   if(pErr) throw pErr; if(oErr) throw oErr; if(mErr) throw mErr; if(hErr) throw hErr;
   const users:User[]=(profiles||[]).map((p:any)=>({id:p.employee_code||p.sr_number||p.id,name:p.full_name||'',mobile:p.mobile_number||'',password:'',role:p.role,status:p.status||'active',isFirstLogin:Boolean(p.is_first_login)}));
   const profileByUuid=new Map((profiles||[]).map((p:any)=>[p.id,p]));
-  const mappedOrders:Order[]=(orders||[]).filter((o:any)=>o.status!=='cancelled').map((o:any)=>{const items:OrderItems={morningTea:false,lunchMeals:false,lunchEgg:false,lunchFishMeat:false,eveningTea:false};(o.order_items||[]).forEach((i:any)=>{if(i.item_code in items) items[i.item_code as keyof OrderItems]=Number(i.quantity)>0;});const ep:any=profileByUuid.get(o.employee_id);return{id:o.id,employeeId:ep?.employee_code||ep?.sr_number||o.employee_id,date:o.ordered_for,items};});
+  const mappedOrders:Order[]=(orders||[]).filter((o:any)=>o.status!=='cancelled').map((o:any)=>{const items:OrderItems={morningTea:false,lunchMeals:false,lunchEgg:false,lunchFishMeat:false,eveningTea:false};const itemPrices:Partial<Record<keyof OrderItems,number>>={};(o.order_items||[]).forEach((i:any)=>{if(i.item_code in items){const k=i.item_code as keyof OrderItems;items[k]=Number(i.quantity)>0;if(i.unit_price!=null)itemPrices[k]=Number(i.unit_price);}});const ep:any=profileByUuid.get(o.employee_id);return{id:o.id,employeeId:ep?.employee_code||ep?.sr_number||o.employee_id,date:o.ordered_for,items,itemPrices};});
   const prices:Prices={morningTea:8,lunchMeals:40,lunchEgg:10,lunchFishMeat:25,eveningTea:8};
   const menuItems:MenuItem[]=(menu||[]).map((r:any)=>{if(r.item_code in prices) prices[r.item_code as keyof Prices]=Number(r.unit_price);return{itemCode:r.item_code,itemName:r.item_name||defaultNames[r.item_code]||r.item_code,unitPrice:Number(r.unit_price),active:Boolean(r.active)};});
   return {users,orders:mappedOrders,prices,menuItems,holidays:(holidays||[]).map((h:any)=>String(h.holiday_date))};
@@ -23,30 +23,16 @@ export async function loadSupabaseData() {
 
 export async function saveEmployee(user:User){
   if(!supabaseEnabled||!supabase) return;
-  const { data, error } = await supabase.functions.invoke('create-employee', {
-    body: {
-      employee_code: user.id,
-      full_name: user.name,
-      mobile_number: user.mobile || null,
-      password: user.password,
-    }
-  });
-  if(error) throw error;
-  if(data?.error) throw new Error(data.error);
+  const { data, error } = await supabase.functions.invoke('create-employee', { body: { employee_code:user.id, full_name:user.name, mobile_number:user.mobile||null, password:user.password } });
+  if(error) throw error; if(data?.error) throw new Error(data.error);
 }
-export async function deleteEmployee(employeeId:string){
-  if(!supabaseEnabled||!supabase) return;
-  const {error}=await supabase.from('profiles').delete().or(`employee_code.eq.${employeeId},sr_number.eq.${employeeId}`); if(error) throw error;
-}
-export async function updateEmployee(user:User){
-  if(!supabaseEnabled||!supabase) return;
-  const {error}=await supabase.from('profiles').update({full_name:user.name,mobile_number:user.mobile||null,status:user.status||'active',is_first_login:Boolean(user.isFirstLogin)}).or(`employee_code.eq.${user.id},sr_number.eq.${user.id}`); if(error) throw error;
-}
+export async function deleteEmployee(employeeId:string){if(!supabaseEnabled||!supabase)return;const {error}=await supabase.from('profiles').delete().or(`employee_code.eq.${employeeId},sr_number.eq.${employeeId}`);if(error)throw error;}
+export async function updateEmployee(user:User){if(!supabaseEnabled||!supabase)return;const {error}=await supabase.from('profiles').update({full_name:user.name,mobile_number:user.mobile||null,status:user.status||'active',is_first_login:Boolean(user.isFirstLogin)}).or(`employee_code.eq.${user.id},sr_number.eq.${user.id}`);if(error)throw error;}
 
 export async function upsertOrder(order:Order,prices:Prices){
   if(!supabaseEnabled||!supabase)return;
   const {data:profile,error:profileError}=await supabase.from('profiles').select('id').or(`employee_code.eq.${order.employeeId},sr_number.eq.${order.employeeId}`).maybeSingle();
-  if(profileError)throw profileError;if(!profile)return;
+  if(profileError)throw profileError;if(!profile)throw new Error('Employee profile not found.');
   const {error:orderError}=await supabase.from('orders').upsert({id:order.id,employee_id:profile.id,ordered_for:order.date,status:'active'},{onConflict:'id'});if(orderError)throw orderError;
   const {error:deleteError}=await supabase.from('order_items').delete().eq('order_id',order.id);if(deleteError)throw deleteError;
   const rows=itemCodes.filter(k=>order.items[k]).map(k=>({order_id:order.id,item_code:k,quantity:1,unit_price:prices[k]}));
