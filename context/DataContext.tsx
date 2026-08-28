@@ -2,7 +2,7 @@ import React, { createContext, useContext, ReactNode, useEffect, useRef, useStat
 import { User, Order, Prices, Status, MenuItem } from '../types';
 import { ADMIN_USER_ID, DEFAULT_ADMIN_PASSWORD } from '../constants';
 import { loadSupabaseData, upsertOrder, upsertPrices, saveHoliday, removeHoliday } from '../services/supabaseSync';
-import { supabaseEnabled } from '../supabase';
+import { supabase, supabaseEnabled } from '../supabase';
 
 interface DataContextType {
   users: User[];
@@ -49,57 +49,98 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [menuItems, setMenuItems] = useState<MenuItem[]>(initialMenuItems);
   const [holidays, setHolidays] = useState<string[]>([]);
   const [cloudSyncing, setCloudSyncing] = useState(false);
+
   const hydrated = useRef(false);
+  const hydrating = useRef(false);
+  const syncInFlight = useRef(false);
+  const refreshRequested = useRef(false);
   const timer = useRef<number | undefined>(undefined);
-  const refreshTimer = useRef<number | undefined>(undefined);
 
   const hydrate = useCallback(async () => {
-    if (!supabaseEnabled) { hydrated.current = true; return; }
+    if (!supabaseEnabled) {
+      hydrated.current = true;
+      return;
+    }
+
+    // Never replace fresh local state while a write is in progress.
+    if (syncInFlight.current) {
+      refreshRequested.current = true;
+      return;
+    }
+
     try {
+      hydrating.current = true;
       const cloud = await loadSupabaseData();
-      if (cloud) {
-        setUsers(prev => {
-          const map = new Map(prev.map(u => [u.id, u]));
-          cloud.users.forEach(u => map.set(u.id, { ...(map.get(u.id) || u), ...u }));
-          return Array.from(map.values());
-        });
-        setOrders(cloud.orders || []);
-        setPrices(cloud.prices || initialPrices);
-        setMenuItems(cloud.menuItems?.length ? cloud.menuItems : initialMenuItems);
-        setHolidays(cloud.holidays || []);
-      }
+      if (!cloud) return;
+
+      setUsers(prev => {
+        const map = new Map(prev.map(u => [u.id, u]));
+        cloud.users.forEach(u => map.set(u.id, { ...(map.get(u.id) || u), ...u }));
+        return Array.from(map.values());
+      });
+      setOrders(cloud.orders || []);
+      setPrices(cloud.prices || initialPrices);
+      setMenuItems(cloud.menuItems?.length ? cloud.menuItems : initialMenuItems);
+      setHolidays(cloud.holidays || []);
     } catch (e) {
-      console.warn('Supabase load failed; keeping local state.', e);
+      console.warn('Supabase load failed; keeping current state.', e);
     } finally {
       hydrated.current = true;
     }
   }, []);
 
   useEffect(() => {
-    hydrate();
+    void hydrate();
   }, [hydrate]);
 
-  // Keep separate employee/admin app instances fresh from Supabase.
-  // This also fixes stale menu/price data when one device changes it and
-  // another device is already open.
+  // Cross-device refresh. Realtime events are used when available, with a
+  // polling/focus fallback so reports eventually converge even if a realtime
+  // connection is unavailable on a mobile network.
   useEffect(() => {
     if (!supabaseEnabled) return;
+
     const refresh = () => { void hydrate(); };
     const interval = window.setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
-    refreshTimer.current = interval;
+
+    let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined;
+    if (supabase) {
+      channel = supabase
+        .channel('gocanteen-data-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_prices' }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'holidays' }, refresh)
+        .subscribe();
+    }
+
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refresh);
+      if (channel) void channel.unsubscribe();
     };
   }, [hydrate]);
 
+  // Only local edits trigger a cloud write. A previous version also wrote the
+  // just-loaded cloud state back to Supabase, creating a race between devices
+  // and causing Daily/Monthly reports to intermittently show stale values.
   useEffect(() => {
     if (!supabaseEnabled || !hydrated.current) return;
+
+    // hydrate() changed state from the cloud; do not echo that state back.
+    if (hydrating.current) {
+      hydrating.current = false;
+      return;
+    }
+
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(async () => {
+      if (syncInFlight.current) return;
+
+      syncInFlight.current = true;
       setCloudSyncing(true);
       try {
         for (const order of orders) await upsertOrder(order, prices);
@@ -107,11 +148,20 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } catch (e) {
         console.warn('Background Supabase sync failed.', e);
       } finally {
+        syncInFlight.current = false;
         setCloudSyncing(false);
+
+        // If a realtime/poll refresh arrived during the write, perform it now
+        // so both admin and employee instances converge on the same database state.
+        if (refreshRequested.current) {
+          refreshRequested.current = false;
+          void hydrate();
+        }
       }
-    }, 900);
+    }, 500);
+
     return () => window.clearTimeout(timer.current);
-  }, [orders, prices, menuItems]);
+  }, [orders, prices, menuItems, hydrate]);
 
   const addHoliday = async (date: string) => {
     await saveHoliday(date);
