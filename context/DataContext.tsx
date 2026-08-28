@@ -12,8 +12,9 @@ import { ADMIN_USER_ID, DEFAULT_ADMIN_PASSWORD } from '../constants';
 import {
   loadSupabaseData,
   upsertOrder,
-  cancelOrder,
   upsertPrices,
+  saveHoliday,
+  removeHoliday,
 } from '../services/supabaseSync';
 import { supabaseEnabled } from '../supabase';
 
@@ -26,6 +27,10 @@ interface DataContextType {
   setPrices: React.Dispatch<React.SetStateAction<Prices>>;
   menuItems: MenuItem[];
   setMenuItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
+  holidays: string[];
+  setHolidays: React.Dispatch<React.SetStateAction<string[]>>;
+  addHoliday: (date: string) => Promise<void>;
+  deleteHoliday: (date: string) => Promise<void>;
   cloudBackupEnabled: boolean;
   cloudSyncing: boolean;
 }
@@ -64,11 +69,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [users, setUsers] = useLocalStorage<User[]>('canteen_users', initialUsers);
   const [orders, setOrders] = useLocalStorage<Order[]>('canteen_orders', []);
   const [prices, setPrices] = useLocalStorage<Prices>('canteen_prices', initialPrices);
-  const [menuItems, setMenuItems] = useLocalStorage<MenuItem[]>(
-    'canteen_menu_items',
-    initialMenuItems
-  );
-
+  const [menuItems, setMenuItems] = useLocalStorage<MenuItem[]>('canteen_menu_items', initialMenuItems);
+  const [holidays, setHolidays] = useState<string[]>([]);
   const [cloudSyncing, setCloudSyncing] = useState(false);
   const hydrated = useRef(false);
   const timer = useRef<number | undefined>(undefined);
@@ -88,7 +90,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (!cancelled && cloud) {
           setUsers(prev => {
             const byId = new Map(prev.map(u => [u.id, u]));
-
             cloud.users.forEach(u => {
               const old = byId.get(u.id);
               byId.set(u.id, {
@@ -97,48 +98,35 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 password: old?.password || u.password || '',
               });
             });
-
             return Array.from(byId.values());
           });
 
           setOrders(cloud.orders);
           setPrices(cloud.prices);
-
-          if (cloud.menuItems?.length) {
-            setMenuItems(cloud.menuItems);
-          }
+          if (cloud.menuItems?.length) setMenuItems(cloud.menuItems);
+          if (Array.isArray(cloud.holidays)) setHolidays(cloud.holidays);
         }
       } catch (e) {
-        console.warn(
-          'Supabase sync unavailable; continuing with local data.',
-          e
-        );
+        console.warn('Supabase sync unavailable; continuing with local data.', e);
       } finally {
         if (!cancelled) hydrated.current = true;
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [setUsers, setOrders, setPrices, setMenuItems]);
 
   useEffect(() => {
     if (!supabaseEnabled || !hydrated.current) return;
 
     window.clearTimeout(timer.current);
-
     timer.current = window.setTimeout(async () => {
       setCloudSyncing(true);
-
       try {
         await Promise.all(orders.map(o => upsertOrder(o, prices)));
         await upsertPrices(prices, menuItems);
       } catch (e) {
-        console.warn(
-          'Supabase write failed; local data retained.',
-          e
-        );
+        console.warn('Supabase write failed; local data retained.', e);
       } finally {
         setCloudSyncing(false);
       }
@@ -146,6 +134,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return () => window.clearTimeout(timer.current);
   }, [orders, prices, menuItems]);
+
+  const addHoliday = async (date: string) => {
+    if (holidays.includes(date)) return;
+    await saveHoliday(date);
+    setHolidays(prev => prev.includes(date) ? prev : [...prev, date]);
+  };
+
+  const deleteHoliday = async (date: string) => {
+    await removeHoliday(date);
+    setHolidays(prev => prev.filter(d => d !== date));
+  };
 
   return (
     <DataContext.Provider
@@ -158,6 +157,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setPrices,
         menuItems,
         setMenuItems,
+        holidays,
+        setHolidays,
+        addHoliday,
+        deleteHoliday,
         cloudBackupEnabled: supabaseEnabled,
         cloudSyncing,
       }}
@@ -169,11 +172,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useData = () => {
   const context = useContext(DataContext);
-
-  if (!context) {
-    throw new Error('useData must be used within a DataProvider');
-  }
-
+  if (!context) throw new Error('useData must be used within a DataProvider');
   return context;
 };
-
