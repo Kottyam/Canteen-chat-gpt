@@ -23,14 +23,25 @@ export async function loadSupabaseData() {
 
 export async function saveEmployee(user:User){
   if(!supabaseEnabled||!supabase) return;
-  const payload:any={employee_code:user.id,sr_number:user.id,full_name:user.name,mobile_number:user.mobile||null,role:user.role,status:user.status||'active',is_first_login:Boolean(user.isFirstLogin)};
-  const {error}=await supabase.from('profiles').upsert(payload,{onConflict:'employee_code'}); if(error) throw error;
+  const { data, error } = await supabase.functions.invoke('create-employee', {
+    body: {
+      employee_code: user.id,
+      full_name: user.name,
+      mobile_number: user.mobile || null,
+      password: user.password,
+    }
+  });
+  if(error) throw error;
+  if(data?.error) throw new Error(data.error);
 }
 export async function deleteEmployee(employeeId:string){
   if(!supabaseEnabled||!supabase) return;
   const {error}=await supabase.from('profiles').delete().or(`employee_code.eq.${employeeId},sr_number.eq.${employeeId}`); if(error) throw error;
 }
-export async function updateEmployee(user:User){return saveEmployee(user);}
+export async function updateEmployee(user:User){
+  if(!supabaseEnabled||!supabase) return;
+  const {error}=await supabase.from('profiles').update({full_name:user.name,mobile_number:user.mobile||null,status:user.status||'active',is_first_login:Boolean(user.isFirstLogin)}).or(`employee_code.eq.${user.id},sr_number.eq.${user.id}`); if(error) throw error;
+}
 
 export async function upsertOrder(order:Order,prices:Prices){
   if(!supabaseEnabled||!supabase)return;
