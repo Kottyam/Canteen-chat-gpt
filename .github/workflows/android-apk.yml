@@ -64,7 +64,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Apply text-only Go Canteen launcher icon
+      - name: Apply text-only Go launcher icon
         run: |
           set -e
           python3 -m pip install --quiet pillow
@@ -87,9 +87,9 @@ jobs:
               out.mkdir(parents=True, exist_ok=True)
               image = Image.new('RGB', (size, size), 'white')
               draw = ImageDraw.Draw(image)
-              font_size = max(10, int(size * 0.22))
+              font_size = max(10, int(size * 0.32))
               font = ImageFont.truetype(font_path, font_size)
-              text = 'Go Canteen'
+              text = 'Go'
               bbox = draw.textbbox((0, 0), text, font=font)
               tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
               draw.text(((size - tw) / 2, (size - th) / 2 - bbox[1]), text, font=font, fill=green)
