@@ -28,23 +28,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Capacitor Android and assets
-        run: npm install @capacitor/android@7.4.0 @capacitor/assets --save-dev
+      - name: Install Capacitor Android
+        run: npm install @capacitor/android@7.4.0
 
       - name: Build web app
         run: npm run build
 
       - name: Add Android platform
         run: npx cap add android
-
-      - name: Prepare Go Canteen icon and splash assets
-        run: |
-          mkdir -p resources
-          convert public/logo.svg -background none -resize 1024x1024 resources/icon.png
-          convert public/logo.svg -background white -gravity center -resize 2200x2200 -extent 2732x2732 resources/splash.png
-
-      - name: Generate Android icon and splash resources
-        run: npx capacitor-assets generate --android
 
       - name: Sync Capacitor
         run: npx cap sync android
