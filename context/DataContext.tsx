@@ -1,5 +1,5 @@
 import React, { createContext, useContext, ReactNode, useEffect, useRef, useState, useCallback } from 'react';
-import { User, Order, Prices, Status, MenuItem } from '../types';
+import { User, Order, Prices, Status, MenuItem, DailyMenuItem } from '../types';
 import { ADMIN_USER_ID, DEFAULT_ADMIN_PASSWORD } from '../constants';
 import { loadSupabaseData, upsertOrder, saveMenuItem, saveHoliday, removeHoliday } from '../services/supabaseSync';
 import { supabase, supabaseEnabled } from '../supabase';
@@ -13,6 +13,8 @@ interface DataContextType {
   setPrices: React.Dispatch<React.SetStateAction<Prices>>;
   menuItems: MenuItem[];
   setMenuItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
+  dailyMenus: DailyMenuItem[];
+  setDailyMenus: React.Dispatch<React.SetStateAction<DailyMenuItem[]>>;
   holidays: string[];
   setHolidays: React.Dispatch<React.SetStateAction<string[]>>;
   addHoliday: (date: string) => Promise<void>;
@@ -47,6 +49,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [orders, setOrders] = useState<Order[]>([]);
   const [prices, setPrices] = useState<Prices>(initialPrices);
   const [menuItems, setMenuItems] = useState<MenuItem[]>(initialMenuItems);
+  const [dailyMenus, setDailyMenus] = useState<DailyMenuItem[]>([]);
   const [holidays, setHolidays] = useState<string[]>([]);
   const [cloudSyncing, setCloudSyncing] = useState(false);
 
@@ -61,18 +64,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       hydrated.current = true;
       return;
     }
-
-    // Never replace fresh local state while a write is in progress.
     if (syncInFlight.current) {
       refreshRequested.current = true;
       return;
     }
-
     try {
       hydrating.current = true;
       const cloud = await loadSupabaseData();
       if (!cloud) return;
-
       setUsers(prev => {
         const map = new Map(prev.map(u => [u.id, u]));
         cloud.users.forEach(u => map.set(u.id, { ...(map.get(u.id) || u), ...u }));
@@ -80,8 +79,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       setOrders(cloud.orders || []);
       setPrices(cloud.prices || initialPrices);
-      // An empty cloud menu is a real state. Do not restore deleted fallback items.
       setMenuItems(cloud.menuItems || []);
+      setDailyMenus(cloud.dailyMenus || []);
       setHolidays(cloud.holidays || []);
     } catch (e) {
       console.warn('Supabase load failed; keeping current state.', e);
@@ -90,21 +89,14 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
+  useEffect(() => { void hydrate(); }, [hydrate]);
 
-  // Cross-device refresh. Realtime events are used when available, with a
-  // polling/focus fallback so reports eventually converge even if a realtime
-  // connection is unavailable on a mobile network.
   useEffect(() => {
     if (!supabaseEnabled) return;
-
     const refresh = () => { void hydrate(); };
     const interval = window.setInterval(refresh, 15000);
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
-
     let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined;
     if (supabase) {
       channel = supabase
@@ -113,10 +105,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_prices' }, refresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_menu' }, refresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'holidays' }, refresh)
         .subscribe();
     }
-
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('focus', refresh);
@@ -125,21 +117,15 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [hydrate]);
 
-  // Only local edits trigger a cloud write. Loaded cloud state is not echoed back.
-  // Menu rows are saved individually so a deleted row is never recreated by a
-  // bulk upsert with an implicit active=true default.
   useEffect(() => {
     if (!supabaseEnabled || !hydrated.current) return;
-
     if (hydrating.current) {
       hydrating.current = false;
       return;
     }
-
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(async () => {
       if (syncInFlight.current) return;
-
       syncInFlight.current = true;
       setCloudSyncing(true);
       try {
@@ -150,14 +136,12 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } finally {
         syncInFlight.current = false;
         setCloudSyncing(false);
-
         if (refreshRequested.current) {
           refreshRequested.current = false;
           void hydrate();
         }
       }
     }, 500);
-
     return () => window.clearTimeout(timer.current);
   }, [orders, prices, menuItems, hydrate]);
 
@@ -165,7 +149,6 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await saveHoliday(date);
     setHolidays(prev => prev.includes(date) ? prev : [...prev, date]);
   };
-
   const deleteHoliday = async (date: string) => {
     await removeHoliday(date);
     setHolidays(prev => prev.filter(d => d !== date));
@@ -174,8 +157,8 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   return (
     <DataContext.Provider value={{
       users, setUsers, orders, setOrders, prices, setPrices,
-      menuItems, setMenuItems, holidays, setHolidays,
-      addHoliday, deleteHoliday,
+      menuItems, setMenuItems, dailyMenus, setDailyMenus,
+      holidays, setHolidays, addHoliday, deleteHoliday,
       cloudBackupEnabled: supabaseEnabled, cloudSyncing,
     }}>
       {children}
