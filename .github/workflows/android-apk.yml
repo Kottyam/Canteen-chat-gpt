@@ -47,14 +47,19 @@ jobs:
               <solid android:color="@android:color/transparent" />
           </shape>
           EOF
-          cat > android/app/src/main/res/values-v31/styles.xml <<'EOF'
+          THEME_NAME=$(grep -o 'android:theme="@style/[^\"]*"' android/app/src/main/AndroidManifest.xml | head -1 | sed 's/.*@style\///;s/"//')
+          if [ -z "$THEME_NAME" ]; then
+            echo "Could not determine Android application theme"
+            exit 1
+          fi
+          echo "Using Android theme: $THEME_NAME"
+          cat > android/app/src/main/res/values-v31/styles.xml <<EOF
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+              <style name="$THEME_NAME">
                   <item name="android:windowSplashScreenBackground">@android:color/white</item>
                   <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
                   <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
-                  <item name="android:windowNoTitle">true</item>
               </style>
           </resources>
           EOF
