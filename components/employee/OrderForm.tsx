@@ -46,25 +46,18 @@ const OrderForm: React.FC = () => {
     setItems(order ? { ...order.items } : { ...EMPTY });
   }, [user, orders, today]);
 
-  // Use a functional state update so one tap can only change the requested item.
   const change = (key: keyof OrderItems, checked: boolean) => {
     if (holiday || existing) return;
 
     setItems(prev => {
       const next = { ...prev, [key]: checked };
-
-      // Add-ons require Meals, but selecting/deselecting an add-on must not
-      // change either of the other add-ons.
       if ((key === 'lunchEgg' || key === 'lunchFishMeat') && checked) {
         next.lunchMeals = true;
       }
-
-      // Meals cannot be removed while an add-on remains selected.
       if (key === 'lunchMeals' && !checked) {
         next.lunchEgg = false;
         next.lunchFishMeat = false;
       }
-
       return next;
     });
   };
@@ -73,6 +66,19 @@ const OrderForm: React.FC = () => {
     order?.itemPrices?.[key] ??
     menuItems.find(i => i.itemCode === key)?.unitPrice ??
     prices[key];
+
+  // Use the menu record even when it is inactive. Deleted/archived items can
+  // therefore still be displayed correctly in historical/current orders.
+  const getName = (key: keyof OrderItems) => {
+    const fallback: Record<keyof OrderItems, string> = {
+      morningTea: 'Morning Tea',
+      lunchMeals: 'Meals',
+      lunchEgg: 'Egg',
+      lunchFishMeat: 'Fish/Meat',
+      eveningTea: 'Evening Tea',
+    };
+    return menuItems.find(i => i.itemCode === key)?.itemName ?? fallback[key];
+  };
 
   const total = (order: Order | undefined) =>
     order
@@ -175,15 +181,7 @@ const OrderForm: React.FC = () => {
             .filter(k => existing.items[k])
             .map(k => (
               <div key={k} className="flex justify-between rounded-lg border p-3">
-                <span>
-                  {({
-                    morningTea: 'Morning Tea',
-                    lunchMeals: 'Meals',
-                    lunchEgg: 'Egg',
-                    lunchFishMeat: 'Fish/Meat',
-                    eveningTea: 'Evening Tea',
-                  } as any)[k]}
-                </span>
+                <span>{getName(k)}</span>
                 <span>₹{getPrice(existing, k).toFixed(2)}</span>
               </div>
             ))}
