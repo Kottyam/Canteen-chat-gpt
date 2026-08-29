@@ -6,10 +6,17 @@ import EmployeeDashboard from './components/employee/EmployeeDashboard';
 import AdminDashboard from './components/admin/AdminDashboard';
 import InitialPasswordChange from './components/auth/InitialPasswordChange';
 
+const SplashScreen: React.FC = () => (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white">
+        <span className="text-4xl font-extrabold text-primary-700">Go Canteen</span>
+        <span className="mt-2 text-[9px] font-medium text-black">Powered by Alien 1729</span>
+    </div>
+);
+
 const AppContent: React.FC = () => {
     const { user, loading } = useAuth();
 
-    if (loading) return <div className="flex min-h-screen items-center justify-center bg-white"><span className="text-4xl font-extrabold text-primary-700">Go Canteen</span></div>;
+    if (loading) return <SplashScreen />;
     if (!user) return <Login />;
     if (user.role === 'employee' && user.isFirstLogin) return <InitialPasswordChange />;
     if (user.role === 'employee') return <EmployeeDashboard />;
@@ -27,7 +34,7 @@ const App: React.FC = () => {
     return (
         <DataProvider>
             <AuthProvider>
-                {splash ? <div className="flex min-h-screen items-center justify-center bg-white"><span className="text-4xl font-extrabold text-primary-700">Go Canteen</span></div> : <AppContent />}
+                {splash ? <SplashScreen /> : <AppContent />}
             </AuthProvider>
         </DataProvider>
     );
