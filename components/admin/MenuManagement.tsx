@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { MenuItem } from '../../types';
 import { loadSupabaseData, saveMenuItem, activateMenuItem, deactivateMenuItem, deleteMenuItem } from '../../services/supabaseSync';
+import { useData } from '../../context/DataContext';
 
 const fallbackItems: MenuItem[] = [
   { itemCode: 'morningTea', itemName: 'Morning Tea', unitPrice: 8, active: true },
@@ -11,7 +12,8 @@ const fallbackItems: MenuItem[] = [
 ];
 
 const MenuManagement: React.FC = () => {
-  const [items, setItems] = useState<MenuItem[]>(fallbackItems);
+  const { menuItems, setMenuItems } = useData();
+  const [items, setItems] = useState<MenuItem[]>(menuItems.length ? menuItems : fallbackItems);
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [message, setMessage] = useState('');
@@ -20,11 +22,18 @@ const MenuManagement: React.FC = () => {
   const loadItems = async () => {
     try {
       const cloud = await loadSupabaseData();
-      if (cloud?.menuItems?.length) setItems(cloud.menuItems);
+      if (cloud) {
+        setItems(cloud.menuItems || []);
+        setMenuItems(cloud.menuItems || []);
+      }
     } catch (error) {
       console.error(error);
     }
   };
+
+  useEffect(() => {
+    setItems(menuItems);
+  }, [menuItems]);
 
   useEffect(() => { loadItems(); }, []);
 
@@ -41,7 +50,8 @@ const MenuManagement: React.FC = () => {
     setBusy(item.itemCode);
     try {
       await saveMenuItem(clean);
-      patch(item.itemCode, clean);
+      setItems(prev => prev.map(i => i.itemCode === clean.itemCode ? clean : i));
+      setMenuItems(prev => prev.map(i => i.itemCode === clean.itemCode ? clean : i));
       setMessage('Menu item saved permanently.');
     } catch (error: any) {
       console.error(error);
@@ -54,7 +64,9 @@ const MenuManagement: React.FC = () => {
     try {
       if (item.active) await deactivateMenuItem(item.itemCode);
       else await activateMenuItem(item.itemCode);
-      patch(item.itemCode, { active: !item.active });
+      const nextActive = !item.active;
+      setItems(prev => prev.map(i => i.itemCode === item.itemCode ? { ...i, active: nextActive } : i));
+      setMenuItems(prev => prev.map(i => i.itemCode === item.itemCode ? { ...i, active: nextActive } : i));
       setMessage(item.active ? 'Menu item deactivated.' : 'Menu item activated.');
     } catch (error: any) {
       console.error(error);
@@ -67,10 +79,10 @@ const MenuManagement: React.FC = () => {
     setBusy(item.itemCode);
     try {
       const result = await deleteMenuItem(item.itemCode);
-      // If historical order_items reference this code, the backend archives it by
-      // deactivating it so old reports remain valid. In both cases it disappears
-      // from the employee's active menu after reload.
+      // Historical order references may force an archive instead of a physical delete.
+      // Either way, remove it from the employee-visible menu immediately.
       setItems(prev => prev.filter(i => i.itemCode !== item.itemCode));
+      setMenuItems(prev => prev.filter(i => i.itemCode !== item.itemCode));
       setMessage(result === 'deactivated'
         ? 'Item archived because it is used in order history.'
         : 'Menu item deleted permanently.');
@@ -98,6 +110,7 @@ const MenuManagement: React.FC = () => {
     try {
       await saveMenuItem(item);
       setItems(prev => [...prev, item]);
+      setMenuItems(prev => [...prev, item]);
       setNewName('');
       setNewPrice('');
       setMessage('New menu item added permanently.');
