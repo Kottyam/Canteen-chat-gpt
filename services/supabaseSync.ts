@@ -1,6 +1,5 @@
 import { supabase, supabaseEnabled } from '../supabase';
 import { User, Order, Prices, OrderItems, MenuItem, DailyMenuItem } from '../types';
-const itemCodes:(keyof OrderItems)[]=['morningTea','lunchMeals','lunchEgg','lunchFishMeat','eveningTea'];
 const defaultNames:Record<string,string>={morningTea:'Morning Tea',lunchMeals:'Lunch: Meals',lunchEgg:'Lunch: Egg (add-on)',lunchFishMeat:'Lunch: Fish/Meat (add-on)',eveningTea:'Evening Tea'};
 
 const isoDate = (date = new Date()) => date.toISOString().slice(0, 10);
@@ -20,10 +19,16 @@ export async function loadSupabaseData(){
   const users:User[]=(profiles||[]).map((p:any)=>({id:p.employee_code||p.sr_number||p.id,name:p.full_name||'',mobile:p.mobile_number||'',password:'',role:p.role,status:p.status||'active',isFirstLogin:Boolean(p.is_first_login)}));
   const profileByUuid=new Map((profiles||[]).map((p:any)=>[p.id,p]));
   const mappedOrders:Order[]=(orders||[]).filter((o:any)=>o.status!=='cancelled').map((o:any)=>{
-    const items:OrderItems={morningTea:false,lunchMeals:false,lunchEgg:false,lunchFishMeat:false,eveningTea:false};
-    const itemPrices:Partial<Record<keyof OrderItems,number>>={};
-    const itemNames:Partial<Record<keyof OrderItems,string>>={};
-    (o.order_items||[]).forEach((i:any)=>{if(i.item_code in items){const k=i.item_code as keyof OrderItems;items[k]=Number(i.quantity)>0;if(i.unit_price!=null)itemPrices[k]=Number(i.unit_price);if(i.item_name)itemNames[k]=i.item_name;}});
+    const items:OrderItems={};
+    const itemPrices:Record<string,number>={};
+    const itemNames:Record<string,string>={};
+    (o.order_items||[]).forEach((i:any)=>{
+      if(Number(i.quantity)>0){
+        items[i.item_code]=true;
+        if(i.unit_price!=null)itemPrices[i.item_code]=Number(i.unit_price);
+        if(i.item_name)itemNames[i.item_code]=i.item_name;
+      }
+    });
     const ep:any=profileByUuid.get(o.employee_id);
     return{id:o.id,employeeId:ep?.employee_code||ep?.sr_number||o.employee_id,date:o.ordered_for,items,itemPrices,itemNames};
   });
@@ -44,12 +49,12 @@ export async function upsertOrder(order:Order,prices:Prices){
   if(profileError)throw profileError;if(!profile)throw new Error('Employee profile not found.');
   const{error:orderError}=await supabase.from('orders').upsert({id:order.id,employee_id:profile.id,ordered_for:order.date,status:'active'},{onConflict:'id'});if(orderError)throw orderError;
   const{error:deleteError}=await supabase.from('order_items').delete().eq('order_id',order.id);if(deleteError)throw deleteError;
-  const rows=itemCodes.filter(k=>order.items[k]).map(k=>({order_id:order.id,item_code:k,item_name:order.itemNames?.[k]||defaultNames[k],quantity:1,unit_price:order.itemPrices?.[k]??prices[k]}));
+  const rows=Object.keys(order.items).filter(code=>order.items[code]).map(code=>({order_id:order.id,item_code:code,item_name:order.itemNames?.[code]||defaultNames[code]||code,quantity:1,unit_price:order.itemPrices?.[code]??(code in prices ? prices[code as keyof Prices] : 0)}));
   if(rows.length){const{error}=await supabase.from('order_items').insert(rows);if(error)throw error;}
 }
 export async function cancelOrder(order:Order){if(!supabaseEnabled||!supabase)return;const{error}=await supabase.from('orders').update({status:'cancelled',cancelled_at:new Date().toISOString()}).eq('id',order.id);if(error)throw error}
 export async function upsertPrices(prices:Prices,menuItems:MenuItem[]=[]){if(!supabaseEnabled||!supabase)return;const rows=menuItems.map(i=>{const key=i.itemCode as keyof Prices;return{item_code:i.itemCode,item_name:i.itemName,unit_price:key in prices?prices[key]:i.unitPrice,active:i.active,archived:Boolean(i.archived)}});if(!rows.length)return;const{error}=await supabase.from('menu_prices').upsert(rows,{onConflict:'item_code'});if(error)throw error}
-export async function saveMenuItem(item:MenuItem){if(!supabaseEnabled||!supabase)return;const{error}=await supabase.from('menu_prices').upsert({item_code:item.itemCode,item_name:item.itemName,unit_price:item.unitPrice,active:item.active,archived:Boolean(item.archived)},{onConflict:'item_code'});if(error)throw error}
+export async function saveMenuItem(item:MenuItem){if(!supabaseEnabled||!supabase)return;const{error}=await supabase.from('menu_prices').upsert({item_code:item.itemCode,item_name:item.itemName,unit_price:item.unitPrice,active:true,archived:false},{onConflict:'item_code'});if(error)throw error}
 export async function deactivateMenuItem(itemCode:string){if(!supabaseEnabled||!supabase)return;const{error}=await supabase.from('menu_prices').update({active:false}).eq('item_code',itemCode);if(error)throw error}
 export async function activateMenuItem(itemCode:string){if(!supabaseEnabled||!supabase)return;const{error}=await supabase.from('menu_prices').update({active:true,archived:false}).eq('item_code',itemCode);if(error)throw error}
 export async function deleteMenuItem(itemCode:string):Promise<'deleted'|'deactivated'>{if(!supabaseEnabled||!supabase)return 'deactivated';const{error}=await supabase.from('menu_prices').update({active:false,archived:true}).eq('item_code',itemCode);if(error)throw error;return 'deactivated'}
