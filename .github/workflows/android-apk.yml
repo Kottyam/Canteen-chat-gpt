@@ -37,11 +37,39 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
-      - name: Remove custom logo icon
+      - name: Apply text-only Go Canteen launcher icon
         run: |
           set -e
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image, ImageDraw, ImageFont
+          from pathlib import Path
+
+          sizes = {
+              'mipmap-mdpi': 48,
+              'mipmap-hdpi': 72,
+              'mipmap-xhdpi': 96,
+              'mipmap-xxhdpi': 144,
+              'mipmap-xxxhdpi': 192,
+          }
+          root = Path('android/app/src/main/res')
+          green = '#008A5A'
+          font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          for folder, size in sizes.items():
+              out = root / folder
+              out.mkdir(parents=True, exist_ok=True)
+              image = Image.new('RGB', (size, size), 'white')
+              draw = ImageDraw.Draw(image)
+              font_size = max(10, int(size * 0.22))
+              font = ImageFont.truetype(font_path, font_size)
+              text = 'Go Canteen'
+              bbox = draw.textbbox((0, 0), text, font=font)
+              tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+              draw.text(((size - tw) / 2, (size - th) / 2 - bbox[1]), text, font=font, fill=green)
+              image.save(out / 'ic_launcher.png', 'PNG')
+              image.save(out / 'ic_launcher_round.png', 'PNG')
+          PY
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
-          rm -f android/app/src/main/res/mipmap-*/ic_launcher.png android/app/src/main/res/mipmap-*/ic_launcher_round.png
 
       - name: Sync Capacitor
         run: npx cap sync android
