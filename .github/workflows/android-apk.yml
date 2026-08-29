@@ -37,21 +37,11 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
-      - name: Apply GoCanteen launcher icon
+      - name: Remove custom logo icon
         run: |
           set -e
-          mkdir -p android/app/src/main/res/mipmap-mdpi android/app/src/main/res/mipmap-hdpi android/app/src/main/res/mipmap-xhdpi android/app/src/main/res/mipmap-xxhdpi android/app/src/main/res/mipmap-xxxhdpi
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
-          cp public/gocanteen-icon.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+          rm -f android/app/src/main/res/mipmap-*/ic_launcher.png android/app/src/main/res/mipmap-*/ic_launcher_round.png
 
       - name: Sync Capacitor
         run: npx cap sync android
