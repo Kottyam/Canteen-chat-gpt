@@ -16,6 +16,11 @@ export interface MenuItem {
   itemName: string;
   unitPrice: number;
   active: boolean;
+  archived?: boolean;
+}
+
+export interface DailyMenuItem extends MenuItem {
+  menuDate: string;
 }
 
 export interface OrderItems {
@@ -27,6 +32,7 @@ export interface OrderItems {
 }
 
 export type OrderItemPrices = Partial<Record<keyof OrderItems, number>>;
+export type OrderItemNames = Partial<Record<keyof OrderItems, string>>;
 
 export interface Order {
   id: string;
@@ -34,6 +40,7 @@ export interface Order {
   date: string;
   items: OrderItems;
   itemPrices?: OrderItemPrices;
+  itemNames?: OrderItemNames;
 }
 
 export type Prices = {
