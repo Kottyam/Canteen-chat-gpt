@@ -37,6 +37,28 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Remove Android system splash icon
+        run: |
+          set -e
+          mkdir -p android/app/src/main/res/values-v31 android/app/src/main/res/drawable
+          cat > android/app/src/main/res/drawable/transparent_splash_icon.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="@android:color/transparent" />
+          </shape>
+          EOF
+          cat > android/app/src/main/res/values-v31/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:windowSplashScreenBackground">@android:color/white</item>
+                  <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
+                  <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+                  <item name="android:windowNoTitle">true</item>
+              </style>
+          </resources>
+          EOF
+
       - name: Apply text-only Go Canteen launcher icon
         run: |
           set -e
