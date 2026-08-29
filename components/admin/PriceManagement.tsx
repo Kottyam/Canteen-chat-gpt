@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useData } from '../../context/DataContext';
 import { Prices } from '../../types';
 
@@ -17,10 +16,14 @@ const MENU: MenuRow[] = [
 ];
 
 const PriceManagement: React.FC = () => {
-  const { prices, setPrices } = useData();
+  const { prices, setPrices, menuItems, setMenuItems } = useData();
   const [currentPrices, setCurrentPrices] = useState<Prices>(prices);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    setCurrentPrices(prices);
+  }, [prices]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -31,7 +34,17 @@ const PriceManagement: React.FC = () => {
   const savePrices = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Update both sources used by the app: Prices and menuItems. This makes the
+    // new amount visible immediately on employee screens instead of waiting for
+    // the next Supabase refresh.
     setPrices(currentPrices);
+    setMenuItems(prev => prev.map(item => {
+      if (!(item.itemCode in currentPrices)) return item;
+      const key = item.itemCode as keyof Prices;
+      return { ...item, unitPrice: currentPrices[key] };
+    }));
+
     setSuccess('Prices updated successfully.');
     window.setTimeout(() => setSuccess(''), 3000);
   };
@@ -111,4 +124,3 @@ const PriceManagement: React.FC = () => {
 };
 
 export default PriceManagement;
-   
