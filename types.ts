@@ -1,5 +1,5 @@
 export type Role = 'employee' | 'admin';
-export type Status = 'active' | 'blocked';
+export type Status = 'active' | 'blocked' | 'deleted';
 
 export interface User {
   id: string;
@@ -36,10 +36,10 @@ export interface Order {
   itemPrices?: OrderItemPrices;
 }
 
-export interface Prices {
+export type Prices = {
   morningTea: number;
   lunchMeals: number;
   lunchEgg: number;
   lunchFishMeat: number;
   eveningTea: number;
-}
+};
