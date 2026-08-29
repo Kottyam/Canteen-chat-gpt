@@ -23,16 +23,10 @@ export interface DailyMenuItem extends MenuItem {
   menuDate: string;
 }
 
-export interface OrderItems {
-  morningTea: boolean;
-  lunchMeals: boolean;
-  lunchEgg: boolean;
-  lunchFishMeat: boolean;
-  eveningTea: boolean;
-}
-
-export type OrderItemPrices = Partial<Record<keyof OrderItems, number>>;
-export type OrderItemNames = Partial<Record<keyof OrderItems, string>>;
+// Menu item codes are dynamic because the admin can add any new item.
+export type OrderItems = Record<string, boolean>;
+export type OrderItemPrices = Record<string, number>;
+export type OrderItemNames = Record<string, string>;
 
 export interface Order {
   id: string;
