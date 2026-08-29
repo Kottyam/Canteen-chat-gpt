@@ -20,8 +20,7 @@ const Login: React.FC = () => {
       <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8">
         <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg sm:p-8">
           <div className="text-center">
-            <img src="/logo.svg" alt="Go Canteen" className="mx-auto h-auto w-[min(62vw,230px)] object-contain" />
-            <h2 className="mt-3 text-2xl font-extrabold text-gray-900 sm:text-3xl">Go Canteen</h2>
+            <h2 className="text-2xl font-extrabold text-gray-900 sm:text-3xl">Go Canteen</h2>
             <p className="mt-1 text-sm text-gray-600">Sign in to your account</p>
           </div>
           <form className="mt-7 space-y-4" onSubmit={handleSubmit}>
