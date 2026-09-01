@@ -23,7 +23,6 @@ export interface DailyMenuItem extends MenuItem {
   menuDate: string;
 }
 
-// Menu item codes are dynamic because the admin can add any new item.
 export type OrderItems = Record<string, boolean>;
 export type OrderItemPrices = Record<string, number>;
 export type OrderItemNames = Record<string, string>;
@@ -35,6 +34,7 @@ export interface Order {
   items: OrderItems;
   itemPrices?: OrderItemPrices;
   itemNames?: OrderItemNames;
+  orderSource?: 'employee' | 'admin';
 }
 
 export type Prices = {
