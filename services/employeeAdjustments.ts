@@ -1,6 +1,7 @@
 import { supabase, supabaseEnabled } from '../supabase';
 
 export interface EmployeeAdjustment { id:string; employee_id:string; adjustment_date:string; amount:number; description:string; created_at?:string; }
+export interface EmployeeAdjustmentForReport extends EmployeeAdjustment { employeeCode:string; }
 
 export async function saveEmployeeAdjustment(employeeCode:string,date:string,amount:number,description='') {
   if(!supabaseEnabled||!supabase) return;
@@ -35,4 +36,14 @@ export async function loadEmployeeAdjustmentTotal(employeeCode:string,dateStart:
   const { data,error }=await supabase.from('employee_adjustments').select('amount').eq('employee_id',profile.id).gte('adjustment_date',dateStart).lte('adjustment_date',dateEnd);
   if(error) throw error;
   return (data||[]).reduce((s:number,x:any)=>s+Number(x.amount||0),0);
+}
+
+export async function loadEmployeeAdjustmentsForUsers(employeeCodes:string[],dateStart:string,dateEnd:string) {
+  const unique=[...new Set(employeeCodes.filter(Boolean))];
+  if(!unique.length) return [] as EmployeeAdjustmentForReport[];
+  const groups=await Promise.all(unique.map(async employeeCode=>{
+    const rows=await loadEmployeeAdjustments(employeeCode);
+    return rows.filter(r=>r.adjustment_date>=dateStart&&r.adjustment_date<=dateEnd).map(r=>({...r,employeeCode}));
+  }));
+  return groups.flat();
 }
