@@ -1,45 +1,9 @@
 import { supabase, supabaseEnabled } from '../supabase';
+import { notifyEmployee } from './notifications';
 
-export interface MonthlyBill {
-  id: string;
-  employee_id: string;
-  bill_month: number;
-  bill_year: number;
-  food_total: number;
-  admin_added_total: number;
-  total: number;
-  published: boolean;
-  published_at?: string | null;
-}
-
-export async function loadPublishedBills(): Promise<MonthlyBill[]> {
-  if (!supabaseEnabled || !supabase) return [];
-  const { data, error } = await supabase.from('monthly_bills').select('*').eq('published', true).order('bill_year', { ascending: false }).order('bill_month', { ascending: false });
-  if (error) throw error;
-  return (data || []).map((row: any) => ({ ...row, food_total: Number(row.food_total), admin_added_total: Number(row.admin_added_total), total: Number(row.total) }));
-}
-
-export async function upsertBill(employeeId: string, month: number, year: number, foodTotal: number, adminAddedTotal: number, publish = false) {
-  if (!supabaseEnabled || !supabase) throw new Error('Supabase is not enabled.');
-  const payload: any = {
-    employee_id: employeeId,
-    bill_month: month,
-    bill_year: year,
-    food_total: Number(foodTotal),
-    admin_added_total: Number(adminAddedTotal),
-    total: Number(foodTotal) + Number(adminAddedTotal),
-    published: publish,
-    updated_at: new Date().toISOString(),
-  };
-  if (publish) payload.published_at = new Date().toISOString();
-  const { data, error } = await supabase.from('monthly_bills').upsert(payload, { onConflict: 'employee_id,bill_month,bill_year' }).select('*').single();
-  if (error) throw error;
-  return data as MonthlyBill;
-}
-
-export async function loadAdminBills(month: number, year: number) {
-  if (!supabaseEnabled || !supabase) return [] as MonthlyBill[];
-  const { data, error } = await supabase.from('monthly_bills').select('*').eq('bill_month', month).eq('bill_year', year);
-  if (error) throw error;
-  return (data || []).map((row: any) => ({ ...row, food_total: Number(row.food_total), admin_added_total: Number(row.admin_added_total), total: Number(row.total) }));
-}
+export interface MonthlyBill { id:string; employee_id:string; bill_month:number; bill_year:number; food_total:number; admin_added_total:number; total:number; published:boolean; published_at?:string|null; }
+const mapBill=(row:any):MonthlyBill=>({...row,food_total:Number(row.food_total),admin_added_total:Number(row.admin_added_total),total:Number(row.total)});
+export async function loadPublishedBills():Promise<MonthlyBill[]> { if(!supabaseEnabled||!supabase)return[]; const{data,error}=await supabase.from('monthly_bills').select('*').eq('published',true).order('bill_year',{ascending:false}).order('bill_month',{ascending:false}); if(error)throw error; return(data||[]).map(mapBill); }
+export async function loadAdminBills(month:number,year:number){if(!supabaseEnabled||!supabase)return[] as MonthlyBill[];const{data,error}=await supabase.from('monthly_bills').select('*').eq('bill_month',month).eq('bill_year',year);if(error)throw error;return(data||[]).map(mapBill);}
+async function employeeProfile(employeeCode:string){if(!supabaseEnabled||!supabase)return null;const{data,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name').or(`employee_code.eq.${employeeCode},sr_number.eq.${employeeCode}`).maybeSingle();if(error)throw error;return data;}
+export async function publishEmployeeBill(employeeCode:string,month:number,year:number,foodTotal:number,adminAddedTotal:number){if(!supabaseEnabled||!supabase)throw new Error('Supabase is not enabled.');const profile=await employeeProfile(employeeCode);if(!profile)throw new Error(`Employee ${employeeCode} not found.`);const now=new Date().toISOString();const{data,error}=await supabase.from('monthly_bills').upsert({employee_id:profile.id,bill_month:month,bill_year:year,food_total:Number(foodTotal),admin_added_total:Number(adminAddedTotal),total:Number(foodTotal)+Number(adminAddedTotal),published:true,published_at:now,updated_at:now},{onConflict:'employee_id,bill_month,bill_year'}).select('*').single();if(error)throw error;await notifyEmployee(profile.id,`${new Date(year,month-1,1).toLocaleString('en',{month:'long'})} ${year} bill is now available.`,`Your monthly bill is ₹${(Number(foodTotal)+Number(adminAddedTotal)).toFixed(2)}. Tap Bills to view it.`,'monthly_bill_published',{month,year,bill_id:data.id});return mapBill(data);}
