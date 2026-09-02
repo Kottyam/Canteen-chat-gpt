@@ -37,6 +37,33 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Configure Android system-bar insets
+        run: |
+          set -e
+          mkdir -p android/app/src/main/java/com/gocanteen/app
+          cat > android/app/src/main/java/com/gocanteen/app/MainActivity.java <<'EOF'
+          package com.gocanteen.app;
+
+          import android.os.Bundle;
+          import android.graphics.Color;
+          import android.view.Window;
+          import androidx.core.view.WindowCompat;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  Window window = getWindow();
+                  WindowCompat.setDecorFitsSystemWindows(window, true);
+                  window.setStatusBarColor(Color.WHITE);
+                  window.setNavigationBarColor(Color.WHITE);
+                  WindowCompat.getInsetsController(window, window.getDecorView()).setAppearanceLightStatusBars(true);
+                  WindowCompat.getInsetsController(window, window.getDecorView()).setAppearanceLightNavigationBars(true);
+              }
+          }
+          EOF
+
       - name: Remove Android system splash icon
         run: |
           set -e
