@@ -10,7 +10,7 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     env:
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PirI2jk8r0rm5r3drpYMqA_f2IvAphx
 
     steps:
       - name: Checkout
@@ -26,13 +26,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-
-      - name: Verify Supabase build configuration
-        run: |
-          if [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then
-            echo "VITE_SUPABASE_PUBLISHABLE_KEY repository secret is missing."
-            exit 1
-          fi
 
       - name: Install dependencies
         run: npm install
