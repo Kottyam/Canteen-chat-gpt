@@ -2,6 +2,7 @@ import React, { createContext, useContext, ReactNode, useEffect, useRef, useStat
 import { User, Order, Prices, Status, MenuItem, DailyMenuItem } from '../types';
 import { ADMIN_USER_ID, DEFAULT_ADMIN_PASSWORD } from '../constants';
 import { loadSupabaseData, upsertOrder, saveMenuItem, saveHoliday, removeHoliday } from '../services/supabaseSync';
+import { notifyEmployee } from '../services/notifications';
 import { supabase, supabaseEnabled } from '../supabase';
 
 interface DataContextType {
@@ -148,6 +149,17 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const addHoliday = async (date: string) => {
     await saveHoliday(date);
     setHolidays(prev => prev.includes(date) ? prev : [...prev, date]);
+    if (supabaseEnabled && supabase) {
+      const employees = users.filter(u => u.role === 'employee' && u.status !== 'blocked' && u.status !== 'deleted');
+      const formattedDate = new Date(`${date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+      await Promise.all(employees.map(employee => notifyEmployee(
+        employee.id,
+        'Holiday Declared',
+        `${formattedDate} has been declared as a holiday.`,
+        'holiday_declared',
+        { holiday_date: date }
+      )));
+    }
   };
   const deleteHoliday = async (date: string) => {
     await removeHoliday(date);
