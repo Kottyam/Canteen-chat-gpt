@@ -1,0 +1,29 @@
+import React, { useEffect, useState } from 'react';
+import { loadPublishedBills, MonthlyBill } from '../../services/monthlyBills';
+import { getMonthName } from '../../utils/helpers';
+
+const Bills: React.FC = () => {
+  const [bills, setBills] = useState<MonthlyBill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<MonthlyBill | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try { setBills(await loadPublishedBills()); }
+    catch (error) { console.warn('Could not load published bills.', error); setBills([]); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return <section className="w-full min-w-0">
+    <div className="mb-5"><h2 className="text-2xl font-bold text-gray-800">Monthly Bills</h2><p className="mt-1 text-sm text-gray-500">Bills appear here only after the Admin publishes them.</p></div>
+    {loading ? <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">Loading bills…</p> : bills.length === 0 ? <p className="rounded-lg border bg-gray-50 p-5 text-sm text-gray-500">No bill published yet.</p> : <div className="space-y-3">{bills.map(bill => <button key={bill.id} type="button" onClick={() => setSelected(bill)} className="flex w-full min-w-0 items-center justify-between gap-4 rounded-xl border bg-white p-4 text-left shadow-sm hover:bg-gray-50"><span className="min-w-0"><span className="block font-bold text-gray-800">{getMonthName(bill.bill_month - 1)} {bill.bill_year}</span><span className="mt-1 block text-sm text-primary-700">Published</span></span><span className="shrink-0 text-lg font-bold text-gray-900">₹{bill.total.toFixed(2)}</span></button>)}</div>}
+    {selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelected(null)}><div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}><div className="flex items-center justify-between"><h3 className="text-xl font-bold">{getMonthName(selected.bill_month - 1)} {selected.bill_year} Bill</h3><button type="button" onClick={() => setSelected(null)} className="rounded-lg px-3 py-2 text-gray-500">✕</button></div><div className="mt-5 space-y-3 rounded-xl bg-gray-50 p-4"><div className="flex justify-between"><span>Food Orders</span><span className="font-semibold">₹{selected.food_total.toFixed(2)}</span></div><div className="flex justify-between"><span>Admin Added</span><span className="font-semibold">₹{selected.admin_added_total.toFixed(2)}</span></div><div className="flex justify-between border-t pt-3 font-bold"><span>Total</span><span>₹{selected.total.toFixed(2)}</span></div></div><p className="mt-4 text-xs text-gray-500">Published {selected.published_at ? new Date(selected.published_at).toLocaleString() : ''}</p></div></div>}
+  </section>;
+};
+export default Bills;
