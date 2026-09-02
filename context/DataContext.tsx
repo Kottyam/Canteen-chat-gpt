@@ -2,40 +2,12 @@ import React, { createContext, useContext, ReactNode, useEffect, useRef, useStat
 import { User, Order, Prices, Status, MenuItem, DailyMenuItem } from '../types';
 import { ADMIN_USER_ID, DEFAULT_ADMIN_PASSWORD } from '../constants';
 import { loadSupabaseData, upsertOrder, saveMenuItem, saveHoliday, removeHoliday } from '../services/supabaseSync';
-import { notifyEmployee } from '../services/notifications';
+import { notifyEmployeeByCode } from '../services/notifications';
 import { supabase, supabaseEnabled } from '../supabase';
 
-interface DataContextType {
-  users: User[];
-  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
-  orders: Order[];
-  setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
-  prices: Prices;
-  setPrices: React.Dispatch<React.SetStateAction<Prices>>;
-  menuItems: MenuItem[];
-  setMenuItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
-  dailyMenus: DailyMenuItem[];
-  setDailyMenus: React.Dispatch<React.SetStateAction<DailyMenuItem[]>>;
-  holidays: string[];
-  setHolidays: React.Dispatch<React.SetStateAction<string[]>>;
-  addHoliday: (date: string) => Promise<void>;
-  deleteHoliday: (date: string) => Promise<void>;
-  cloudBackupEnabled: boolean;
-  cloudSyncing: boolean;
-}
-
+interface DataContextType { users: User[]; setUsers: React.Dispatch<React.SetStateAction<User[]>>; orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; prices: Prices; setPrices: React.Dispatch<React.SetStateAction<Prices>>; menuItems: MenuItem[]; setMenuItems: React.Dispatch<React.SetStateAction<MenuItem[]>>; dailyMenus: DailyMenuItem[]; setDailyMenus: React.Dispatch<React.SetStateAction<DailyMenuItem[]>>; holidays: string[]; setHolidays: React.Dispatch<React.SetStateAction<string[]>>; addHoliday: (date: string) => Promise<void>; deleteHoliday: (date: string) => Promise<void>; cloudBackupEnabled: boolean; cloudSyncing: boolean; }
 const DataContext = createContext<DataContextType | undefined>(undefined);
-
-const initialUsers: User[] = [{
-  id: ADMIN_USER_ID,
-  name: 'GoCanteen Administrator',
-  mobile: '',
-  password: DEFAULT_ADMIN_PASSWORD,
-  role: 'admin',
-  status: 'active' as Status,
-  isFirstLogin: false,
-}];
-
+const initialUsers: User[] = [{ id: ADMIN_USER_ID, name: 'GoCanteen Administrator', mobile: '', password: DEFAULT_ADMIN_PASSWORD, role: 'admin', status: 'active' as Status, isFirstLogin: false }];
 const initialPrices: Prices = { morningTea: 8, lunchMeals: 40, lunchEgg: 10, lunchFishMeat: 25, eveningTea: 8 };
 const initialMenuItems: MenuItem[] = [
   { itemCode: 'morningTea', itemName: 'Morning Tea', unitPrice: 8, active: true },
@@ -44,142 +16,15 @@ const initialMenuItems: MenuItem[] = [
   { itemCode: 'lunchFishMeat', itemName: 'Lunch: Fish/Meat (add-on)', unitPrice: 25, active: true },
   { itemCode: 'eveningTea', itemName: 'Evening Tea', unitPrice: 8, active: true },
 ];
-
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [users, setUsers] = useState<User[]>(initialUsers);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [prices, setPrices] = useState<Prices>(initialPrices);
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(initialMenuItems);
-  const [dailyMenus, setDailyMenus] = useState<DailyMenuItem[]>([]);
-  const [holidays, setHolidays] = useState<string[]>([]);
-  const [cloudSyncing, setCloudSyncing] = useState(false);
-
-  const hydrated = useRef(false);
-  const hydrating = useRef(false);
-  const syncInFlight = useRef(false);
-  const refreshRequested = useRef(false);
-  const timer = useRef<number | undefined>(undefined);
-
-  const hydrate = useCallback(async () => {
-    if (!supabaseEnabled) {
-      hydrated.current = true;
-      return;
-    }
-    if (syncInFlight.current) {
-      refreshRequested.current = true;
-      return;
-    }
-    try {
-      hydrating.current = true;
-      const cloud = await loadSupabaseData();
-      if (!cloud) return;
-      setUsers(prev => {
-        const map = new Map(prev.map(u => [u.id, u]));
-        cloud.users.forEach(u => map.set(u.id, { ...(map.get(u.id) || u), ...u }));
-        return Array.from(map.values());
-      });
-      setOrders(cloud.orders || []);
-      setPrices(cloud.prices || initialPrices);
-      setMenuItems(cloud.menuItems || []);
-      setDailyMenus(cloud.dailyMenus || []);
-      setHolidays(cloud.holidays || []);
-    } catch (e) {
-      console.warn('Supabase load failed; keeping current state.', e);
-    } finally {
-      hydrated.current = true;
-    }
-  }, []);
-
+  const [users, setUsers] = useState<User[]>(initialUsers); const [orders, setOrders] = useState<Order[]>([]); const [prices, setPrices] = useState<Prices>(initialPrices); const [menuItems, setMenuItems] = useState<MenuItem[]>(initialMenuItems); const [dailyMenus, setDailyMenus] = useState<DailyMenuItem[]>([]); const [holidays, setHolidays] = useState<string[]>([]); const [cloudSyncing, setCloudSyncing] = useState(false);
+  const hydrated = useRef(false); const hydrating = useRef(false); const syncInFlight = useRef(false); const refreshRequested = useRef(false); const timer = useRef<number | undefined>(undefined);
+  const hydrate = useCallback(async () => { if (!supabaseEnabled) { hydrated.current = true; return; } if (syncInFlight.current) { refreshRequested.current = true; return; } try { hydrating.current = true; const cloud = await loadSupabaseData(); if (!cloud) return; setUsers(prev => { const map = new Map(prev.map(u => [u.id, u])); cloud.users.forEach(u => map.set(u.id, { ...(map.get(u.id) || u), ...u })); return Array.from(map.values()); }); setOrders(cloud.orders || []); setPrices(cloud.prices || initialPrices); setMenuItems(cloud.menuItems || []); setDailyMenus(cloud.dailyMenus || []); setHolidays(cloud.holidays || []); } catch (e) { console.warn('Supabase load failed; keeping current state.', e); } finally { hydrated.current = true; } }, []);
   useEffect(() => { void hydrate(); }, [hydrate]);
-
-  useEffect(() => {
-    if (!supabaseEnabled) return;
-    const refresh = () => { void hydrate(); };
-    const interval = window.setInterval(refresh, 15000);
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined;
-    if (supabase) {
-      channel = supabase
-        .channel('gocanteen-data-sync')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, refresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'menu_prices' }, refresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_menu' }, refresh)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'holidays' }, refresh)
-        .subscribe();
-    }
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-      if (channel) void channel.unsubscribe();
-    };
-  }, [hydrate]);
-
-  useEffect(() => {
-    if (!supabaseEnabled || !hydrated.current) return;
-    if (hydrating.current) {
-      hydrating.current = false;
-      return;
-    }
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(async () => {
-      if (syncInFlight.current) return;
-      syncInFlight.current = true;
-      setCloudSyncing(true);
-      try {
-        for (const order of orders) await upsertOrder(order, prices);
-        for (const item of menuItems) await saveMenuItem(item);
-      } catch (e) {
-        console.warn('Background Supabase sync failed.', e);
-      } finally {
-        syncInFlight.current = false;
-        setCloudSyncing(false);
-        if (refreshRequested.current) {
-          refreshRequested.current = false;
-          void hydrate();
-        }
-      }
-    }, 500);
-    return () => window.clearTimeout(timer.current);
-  }, [orders, prices, menuItems, hydrate]);
-
-  const addHoliday = async (date: string) => {
-    await saveHoliday(date);
-    setHolidays(prev => prev.includes(date) ? prev : [...prev, date]);
-    if (supabaseEnabled && supabase) {
-      const employees = users.filter(u => u.role === 'employee' && u.status !== 'blocked' && u.status !== 'deleted');
-      const formattedDate = new Date(`${date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
-      await Promise.all(employees.map(employee => notifyEmployee(
-        employee.id,
-        'Holiday Declared',
-        `${formattedDate} has been declared as a holiday.`,
-        'holiday_declared',
-        { holiday_date: date }
-      )));
-    }
-  };
-  const deleteHoliday = async (date: string) => {
-    await removeHoliday(date);
-    setHolidays(prev => prev.filter(d => d !== date));
-  };
-
-  return (
-    <DataContext.Provider value={{
-      users, setUsers, orders, setOrders, prices, setPrices,
-      menuItems, setMenuItems, dailyMenus, setDailyMenus,
-      holidays, setHolidays, addHoliday, deleteHoliday,
-      cloudBackupEnabled: supabaseEnabled, cloudSyncing,
-    }}>
-      {children}
-    </DataContext.Provider>
-  );
+  useEffect(() => { if (!supabaseEnabled) return; const refresh = () => { void hydrate(); }; const interval = window.setInterval(refresh, 15000); window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', refresh); let channel: ReturnType<NonNullable<typeof supabase>['channel']> | undefined; if (supabase) { channel = supabase.channel('gocanteen-data-sync').on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, refresh).on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refresh).on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, refresh).on('postgres_changes', { event: '*', schema: 'public', table: 'menu_prices' }, refresh).on('postgres_changes', { event: '*', schema: 'public', table: 'daily_menu' }, refresh).on('postgres_changes', { event: '*', schema: 'public', table: 'holidays' }, refresh).subscribe(); } return () => { window.clearInterval(interval); window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); if (channel) void channel.unsubscribe(); }; }, [hydrate]);
+  useEffect(() => { if (!supabaseEnabled || !hydrated.current) return; if (hydrating.current) { hydrating.current = false; return; } window.clearTimeout(timer.current); timer.current = window.setTimeout(async () => { if (syncInFlight.current) return; syncInFlight.current = true; setCloudSyncing(true); try { for (const order of orders) await upsertOrder(order, prices); for (const item of menuItems) await saveMenuItem(item); } catch (e) { console.warn('Background Supabase sync failed.', e); } finally { syncInFlight.current = false; setCloudSyncing(false); if (refreshRequested.current) { refreshRequested.current = false; void hydrate(); } } }, 500); return () => window.clearTimeout(timer.current); }, [orders, prices, menuItems, hydrate]);
+  const addHoliday = async (date: string) => { await saveHoliday(date); setHolidays(prev => prev.includes(date) ? prev : [...prev, date]); if (supabaseEnabled && supabase) { const employees = users.filter(u => u.role === 'employee' && u.status !== 'blocked' && u.status !== 'deleted'); const formattedDate = new Date(`${date}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }); await Promise.all(employees.map(employee => notifyEmployeeByCode(employee.id, 'Holiday Declared', `${formattedDate} has been declared as a holiday.`, 'holiday_declared', { holiday_date: date }))); } };
+  const deleteHoliday = async (date: string) => { await removeHoliday(date); setHolidays(prev => prev.filter(d => d !== date)); };
+  return <DataContext.Provider value={{ users, setUsers, orders, setOrders, prices, setPrices, menuItems, setMenuItems, dailyMenus, setDailyMenus, holidays, setHolidays, addHoliday, deleteHoliday, cloudBackupEnabled: supabaseEnabled, cloudSyncing }}>{children}</DataContext.Provider>;
 };
-
-export const useData = () => {
-  const context = useContext(DataContext);
-  if (!context) throw new Error('useData must be used within a DataProvider');
-  return context;
-};
+export const useData = () => { const context = useContext(DataContext); if (!context) throw new Error('useData must be used within a DataProvider'); return context; };
