@@ -1,56 +1,5 @@
 import React,{createContext,useContext,useState,useEffect,useCallback,ReactNode}from'react';
-import{User}from'../types';
-import{supabase,supabaseEnabled,internalEmailForLogin}from'../supabase';
-import{resetEmployeePassword}from'../services/supabaseSync';
-import{DEFAULT_EMPLOYEE_PASSWORD}from'../constants';
-
+import{User}from'../types';import{supabase,supabaseEnabled,internalEmailForLogin}from'../supabase';import{resetEmployeePassword}from'../services/supabaseSync';import{DEFAULT_EMPLOYEE_PASSWORD}from'../constants';
 interface AuthContextType{user:User|null;login:(user:User)=>void;loginWithCredentials:(userId:string,password:string,localUsers:User[])=>Promise<{ok:boolean;error?:string}>;logout:()=>void;updateUser:(updatedUser:User)=>void;loading:boolean;}
-const AuthContext=createContext<AuthContextType|undefined>(undefined);
-const GENERIC_LOGIN_ERROR='Employee ID or password is incorrect.';
-
-export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
- const[user,setUser]=useState<User|null>(null);const[loading,setLoading]=useState(true);
- const clearInvalidSession=useCallback(async()=>{sessionStorage.removeItem('canteen_user');setUser(null);if(supabaseEnabled&&supabase){try{await supabase.auth.signOut()}catch{}}},[]);
- const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null>=>{
-   if(!supabase||!authUser?.id)return null;
-   const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,status,is_first_login').eq('id',authUser.id).maybeSingle();
-   if(error||!profile)return null;
-   const employeeMatch=!requestedId||(String(profile.employee_code||'')===requestedId||String(profile.sr_number||'')===requestedId);
-   if(!employeeMatch||String(profile.status||'')!=='active'||!['employee','admin'].includes(String(profile.role||'')))return null;
-   return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,status:profile.status,isFirstLogin:Boolean(profile.is_first_login)};
- },[]);
- useEffect(()=>{let alive=true;
-   const restore=async()=>{
-     if(!supabaseEnabled||!supabase){const stored=sessionStorage.getItem('canteen_user');if(stored)try{if(alive)setUser(JSON.parse(stored))}catch{sessionStorage.removeItem('canteen_user')}if(alive)setLoading(false);return}
-     const{data:{session}}=await supabase.auth.getSession();
-     if(!alive)return;
-     if(session?.user){const resolved=await resolveAuthenticatedProfile(session.user);if(alive&&resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else if(alive){await clearInvalidSession()}}
-     else{sessionStorage.removeItem('canteen_user');setUser(null)}
-     if(alive)setLoading(false);
-   };
-   void restore();
-   if(supabase){const{data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{void(async()=>{if(!alive)return;if(session?.user){const resolved=await resolveAuthenticatedProfile(session.user);if(resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else{await clearInvalidSession()}}else{sessionStorage.removeItem('canteen_user');setUser(null)}})()});return()=>{alive=false;subscription.unsubscribe()}}
-   return()=>{alive=false};
- },[clearInvalidSession,resolveAuthenticatedProfile]);
- const login=useCallback((u:User)=>{sessionStorage.setItem('canteen_user',JSON.stringify(u));setUser(u)},[]);
- const loginWithCredentials=useCallback(async(userId:string,password:string,localUsers:User[])=>{
-   const local=localUsers.find(u=>u.id===userId);
-   if(local&&(local.status==='blocked'||local.status==='deleted'))return{ok:false,error:GENERIC_LOGIN_ERROR};
-   if(supabaseEnabled&&supabase){
-     let{data,error}=await supabase.auth.signInWithPassword({email:internalEmailForLogin(userId),password});
-     if(error&&local?.role!=='admin'&&password===DEFAULT_EMPLOYEE_PASSWORD){try{await resetEmployeePassword(userId,DEFAULT_EMPLOYEE_PASSWORD);const retry=await supabase.auth.signInWithPassword({email:internalEmailForLogin(userId),password:DEFAULT_EMPLOYEE_PASSWORD});data=retry.data;error=retry.error}catch{}}
-     if(!error&&data.user){
-       const resolved=await resolveAuthenticatedProfile(data.user,userId);
-       if(!resolved){await clearInvalidSession();return{ok:false,error:GENERIC_LOGIN_ERROR};}
-       login(resolved);return{ok:true};
-     }
-     return{ok:false,error:GENERIC_LOGIN_ERROR};
-   }
-   if(!local||local.password!==password)return{ok:false,error:GENERIC_LOGIN_ERROR};
-   login(local);return{ok:true};
- },[clearInvalidSession,login,resolveAuthenticatedProfile]);
- const logout=useCallback(async()=>{if(supabaseEnabled&&supabase)await supabase.auth.signOut();sessionStorage.removeItem('canteen_user');setUser(null)},[]);
- const updateUser=useCallback((u:User)=>{sessionStorage.setItem('canteen_user',JSON.stringify(u));setUser(u)},[]);
- return <AuthContext.Provider value={{user,login,loginWithCredentials,logout,updateUser,loading}}>{children}</AuthContext.Provider>;
-};
-export const useAuth=()=>{const context=useContext(AuthContext);if(!context)throw new Error('useAuth must be used within AuthProvider');return context};
+const AuthContext=createContext<AuthContextType|undefined>(undefined);const GENERIC_LOGIN_ERROR='Employee ID or password is incorrect.';
+export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{const[user,setUser]=useState<User|null>(null);const[loading,setLoading]=useState(true);const clearInvalidSession=useCallback(async()=>{sessionStorage.removeItem('canteen_user');setUser(null);if(supabaseEnabled&&supabase){try{await supabase.auth.signOut()}catch{}}},[]);const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null>=>{if(!supabase||!authUser?.id)return null;const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,status,is_first_login').eq('id',authUser.id).maybeSingle();if(error||!profile)return null;const employeeMatch=!requestedId||(String(profile.employee_code||'')===requestedId||String(profile.sr_number||'')===requestedId);if(!employeeMatch||String(profile.status||'')!=='active'||!['employee','admin'].includes(String(profile.role||'')))return null;return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,status:profile.status,isFirstLogin:Boolean(profile.is_first_login)}},[]);useEffect(()=>{let alive=true;const restore=async()=>{if(!supabaseEnabled||!supabase){const stored=sessionStorage.getItem('canteen_user');if(stored)try{if(alive)setUser(JSON.parse(stored))}catch{sessionStorage.removeItem('canteen_user')}if(alive)setLoading(false);return}const{data:{session}}=await supabase.auth.getSession();if(!alive)return;if(session?.user){const resolved=await resolveAuthenticatedProfile(session.user);if(alive&&resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else if(alive){await clearInvalidSession()}}else{sessionStorage.removeItem('canteen_user');setUser(null)}if(alive)setLoading(false)};void restore();if(supabase){const{data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{void(async()=>{if(!alive)return;if(session?.user){const resolved=await resolveAuthenticatedProfile(session.user);if(resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else{await clearInvalidSession()}}else{sessionStorage.removeItem('canteen_user');setUser(null)}})()});return()=>{alive=false;subscription.unsubscribe()}}return()=>{alive=false}},[clearInvalidSession,resolveAuthenticatedProfile]);const login=useCallback((u:User)=>{sessionStorage.setItem('canteen_user',JSON.stringify(u));setUser(u)},[]);const loginWithCredentials=useCallback(async(userId:string,password:string,localUsers:User[])=>{const local=localUsers.find(u=>u.id===userId);if(local&&(local.status==='blocked'||local.status==='deleted'))return{ok:false,error:GENERIC_LOGIN_ERROR};if(supabaseEnabled&&supabase){let{data,error}=await supabase.auth.signInWithPassword({email:internalEmailForLogin(userId),password});if(error&&local?.role==='employee'&&local.status==='active'&&password===DEFAULT_EMPLOYEE_PASSWORD){try{await resetEmployeePassword(userId,DEFAULT_EMPLOYEE_PASSWORD);const retry=await supabase.auth.signInWithPassword({email:internalEmailForLogin(userId),password:DEFAULT_EMPLOYEE_PASSWORD});data=retry.data;error=retry.error}catch{}}if(!error&&data.user){const resolved=await resolveAuthenticatedProfile(data.user,userId);if(!resolved){await clearInvalidSession();return{ok:false,error:GENERIC_LOGIN_ERROR}}login(resolved);return{ok:true}}return{ok:false,error:GENERIC_LOGIN_ERROR}}if(!local||local.password!==password)return{ok:false,error:GENERIC_LOGIN_ERROR};login(local);return{ok:true}},[clearInvalidSession,login,resolveAuthenticatedProfile]);const logout=useCallback(async()=>{if(supabaseEnabled&&supabase)await supabase.auth.signOut();sessionStorage.removeItem('canteen_user');setUser(null)},[]);const updateUser=useCallback((u:User)=>{sessionStorage.setItem('canteen_user',JSON.stringify(u));setUser(u)},[]);return <AuthContext.Provider value={{user,login,loginWithCredentials,logout,updateUser,loading}}>{children}</AuthContext.Provider>};export const useAuth=()=>{const context=useContext(AuthContext);if(!context)throw new Error('useAuth must be used within AuthProvider');return context};
