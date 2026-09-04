@@ -18,6 +18,9 @@ export interface BillPayment {
   payment_reference?: string | null;
   covered_through?: string | null;
   request_sequence?: number | null;
+  upi_name?: string | null;
+  upi_id?: string | null;
+  upi_number?: string | null;
 }
 
 export interface BillPaymentSummary {
@@ -40,13 +43,7 @@ export async function loadBillPaymentSummary(billId: string): Promise<BillPaymen
   const { data, error } = await supabase.rpc('get_bill_payment_summary', { p_bill_id: billId });
   if (error) throw error;
   const row = Array.isArray(data) ? data[0] : data;
-  return {
-    current_total: Number(row?.current_total || 0),
-    confirmed_received: Number(row?.confirmed_received || 0),
-    pending_amount: Number(row?.pending_amount || 0),
-    outstanding_balance: Number(row?.outstanding_balance || 0),
-    current_payment_id: row?.current_payment_id || null,
-  };
+  return { current_total: Number(row?.current_total || 0), confirmed_received: Number(row?.confirmed_received || 0), pending_amount: Number(row?.pending_amount || 0), outstanding_balance: Number(row?.outstanding_balance || 0), current_payment_id: row?.current_payment_id || null };
 }
 
 export async function confirmBillPayment(paymentId: string) {
@@ -67,9 +64,7 @@ export async function loadPaymentsForMonth(month: number, year: number) {
   return bills.flatMap((b: any) => payments.filter((p: any) => p.bill_id === b.id).map((p: any) => ({ ...p, monthly_bills: b })));
 }
 
-export async function approveBillPayment(paymentId: string) {
-  return setBillPaymentStatus(paymentId, 'paid');
-}
+export async function approveBillPayment(paymentId: string) { return setBillPaymentStatus(paymentId, 'paid'); }
 
 export async function setBillPaymentStatus(paymentId: string, status: 'paid' | 'not_received') {
   if (!supabaseEnabled || !supabase) throw new Error('Supabase is not enabled.');
@@ -78,9 +73,6 @@ export async function setBillPaymentStatus(paymentId: string, status: 'paid' | '
   return data;
 }
 
-// UPI transaction references are constrained to a compact alphanumeric value.
-// Preserve an existing batch reference when it can be represented safely;
-// otherwise derive a deterministic reference from the unique payment id.
 function buildUpiTransactionReference(bill: MonthlyBill, payment: BillPayment) {
   const existing = (payment.payment_reference || '').replace(/[^A-Za-z0-9]/g, '');
   if (existing.length > 0 && existing.length <= 35) return existing;
@@ -95,81 +87,40 @@ function buildUpiTransactionNote(bill: MonthlyBill, payment: BillPayment) {
   return `GoCanteen ${monthName} ${bill.bill_year} Bill${batch}`.slice(0, 50);
 }
 
-function encodeUpiQueryValue(value: string) {
-  // encodeURIComponent produces RFC-compatible query values and uses %20 for spaces.
-  // The resulting value is encoded exactly once; it must not be encoded again.
-  return encodeURIComponent(value);
-}
+function encodeUpiQueryValue(value: string) { return encodeURIComponent(value); }
 
 function validateUpiPayee(payee: string) {
   if (!payee) throw new Error('UPI payment details are not configured for this bill.');
-  if (/%(?:25|40|2B|26|3D|3F|23)/i.test(payee)) {
-    throw new Error('The published UPI ID contains encoded characters and cannot be used safely. Please publish a new payment request with the correct UPI ID.');
-  }
-  if (/[?#&=\s]/.test(payee) || !payee.includes('@')) {
-    throw new Error('The published UPI ID is malformed and cannot be used for payment.');
-  }
+  if (/%(?:25|40|2B|26|3D|3F|23)/i.test(payee)) throw new Error('The published UPI ID contains encoded characters and cannot be used safely. Please publish a new payment request with the correct UPI ID.');
+  if (/[?#&=\s]/.test(payee) || !payee.includes('@')) throw new Error('The published UPI ID is malformed and cannot be used for payment.');
 }
 
 function validateUpiIntent(url: string, payee: string, name: string, amount: number, reference: string, note: string) {
   if (!url.startsWith('upi://pay?')) throw new Error('Invalid UPI payment URI.');
-  if (url.includes('upi%3A%2F%2F') || url.includes('%2540') || url.includes('%2520')) {
-    throw new Error('The UPI payment URI is double-encoded and was blocked.');
-  }
-  if (url.includes('pa=' + encodeURIComponent(payee))) {
-    throw new Error('The UPI payee ID was encoded as a query value instead of being preserved in UPI URI form.');
-  }
+  if (url.includes('upi%3A%2F%2F') || url.includes('%2540') || url.includes('%2520')) throw new Error('The UPI payment URI is double-encoded and was blocked.');
+  if (url.includes('pa=' + encodeURIComponent(payee))) throw new Error('The UPI payee ID was encoded as a query value instead of being preserved in UPI URI form.');
   if (!url.includes(`pn=${encodeUpiQueryValue(name)}`)) throw new Error('The UPI payee name was not encoded correctly.');
   if (!url.includes(`am=${amount.toFixed(2)}`)) throw new Error('The UPI payment amount is not encoded correctly.');
-  if (!url.includes(`cu=INR`)) throw new Error('The UPI currency is invalid.');
+  if (!url.includes('cu=INR')) throw new Error('The UPI currency is invalid.');
   if (!url.includes(`tr=${reference}`)) throw new Error('The UPI transaction reference is invalid.');
   if (!url.includes(`tn=${encodeUpiQueryValue(note)}`)) throw new Error('The UPI payment note was not encoded correctly.');
 }
 
 function logUpiDiagnostics(url: string, payee: string, name: string, amount: number, reference: string, note: string) {
   if (!import.meta.env.DEV) return;
-  const query = url.slice('upi://pay?'.length);
-  console.debug('[GoCanteen] UPI diagnostics', {
-    scheme: 'upi',
-    pa: payee,
-    pn: name,
-    am: amount.toFixed(2),
-    cu: 'INR',
-    tr: reference,
-    tn: note,
-    uri: url,
-    suspicious: {
-      doubleEncodedPercent: /%25/i.test(url),
-      encodedAt: /%40/i.test(url),
-      plusCharacter: url.includes('+'),
-      encodedEntireUri: /upi%3A%2F%2F/i.test(url),
-      queryParameterCount: query ? query.split('&').length : 0,
-    },
-  });
+  console.debug('[GoCanteen] UPI diagnostics', { scheme: 'upi', pa: payee, pn: name, am: amount.toFixed(2), cu: 'INR', tr: reference, tn: note, uri: url, suspicious: { doubleEncodedPercent: /%25/i.test(url), encodedAt: /%40/i.test(url), plusCharacter: url.includes('+'), encodedEntireUri: /upi%3A%2F%2F/i.test(url) } });
 }
 
 export function buildUpiIntent(bill: MonthlyBill, payment: BillPayment) {
   const payee = (bill.upi_id || '').trim();
   const name = (bill.upi_name || '').trim();
   const amount = Number(payment.amount);
-
   validateUpiPayee(payee);
   if (!name) throw new Error('UPI payee name is not configured for this bill.');
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('No payment amount is available for this request.');
-
   const ref = buildUpiTransactionReference(bill, payment);
   const note = buildUpiTransactionNote(bill, payment);
-
-  // VPA deliberately uses encodeURI so the required @ separator remains part of pa.
-  // Other query values use encodeURIComponent, which encodes spaces as %20 (not +).
-  const pa = encodeURI(payee);
-  const pn = encodeUpiQueryValue(name);
-  const am = amount.toFixed(2);
-  const cu = 'INR';
-  const tr = encodeUpiQueryValue(ref);
-  const tn = encodeUpiQueryValue(note);
-  const url = `upi://pay?pa=${pa}&pn=${pn}&am=${am}&cu=${cu}&tr=${tr}&tn=${tn}`;
-
+  const url = `upi://pay?pa=${encodeURI(payee)}&pn=${encodeUpiQueryValue(name)}&am=${amount.toFixed(2)}&cu=INR&tr=${encodeUpiQueryValue(ref)}&tn=${encodeUpiQueryValue(note)}`;
   validateUpiIntent(url, payee, name, amount, ref, note);
   logUpiDiagnostics(url, payee, name, amount, ref, note);
   return url;
