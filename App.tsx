@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { DataProvider } from './context/DataContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/auth/Login';
+import CanteenOnboarding from './components/auth/CanteenOnboarding';
 import EmployeeDashboard from './components/employee/EmployeeDashboard';
 import AdminDashboard from './components/admin/AdminDashboard';
 import InitialPasswordChange from './components/auth/InitialPasswordChange';
@@ -18,6 +19,7 @@ const AppContent: React.FC = () => {
 
     if (loading) return <SplashScreen />;
     if (!user) return <Login />;
+    if (user.role === 'admin' && user.needsCanteenSetup) return <CanteenOnboarding />;
     if (user.role === 'employee' && user.isFirstLogin) return <InitialPasswordChange />;
     if (user.role === 'employee') return <EmployeeDashboard />;
     if (user.role === 'admin') return <AdminDashboard />;

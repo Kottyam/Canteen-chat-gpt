@@ -1,0 +1,105 @@
+-- Multi-canteen tenancy, Google Admin onboarding, tenant RLS and secure Member Default Password.
+-- Existing rows are linked to the existing active Admin's canteen; no destructive data migration is performed.
+create table if not exists public.canteens(id uuid primary key default gen_random_uuid(),name text not null check(length(trim(name)) between 1 and 120),owner_id uuid not null references auth.users(id) on delete restrict,created_at timestamptz not null default now(),updated_at timestamptz not null default now());
+create unique index if not exists canteens_owner_id_uidx on public.canteens(owner_id);
+alter table public.profiles add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.profiles add column if not exists onboarding_completed boolean not null default true;
+insert into public.canteens(id,name,owner_id) select gen_random_uuid(),'GoCanteen',p.id from public.profiles p where p.role='admin' and p.status='active' and not exists(select 1 from public.canteens c where c.owner_id=p.id) limit 1;
+update public.profiles p set canteen_id=c.id from public.canteens c where c.owner_id=p.id and p.canteen_id is null;
+
+alter table public.orders add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.order_items add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.menu_prices add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.daily_menu add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.holidays add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.order_window_settings add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.payment_settings add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.expenses add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.employee_adjustments add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.monthly_bills add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.bill_payments add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.payments add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+alter table public.notifications add column if not exists canteen_id uuid references public.canteens(id) on delete restrict;
+update public.orders o set canteen_id=p.canteen_id from public.profiles p where p.id=o.employee_id and o.canteen_id is null;
+update public.order_items oi set canteen_id=o.canteen_id from public.orders o where o.id=oi.order_id and oi.canteen_id is null;
+update public.monthly_bills b set canteen_id=p.canteen_id from public.profiles p where p.id=b.employee_id and b.canteen_id is null;
+update public.bill_payments bp set canteen_id=b.canteen_id from public.monthly_bills b where b.id=bp.bill_id and bp.canteen_id is null;
+update public.payments p set canteen_id=x.canteen_id from public.profiles x where x.id=p.employee_id and p.canteen_id is null;
+update public.employee_adjustments a set canteen_id=p.canteen_id from public.profiles p where p.id=a.employee_id and a.canteen_id is null;
+update public.notifications n set canteen_id=p.canteen_id from public.profiles p where p.id=n.recipient_id and n.canteen_id is null;
+update public.menu_prices set canteen_id=(select id from public.canteens order by created_at limit 1) where canteen_id is null;
+alter table public.daily_menu disable trigger user;
+update public.daily_menu set canteen_id=(select id from public.canteens order by created_at limit 1) where canteen_id is null;
+alter table public.daily_menu enable trigger user;
+update public.holidays set canteen_id=(select id from public.canteens order by created_at limit 1) where canteen_id is null;
+update public.order_window_settings set canteen_id=(select id from public.canteens order by created_at limit 1) where canteen_id is null;
+update public.payment_settings set canteen_id=(select id from public.canteens order by created_at limit 1) where canteen_id is null;
+update public.expenses set canteen_id=(select id from public.canteens order by created_at limit 1) where canteen_id is null;
+
+alter table public.order_items drop constraint if exists order_items_item_code_fkey;
+alter table public.menu_prices drop constraint if exists menu_prices_pkey;
+alter table public.menu_prices add primary key(canteen_id,item_code);
+alter table public.daily_menu drop constraint if exists daily_menu_pkey;
+alter table public.daily_menu add primary key(canteen_id,menu_date,item_code);
+alter table public.holidays drop constraint if exists holidays_pkey;
+alter table public.holidays add primary key(canteen_id,holiday_date);
+alter table public.order_window_settings drop constraint if exists order_window_settings_pkey;
+alter table public.order_window_settings add unique(canteen_id);
+alter table public.payment_settings drop constraint if exists payment_settings_pkey;
+alter table public.payment_settings add unique(canteen_id);
+
+create or replace function public.current_canteen_id() returns uuid language sql stable security definer set search_path=public as $$select p.canteen_id from public.profiles p where p.id=(select auth.uid()) and p.status='active' limit 1$$;
+revoke all on function public.current_canteen_id() from public;grant execute on function public.current_canteen_id() to authenticated;
+create or replace function public.set_canteen_id_from_context() returns trigger language plpgsql security definer set search_path=public as $$begin if new.canteen_id is null then if tg_table_name='orders' then select p.canteen_id into new.canteen_id from public.profiles p where p.id=new.employee_id; elsif tg_table_name='order_items' then select o.canteen_id into new.canteen_id from public.orders o where o.id=new.order_id; elsif tg_table_name='monthly_bills' then select p.canteen_id into new.canteen_id from public.profiles p where p.id=new.employee_id; elsif tg_table_name='bill_payments' then select b.canteen_id into new.canteen_id from public.monthly_bills b where b.id=new.bill_id; elsif tg_table_name='payments' then select p.canteen_id into new.canteen_id from public.profiles p where p.id=new.employee_id; elsif tg_table_name='employee_adjustments' then select p.canteen_id into new.canteen_id from public.profiles p where p.id=new.employee_id; elsif tg_table_name='notifications' then select p.canteen_id into new.canteen_id from public.profiles p where p.id=new.recipient_id; else new.canteen_id:=public.current_canteen_id();end if;end if;if new.canteen_id is null then raise exception 'Canteen could not be determined';end if;return new;end$$;
+revoke all on function public.set_canteen_id_from_context() from public;
+do $$declare t text;begin foreach t in array array['orders','order_items','menu_prices','daily_menu','holidays','order_window_settings','payment_settings','expenses','employee_adjustments','monthly_bills','bill_payments','payments','notifications'] loop execute format('drop trigger if exists set_canteen_id_trigger on public.%I',t);execute format('create trigger set_canteen_id_trigger before insert or update on public.%I for each row execute function public.set_canteen_id_from_context()',t);end loop;end$$;
+
+alter table public.canteens enable row level security;
+drop policy if exists canteens_owner_select on public.canteens;
+drop policy if exists canteens_owner_update on public.canteens;
+create policy canteens_owner_select on public.canteens for select to authenticated using(owner_id=(select auth.uid()) or public.current_canteen_id()=id);
+create policy canteens_owner_update on public.canteens for update to authenticated using(owner_id=(select auth.uid())) with check(owner_id=(select auth.uid()));
+
+do $$declare r record;begin for r in select tablename,policyname from pg_policies where schemaname='public' and tablename in('profiles','orders','order_items','menu_prices','daily_menu','holidays','order_window_settings','payment_settings','expenses','employee_adjustments','monthly_bills','bill_payments','payments','notifications') loop execute format('drop policy if exists %I on public.%I',r.policyname,r.tablename);end loop;end$$;
+create policy profiles_tenant on public.profiles for all to authenticated using(id=(select auth.uid()) or(public.is_admin_user() and canteen_id=public.current_canteen_id())) with check(id=(select auth.uid()) or(public.is_admin_user() and canteen_id=public.current_canteen_id()));
+create policy orders_admin_tenant on public.orders for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy orders_employee_tenant on public.orders for select to authenticated using(employee_id=(select auth.uid()) and status='active' and canteen_id=public.current_canteen_id());
+create policy orders_employee_write on public.orders for insert to authenticated with check(employee_id=(select auth.uid()) and canteen_id=public.current_canteen_id());
+create policy orders_employee_update on public.orders for update to authenticated using(employee_id=(select auth.uid()) and canteen_id=public.current_canteen_id()) with check(employee_id=(select auth.uid()) and canteen_id=public.current_canteen_id());
+create policy orders_employee_delete on public.orders for delete to authenticated using(employee_id=(select auth.uid()) and canteen_id=public.current_canteen_id());
+create policy order_items_admin_tenant on public.order_items for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy order_items_employee_tenant on public.order_items for all to authenticated using(exists(select 1 from public.orders o where o.id=order_items.order_id and o.employee_id=auth.uid() and o.canteen_id=public.current_canteen_id())) with check(exists(select 1 from public.orders o where o.id=order_items.order_id and o.employee_id=auth.uid() and o.canteen_id=public.current_canteen_id()));
+create policy menu_admin_tenant on public.menu_prices for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy menu_read_tenant on public.menu_prices for select to authenticated using(canteen_id=public.current_canteen_id());
+create policy daily_menu_admin_tenant on public.daily_menu for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy daily_menu_read_tenant on public.daily_menu for select to authenticated using(canteen_id=public.current_canteen_id());
+create policy holidays_admin_tenant on public.holidays for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy holidays_read_tenant on public.holidays for select to authenticated using(canteen_id=public.current_canteen_id());
+create policy window_admin_tenant on public.order_window_settings for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy window_read_tenant on public.order_window_settings for select to authenticated using(canteen_id=public.current_canteen_id());
+create policy payment_settings_admin_tenant on public.payment_settings for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy payment_settings_read_tenant on public.payment_settings for select to authenticated using(canteen_id=public.current_canteen_id());
+create policy expenses_admin_tenant on public.expenses for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy adjustments_admin_tenant on public.employee_adjustments for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy adjustments_employee_tenant on public.employee_adjustments for select to authenticated using(employee_id=auth.uid() and canteen_id=public.current_canteen_id());
+create policy bills_admin_tenant on public.monthly_bills for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy bills_employee_tenant on public.monthly_bills for select to authenticated using(employee_id=auth.uid() and published=true and canteen_id=public.current_canteen_id());
+create policy bill_payments_admin_tenant on public.bill_payments for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy bill_payments_employee_tenant on public.bill_payments for select to authenticated using(employee_id=auth.uid() and canteen_id=public.current_canteen_id());
+create policy bill_payments_employee_insert on public.bill_payments for insert to authenticated with check(employee_id=auth.uid() and canteen_id=public.current_canteen_id() and status='pending_verification');
+create policy payments_admin_tenant on public.payments for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy payments_employee_tenant on public.payments for select to authenticated using(employee_id=auth.uid() and canteen_id=public.current_canteen_id());
+create policy notifications_admin_tenant on public.notifications for all to authenticated using(public.is_admin_user() and canteen_id=public.current_canteen_id()) with check(public.is_admin_user() and canteen_id=public.current_canteen_id());
+create policy notifications_employee_tenant on public.notifications for select to authenticated using(recipient_id=auth.uid() and canteen_id=public.current_canteen_id());
+create policy notifications_employee_update on public.notifications for update to authenticated using(recipient_id=auth.uid() and canteen_id=public.current_canteen_id()) with check(recipient_id=auth.uid() and canteen_id=public.current_canteen_id());
+
+create or replace function public.ensure_google_admin() returns jsonb language plpgsql security definer set search_path=public,auth as $$declare v_uid uuid:=auth.uid();v_name text;v_canteen public.canteens;v_profile public.profiles;begin if v_uid is null then raise exception 'Authentication required';end if;select coalesce(raw_user_meta_data->>'full_name',raw_user_meta_data->>'name',split_part(email,'@',1)) into v_name from auth.users where id=v_uid;if not exists(select 1 from auth.users where id=v_uid and coalesce(raw_app_meta_data->>'provider','')='google') then raise exception 'Google authentication required';end if;select * into v_profile from public.profiles where id=v_uid;if v_profile.id is not null and v_profile.role='admin' and v_profile.status='active' and v_profile.canteen_id is not null then return jsonb_build_object('canteen_id',v_profile.canteen_id,'profile_id',v_uid,'existing',true,'needs_setup',not coalesce(v_profile.onboarding_completed,true),'canteen_name',(select name from public.canteens where id=v_profile.canteen_id));end if;if v_profile.id is not null and v_profile.role='employee' then raise exception 'This Google account is already linked to a Member account';end if;insert into public.canteens(name,owner_id) values(coalesce(nullif(trim(v_name),''),'My Canteen'),v_uid) returning * into v_canteen;insert into public.profiles(id,full_name,role,status,is_first_login,canteen_id,onboarding_completed) values(v_uid,v_name,'admin','active',false,v_canteen.id,false) on conflict(id) do update set full_name=excluded.full_name,role='admin',status='active',canteen_id=excluded.canteen_id,onboarding_completed=false;return jsonb_build_object('canteen_id',v_canteen.id,'profile_id',v_uid,'existing',false,'needs_setup',true,'canteen_name',v_canteen.name);end$$;
+revoke all on function public.ensure_google_admin() from public;grant execute on function public.ensure_google_admin() to authenticated;
+create or replace function public.complete_google_admin_onboarding(p_canteen_name text) returns jsonb language plpgsql security definer set search_path=public as $$declare v_uid uuid:=auth.uid();v_canteen_id uuid;v_name text:=trim(coalesce(p_canteen_name,''));begin if v_uid is null or not public.is_admin_user() then raise exception 'Admin authentication required';end if;if length(v_name)<1 or length(v_name)>120 then raise exception 'Canteen name must be between 1 and 120 characters';end if;select canteen_id into v_canteen_id from public.profiles where id=v_uid;update public.canteens set name=v_name,updated_at=now() where id=v_canteen_id and owner_id=v_uid;if not found then raise exception 'Canteen ownership could not be verified';end if;update public.profiles set onboarding_completed=true where id=v_uid;return jsonb_build_object('canteen_id',v_canteen_id,'canteen_name',v_name);end$$;
+revoke all on function public.complete_google_admin_onboarding(text) from public;grant execute on function public.complete_google_admin_onboarding(text) to authenticated;
+
+create or replace function public.get_member_default_password() returns text language plpgsql security definer set search_path=public as $$declare v_name text;v_secret text;begin if not public.is_admin_user() then raise exception 'Admin access required';end if;v_name:='gocanteen_member_default_password_'||public.current_canteen_id()::text;select decrypted_secret into v_secret from vault.decrypted_secrets where name=v_name limit 1;return coalesce(v_secret,'123456');end$$;
+revoke all on function public.get_member_default_password() from public;grant execute on function public.get_member_default_password() to authenticated;
+create or replace function public.set_member_default_password(p_password text) returns boolean language plpgsql security definer set search_path=public as $$declare v_id uuid;v_name text;begin if not public.is_admin_user() then raise exception 'Admin access required';end if;if length(coalesce(p_password,''))<6 or length(p_password)>128 then raise exception 'Password must be between 6 and 128 characters';end if;v_name:='gocanteen_member_default_password_'||public.current_canteen_id()::text;select id into v_id from vault.secrets where name=v_name limit 1;if v_id is null then perform vault.create_secret(p_password,v_name,'Encrypted GoCanteen Member Default Password');else perform vault.update_secret(v_id,p_password,v_name,'Encrypted GoCanteen Member Default Password');end if;return true;end$$;
+revoke all on function public.set_member_default_password(text) from public;grant execute on function public.set_member_default_password(text) to authenticated;
+notify pgrst,'reload schema';
