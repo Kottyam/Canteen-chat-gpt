@@ -13,7 +13,6 @@ const OrderForm:React.FC=()=>{
  const today=formatDate(now);
  const weekend=now.getDay()===0||now.getDay()===6;
  const holiday=weekend||holidays.includes(today);
- const localEmployeeOrder=user?orders.find(o=>o.employeeId===user.id&&o.date===today&&o.status!=='cancelled'&&(Object.keys(o.items||{}).some(c=>o.items[c])||o.orderSource==='admin')):undefined;
  const todayOrder=user?orders.find(o=>o.employeeId===user.id&&o.date===today&&o.status!=='cancelled'):undefined;
  const activeItems=useMemo(()=>menuItems.filter(i=>i.active&&!i.archived),[menuItems]);
  const[serverEmployeeOrder,setServerEmployeeOrder]=useState<Order|null>(null);
@@ -25,37 +24,40 @@ const OrderForm:React.FC=()=>{
  const[windowOpen,setWindowOpen]=useState(true);
 
  const fetchActiveEmployeeOrder=async():Promise<Order|null>=>{
-  if(!user||!supabase)return localEmployeeOrder||null;
-  try{
-   const{data:profile,error:pe}=await supabase.from('profiles').select('id').or(`employee_code.eq.${user.id},sr_number.eq.${user.id}`).maybeSingle();
-   if(pe)throw pe;
-   if(!profile)return null;
-   const{data,error}=await supabase.from('orders').select('id,employee_id,ordered_for,status,created_at,updated_at,cancelled_at,order_source,guest_name,guest_count,guest_total,order_items(item_code,item_name,quantity,unit_price,item_source,guest_name)').eq('employee_id',profile.id).eq('ordered_for',today).eq('status','active').order('created_at',{ascending:false});
-   if(error)throw error;
-   const row=(data||[]).find((o:any)=>(o.order_items||[]).some((i:any)=>i.item_source!=='guest'&&Number(i.quantity)>0));
-   if(!row)return null;
-   const employeeItems:OrderItems={},itemQuantities:Record<string,number>={},itemPrices:Record<string,number>={},itemNames:Record<string,string>={},guestItems:OrderItems={},guestItemQuantities:Record<string,number>={},guestItemPrices:Record<string,number>={},guestItemNames:Record<string,string>={};
-   (row.order_items||[]).forEach((i:any)=>{
-    if(Number(i.quantity)<=0)return;
-    if(i.item_source==='guest'){
-     guestItems[i.item_code]=true;guestItemQuantities[i.item_code]=Number(i.quantity);guestItemPrices[i.item_code]=Number(i.unit_price);guestItemNames[i.item_code]=i.item_name||i.item_code;
-    }else{
-     employeeItems[i.item_code]=true;itemQuantities[i.item_code]=Number(i.quantity);itemPrices[i.item_code]=Number(i.unit_price);itemNames[i.item_code]=i.item_name||i.item_code;
-    }
-   });
-   return{id:row.id,employeeId:user.id,date:row.ordered_for,items:employeeItems,itemQuantities,itemPrices,itemNames,guestItems,guestItemQuantities,guestItemPrices,guestItemNames,orderSource:row.order_source==='admin'?'admin':'employee',guestName:row.guest_name||undefined,guestCount:row.guest_count==null?undefined:Number(row.guest_count),guestTotal:Number(row.guest_total||0),status:'active',cancelledAt:row.cancelled_at||undefined};
-  }catch(error){console.error('Active employee order check failed',error);return localEmployeeOrder||null;}
+  if(!user||!supabase)return null;
+  const{data:profile,error:pe}=await supabase.from('profiles').select('id').or(`employee_code.eq.${user.id},sr_number.eq.${user.id}`).maybeSingle();
+  if(pe)throw pe;
+  if(!profile)return null;
+  const{data,error}=await supabase.from('orders').select('id,employee_id,ordered_for,status,created_at,updated_at,cancelled_at,order_source,guest_name,guest_count,guest_total,order_items(item_code,item_name,quantity,unit_price,item_source,guest_name)').eq('employee_id',profile.id).eq('ordered_for',today).eq('status','active').order('created_at',{ascending:false});
+  if(error)throw error;
+  const row=(data||[]).find((o:any)=>(o.order_items||[]).some((i:any)=>i.item_source!=='guest'&&Number(i.quantity)>0));
+  if(!row)return null;
+  const employeeItems:OrderItems={},itemQuantities:Record<string,number>={},itemPrices:Record<string,number>={},itemNames:Record<string,string>={},guestItems:OrderItems={},guestItemQuantities:Record<string,number>={},guestItemPrices:Record<string,number>={},guestItemNames:Record<string,string>{};
+  (row.order_items||[]).forEach((i:any)=>{
+   if(Number(i.quantity)<=0)return;
+   if(i.item_source==='guest'){
+    guestItems[i.item_code]=true;guestItemQuantities[i.item_code]=Number(i.quantity);guestItemPrices[i.item_code]=Number(i.unit_price);guestItemNames[i.item_code]=i.item_name||i.item_code;
+   }else{
+    employeeItems[i.item_code]=true;itemQuantities[i.item_code]=Number(i.quantity);itemPrices[i.item_code]=Number(i.unit_price);itemNames[i.item_code]=i.item_name||i.item_code;
+   }
+  });
+  return{id:row.id,employeeId:user.id,date:row.ordered_for,items:employeeItems,itemQuantities,itemPrices,itemNames,guestItems,guestItemQuantities,guestItemPrices,guestItemNames,orderSource:row.order_source==='admin'?'admin':'employee',guestName:row.guest_name||undefined,guestCount:row.guest_count==null?undefined:Number(row.guest_count),guestTotal:Number(row.guest_total||0),status:'active',cancelledAt:row.cancelled_at||undefined};
  };
 
- const existing=serverEmployeeOrder||localEmployeeOrder;
+ const existing=serverEmployeeOrder;
 
  useEffect(()=>{setItems({});setQuantities({})},[existing?.id,today]);
  useEffect(()=>{
   let mounted=true;
   const check=async()=>{
    if(!mounted)return;
-   const result=await fetchActiveEmployeeOrder();
-   if(mounted){setServerEmployeeOrder(result);setCheckingEmployeeOrder(false)}
+   try{
+    const result=await fetchActiveEmployeeOrder();
+    if(mounted){setServerEmployeeOrder(result);setCheckingEmployeeOrder(false)}
+   }catch(error){
+    console.error('Active employee order check failed',error);
+    if(mounted){setServerEmployeeOrder(null);setCheckingEmployeeOrder(false);setMsg('Could not verify today’s employee order. Please try again.')}
+   }
   };
   void check();
   return()=>{mounted=false};
@@ -95,8 +97,12 @@ const OrderForm:React.FC=()=>{
   if(!user||holiday||!windowOpen||!existing)return;if(!window.confirm('Cancel your employee order for today?'))return;setSaving(true);setMsg('');
   try{
    const hasGuest=Object.keys(existing.guestItems||{}).some(c=>existing.guestItems?.[c]);
-   if(hasGuest){const updated:Order={...existing,items:{},itemQuantities:{},itemPrices:{},itemNames:{},status:'active'};await upsertOrder(updated,prices);setOrders(p=>p.map(o=>o.id===existing.id?updated:o));setServerEmployeeOrder(null);setMsg('Employee order cancelled. Guest order remains active.')}
-   else{await cancelOrder(existing);setOrders(p=>p.filter(o=>o.id!==existing.id));setServerEmployeeOrder(null);setMsg('Today’s employee order cancelled. You can now place a new order.')}
+   if(hasGuest){const updated:Order={...existing,items:{},itemQuantities:{},itemPrices:{},itemNames:{},status:'active'};await upsertOrder(updated,prices);setOrders(p=>p.map(o=>o.id===existing.id?updated:o));}
+   else{await cancelOrder(existing);setOrders(p=>p.filter(o=>o.id!==existing.id));}
+   setItems({});setQuantities({});
+   const refreshed=await fetchActiveEmployeeOrder();
+   setServerEmployeeOrder(refreshed);
+   setMsg(refreshed?'Employee order is still active.':'Today’s employee order cancelled. You can now place a new order.');
   }catch(error:any){console.error('Order cancel failed',error);setMsg(error?.message||'Could not cancel order. Please try again.')}finally{setSaving(false)}
  };
 
