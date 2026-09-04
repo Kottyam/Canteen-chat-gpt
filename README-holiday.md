@@ -1,1 +1,0 @@
-Holiday Management implementation is contained in the Time Management settings and Supabase holiday configuration.
