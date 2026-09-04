@@ -32,11 +32,18 @@ begin
          extract(year from o.ordered_for)::integer,
          coalesce(sum(oi.quantity*oi.unit_price),0),
          coalesce(sum(case when oi.item_source='guest' then oi.quantity*oi.unit_price else 0 end),0),
-         coalesce((select sum(a.amount) from public.employee_adjustments a where a.employee_id=o.employee_id and a.adjustment_date=p_date),0)
+         0
   from public.orders o
   left join public.order_items oi on oi.order_id=o.id
   where o.ordered_for=p_date
   group by o.employee_id,o.ordered_for;
+
+  insert into _gocanteen_history_impact(employee_id,bill_month,bill_year,food_total,guest_total,admin_total)
+  select a.employee_id,extract(month from a.adjustment_date)::integer,extract(year from a.adjustment_date)::integer,0,0,coalesce(sum(a.amount),0)
+  from public.employee_adjustments a
+  where a.adjustment_date=p_date
+  group by a.employee_id,a.adjustment_date
+  on conflict (employee_id) do update set admin_total=excluded.admin_total;
 
   delete from public.employee_adjustments where adjustment_date=p_date;
   delete from public.orders where ordered_for=p_date;
