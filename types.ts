@@ -1,6 +1,6 @@
 export type Role = 'employee' | 'admin';
 export type Status = 'active' | 'blocked' | 'deleted';
-export interface User { id:string; name:string; mobile:string; password:string; role:Role; status:Status; isFirstLogin?:boolean; canteenId?:string; canteenName?:string; needsCanteenSetup?:boolean; }
+export interface User { id:string; name:string; mobile:string; password:string; role:Role; status:Status; isFirstLogin?:boolean; canteenId?:string; canteenName?:string; needsCanteenSetup?:boolean; authProvider?:'password'|'google'; }
 export interface MenuItem { itemCode:string; itemName:string; unitPrice:number; active:boolean; archived?:boolean; }
 export interface DailyMenuItem extends MenuItem { menuDate:string; }
 export type OrderItems=Record<string,boolean>;
