@@ -1,2 +1,100 @@
-import React,{useEffect,useMemo,useState}from'react';import{useAuth}from'../../context/AuthContext';import{useData}from'../../context/DataContext';import{Order}from'../../types';import{formatDate}from'../../utils/helpers';import{upsertOrder,cancelOrder}from'../../services/supabaseSync';import{supabase}from'../../supabase';
-const GuestMealForm:React.FC=()=>{const{user}=useAuth();const{orders,setOrders,menuItems,holidays}=useData();const today=formatDate(new Date());const dateObj=new Date(`${today}T00:00:00`);const holiday=dateObj.getDay()===0||dateObj.getDay()===6||holidays.includes(today);const activeItems=useMemo(()=>menuItems.filter(i=>i.active&&!i.archived),[menuItems]);const todayOrder=user?orders.find(o=>o.employeeId===user.id&&o.date===today&&o.status!=='cancelled'):undefined;const hasGuest=Boolean(todayOrder&&Object.keys(todayOrder.guestItems||{}).some(c=>todayOrder.guestItems?.[c]));const[guestCount,setGuestCount]=useState(Math.max(1,todayOrder?.guestCount||1));const[guestName,setGuestName]=useState(todayOrder?.guestName||'');const[quantities,setQuantities]=useState<Record<string,number>>({});const[windowOpen,setWindowOpen]=useState(true);const[saving,setSaving]=useState(false);const[msg,setMsg]=useState('');useEffect(()=>{setGuestCount(Math.max(1,todayOrder?.guestCount||1));setGuestName(todayOrder?.guestName||'');const q:Record<string,number>={};Object.keys(todayOrder?.guestItems||{}).forEach(c=>{if(todayOrder?.guestItems?.[c])q[c]=Number(todayOrder?.guestItemQuantities?.[c]||1)});setQuantities(q)},[todayOrder?.id,todayOrder?.guestCount,todayOrder?.guestName]);useEffect(()=>{let alive=true;const check=async()=>{if(!supabase||holiday){if(alive)setWindowOpen(!holiday);return}const{data,error}=await supabase.rpc('employee_order_window_open');if(alive)setWindowOpen(!error&&data!==false)};void check();const timer=window.setInterval(check,30000);return()=>{alive=false;window.clearInterval(timer)}},[holiday]);const guestItems=activeItems.filter(i=>Number(quantities[i.itemCode]||0)>0);const guestTotal=guestItems.reduce((sum,i)=>sum+Number(i.unitPrice)*Number(quantities[i.itemCode]||0),0);const setQty=(code:string,value:number)=>setQuantities(p=>({...p,[code]:Math.max(0,Math.min(99,value))}));const save=async(e:React.FormEvent)=>{e.preventDefault();if(!user)return;if(holiday){setMsg('Guest meals are not available on holidays.');return}if(!windowOpen){setMsg('Ordering is currently closed.');return}if(!guestItems.length){setMsg('Please select at least one guest food item.');return}setSaving(true);setMsg('');try{const base:Order=todayOrder||{id:crypto.randomUUID(),employeeId:user.id,date:today,items:{},itemPrices:{},itemNames:{},orderSource:'employee',status:'active'};const guestItemPrices={...(base.guestItemPrices||{})};const guestItemNames={...(base.guestItemNames||{})};const guestFlags:Record<string,boolean>={};const guestQty:Record<string,number>={};guestItems.forEach(i=>{guestFlags[i.itemCode]=true;guestQty[i.itemCode]=Number(quantities[i.itemCode]||0);guestItemPrices[i.itemCode]=Number(i.unitPrice);guestItemNames[i.itemCode]=i.itemName});const updated:Order={...base,guestItems:guestFlags,guestItemQuantities:guestQty,guestItemPrices,guestItemNames,guestName:guestName.trim()||undefined,guestCount:Math.max(1,guestCount)};await upsertOrder(updated,{morningTea:0,lunchMeals:0,lunchEgg:0,lunchFishMeat:0,eveningTea:0});setOrders(prev=>{const idx=prev.findIndex(o=>o.id===updated.id);if(idx<0)return[...prev,updated];const next=[...prev];next[idx]=updated;return next});setMsg('Guest order saved successfully.')}catch(error:any){setMsg(error?.message||'Could not save guest order.')}finally{setSaving(false)}};const cancelGuest=async()=>{if(!todayOrder||!hasGuest)return;if(!windowOpen){setMsg('Ordering is currently closed.');return}if(!window.confirm('Cancel the guest order for today?'))return;setSaving(true);setMsg('');try{const hasEmployee=Object.keys(todayOrder.items||{}).some(c=>todayOrder.items[c]);if(hasEmployee){const updated:Order={...todayOrder,guestItems:{},guestItemQuantities:{},guestItemPrices:{},guestItemNames:{},guestName:undefined,guestCount:undefined};await upsertOrder(updated,{morningTea:0,lunchMeals:0,lunchEgg:0,lunchFishMeat:0,eveningTea:0});setOrders(prev=>prev.map(o=>o.id===todayOrder.id?updated:o))}else{await cancelOrder(todayOrder);setOrders(prev=>prev.filter(o=>o.id!==todayOrder.id))}setQuantities({});setGuestCount(1);setGuestName('');setMsg('Guest order cancelled.')}catch(error:any){setMsg(error?.message||'Could not cancel guest order.')}finally{setSaving(false)}};return <section className="rounded-xl border bg-white p-4 shadow-sm sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-bold text-gray-800">Guest Order</h3><p className="mt-1 text-sm text-gray-500">Guest count and food quantities are independent.</p></div><span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">Guest Total: ₹{guestTotal.toFixed(2)}</span></div>{holiday&&<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Guest orders are not available on holidays.</div>}{!holiday&&!windowOpen&&<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Ordering is currently closed.</div>}<form onSubmit={save} className="mt-4 space-y-4"><div className="rounded-xl border bg-gray-50 p-3"><div className="flex items-center justify-between gap-3"><span className="font-semibold text-gray-700">Number of Guests</span><div className="flex items-center gap-2"><button type="button" disabled={holiday||!windowOpen} onClick={()=>setGuestCount(v=>Math.max(1,v-1))} className="h-10 w-10 rounded-lg border bg-white text-lg font-bold disabled:opacity-50">−</button><span className="w-8 text-center text-lg font-bold">{guestCount}</span><button type="button" disabled={holiday||!windowOpen} onClick={()=>setGuestCount(v=>Math.min(99,v+1))} className="h-10 w-10 rounded-lg border bg-white text-lg font-bold disabled:opacity-50">+</button></div></div></div><input value={guestName} onChange={e=>setGuestName(e.target.value)} placeholder="Guest Name (optional)" className="w-full rounded-md border px-3 py-2.5" maxLength={100}/><div className="space-y-2">{activeItems.map(item=>{const qty=Number(quantities[item.itemCode]||0);return <div key={item.itemCode} className={`flex min-h-14 items-center justify-between gap-3 rounded-xl border p-3 ${(holiday||!windowOpen)?'opacity-60':''}`}><div className="flex min-w-0 items-center gap-3"><input type="checkbox" disabled={holiday||!windowOpen} checked={qty>0} onChange={e=>setQty(item.itemCode,e.currentTarget.checked?1:0)} className="h-5 w-5 shrink-0"/><span className="min-w-0 break-words text-sm font-medium text-gray-700">{item.itemName}</span><span className="shrink-0 text-sm">₹{item.unitPrice}</span></div>{qty>0&&<div className="flex shrink-0 items-center gap-1"><button type="button" disabled={holiday||!windowOpen} onClick={()=>setQty(item.itemCode,qty-1)} className="h-9 w-9 rounded-lg border bg-white font-bold disabled:opacity-50">−</button><span className="w-7 text-center font-semibold">{qty}</span><button type="button" disabled={holiday||!windowOpen} onClick={()=>setQty(item.itemCode,qty+1)} className="h-9 w-9 rounded-lg border bg-white font-bold disabled:opacity-50">+</button></div>}</div>})}</div><div className="flex items-center justify-between border-t pt-3"><span className="font-semibold">Guest Total</span><span className="text-lg font-bold text-primary-700">₹{guestTotal.toFixed(2)}</span></div><button type="submit" disabled={saving||holiday||!windowOpen||!guestItems.length} className="min-h-12 w-full rounded-lg bg-primary-600 px-4 font-semibold text-white disabled:opacity-50">{saving?'Saving…':'Add Guest Meal'}</button>{hasGuest&&<button type="button" disabled={saving||holiday||!windowOpen} onClick={()=>void cancelGuest()} className="min-h-12 w-full rounded-lg bg-red-600 px-4 font-semibold text-white disabled:opacity-50">{saving?'Working…':'Cancel Guest Order'}</button>}{msg&&<p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{msg}</p>}</form></section>};export default GuestMealForm;
+import React,{useEffect,useMemo,useState}from'react';
+import{useAuth}from'../../context/AuthContext';
+import{useData}from'../../context/DataContext';
+import{Order}from'../../types';
+import{formatDate}from'../../utils/helpers';
+import{upsertOrder,cancelOrder}from'../../services/supabaseSync';
+import{supabase}from'../../supabase';
+
+const GuestMealForm:React.FC=()=>{
+ const{user}=useAuth();
+ const{orders,setOrders,menuItems,holidays}=useData();
+ const today=formatDate(new Date());
+ const dateObj=new Date(`${today}T00:00:00`);
+ const holiday=dateObj.getDay()===0||dateObj.getDay()===6||holidays.includes(today);
+ const activeItems=useMemo(()=>menuItems.filter(i=>i.active&&!i.archived),[menuItems]);
+ const todayOrder=user?orders.find(o=>o.employeeId===user.id&&o.date===today&&o.status!=='cancelled'):undefined;
+ const hasGuest=Boolean(todayOrder&&Object.keys(todayOrder.guestItems||{}).some(c=>todayOrder.guestItems?.[c]));
+ const[guestCount,setGuestCount]=useState(Math.max(1,todayOrder?.guestCount||1));
+ const[guestName,setGuestName]=useState(todayOrder?.guestName||'');
+ const[quantities,setQuantities]=useState<Record<string,number>>({});
+ const[windowOpen,setWindowOpen]=useState(true);
+ const[saving,setSaving]=useState(false);
+ const[msg,setMsg]=useState('');
+ useEffect(()=>{
+  setGuestCount(Math.max(1,todayOrder?.guestCount||1));
+  setGuestName(todayOrder?.guestName||'');
+  const q:Record<string,number>={};
+  Object.keys(todayOrder?.guestItems||{}).forEach(c=>{if(todayOrder?.guestItems?.[c])q[c]=Math.max(1,Number(todayOrder?.guestItemQuantities?.[c]||1))});
+  setQuantities(q);
+ },[todayOrder?.id,todayOrder?.guestCount,todayOrder?.guestName,todayOrder?.guestItemQuantities]);
+ useEffect(()=>{
+  let alive=true;
+  const check=async()=>{
+   if(!supabase||holiday){if(alive)setWindowOpen(!holiday);return}
+   const{data,error}=await supabase.rpc('employee_order_window_open');
+   if(alive)setWindowOpen(!error&&data!==false);
+  };
+  void check();
+  const timer=window.setInterval(check,30000);
+  return()=>{alive=false;window.clearInterval(timer)};
+ },[holiday]);
+ const guestItems=activeItems.filter(i=>Number(quantities[i.itemCode]||0)>0);
+ const guestTotal=guestItems.reduce((sum,i)=>sum+Number(i.unitPrice)*Number(quantities[i.itemCode]||0),0);
+ const existingGuestTotal=useMemo(()=>todayOrder?Object.keys(todayOrder.guestItems||{}).reduce((sum,code)=>sum+(todayOrder.guestItems?.[code]?Number(todayOrder.guestItemPrices?.[code]??activeItems.find(i=>i.itemCode===code)?.unitPrice??0)*Math.max(1,Number(todayOrder.guestItemQuantities?.[code]||1)):0),0):0,[todayOrder,activeItems]);
+ const setQty=(code:string,value:number)=>setQuantities(p=>({...p,[code]:Math.max(0,Math.min(99,value))}));
+ const save=async(e:React.FormEvent)=>{
+  e.preventDefault();
+  if(!user)return;
+  if(hasGuest){setMsg('Guest order already placed for today. Cancel the guest order before placing a fresh guest order.');return}
+  if(holiday){setMsg('Guest meals are not available on holidays.');return}
+  if(!windowOpen){setMsg('Ordering is currently closed.');return}
+  if(!guestItems.length){setMsg('Please select at least one guest food item.');return}
+  setSaving(true);setMsg('');
+  try{
+   const base:Order=todayOrder||{id:crypto.randomUUID(),employeeId:user.id,date:today,items:{},itemPrices:{},itemNames:{},orderSource:'employee',status:'active'};
+   const guestItemPrices={...(base.guestItemPrices||{})};
+   const guestItemNames={...(base.guestItemNames||{})};
+   const guestFlags:Record<string,boolean>={};
+   const guestQty:Record<string,number>={};
+   guestItems.forEach(i=>{guestFlags[i.itemCode]=true;guestQty[i.itemCode]=Math.max(1,Number(quantities[i.itemCode]||1));guestItemPrices[i.itemCode]=Number(i.unitPrice);guestItemNames[i.itemCode]=i.itemName});
+   const updated:Order={...base,guestItems:guestFlags,guestItemQuantities:guestQty,guestItemPrices,guestItemNames,guestName:guestName.trim()||undefined,guestCount:Math.max(1,guestCount),guestTotal:guestItems.reduce((s,i)=>s+Number(i.unitPrice)*guestQty[i.itemCode],0)};
+   await upsertOrder(updated,{morningTea:0,lunchMeals:0,lunchEgg:0,lunchFishMeat:0,eveningTea:0});
+   setOrders(prev=>{const idx=prev.findIndex(o=>o.id===updated.id);if(idx<0)return[...prev,updated];const next=[...prev];next[idx]=updated;return next});
+   setMsg('Guest order saved successfully.');
+  }catch(error:any){setMsg(error?.message||'Could not save guest order.')}finally{setSaving(false)}
+ };
+ const cancelGuest=async()=>{
+  if(!todayOrder||!hasGuest)return;
+  if(!windowOpen){setMsg('Ordering is currently closed.');return}
+  if(!window.confirm('Cancel the guest order for today?'))return;
+  setSaving(true);setMsg('');
+  try{
+   const hasEmployee=Object.keys(todayOrder.items||{}).some(c=>todayOrder.items[c]);
+   if(hasEmployee){
+    const updated:Order={...todayOrder,guestItems:{},guestItemQuantities:{},guestItemPrices:{},guestItemNames:{},guestName:undefined,guestCount:undefined,guestTotal:undefined};
+    await upsertOrder(updated,{morningTea:0,lunchMeals:0,lunchEgg:0,lunchFishMeat:0,eveningTea:0});
+    setOrders(prev=>prev.map(o=>o.id===todayOrder.id?updated:o));
+   }else{
+    await cancelOrder(todayOrder);
+    setOrders(prev=>prev.filter(o=>o.id!==todayOrder.id));
+   }
+   setQuantities({});setGuestCount(1);setGuestName('');setMsg('Guest order cancelled.');
+  }catch(error:any){setMsg(error?.message||'Could not cancel guest order.')}finally{setSaving(false)}
+ };
+ if(hasGuest&&todayOrder)return <section className="rounded-xl border bg-white p-4 shadow-sm sm:p-5">
+  <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-bold text-gray-800">Guest Order</h3><p className="mt-1 text-sm text-gray-500">{today}</p></div><span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">Guest Total: ₹{existingGuestTotal.toFixed(2)}</span></div>
+  <div className="mt-4 rounded-lg border border-primary-200 bg-primary-50 p-3"><div className="font-bold text-primary-800">Guest order already placed for today</div><p className="mt-1 text-sm text-primary-700">Cancel the guest order before placing a fresh guest order.</p></div>
+  {todayOrder.guestName&&<p className="mt-3 text-sm text-gray-600">Guest: <span className="font-semibold">{todayOrder.guestName}</span>{todayOrder.guestCount?` · ${todayOrder.guestCount} guest${todayOrder.guestCount===1?'':'s'}`:''}</p>}
+  <div className="mt-3 space-y-2">{Object.keys(todayOrder.guestItems||{}).filter(c=>todayOrder.guestItems?.[c]).map(code=>{const qty=Math.max(1,Number(todayOrder.guestItemQuantities?.[code]||1));const unit=Number(todayOrder.guestItemPrices?.[code]??activeItems.find(i=>i.itemCode===code)?.unitPrice??0);return <div key={code} className="flex items-center justify-between gap-3 rounded-lg border p-3"><span>{todayOrder.guestItemNames?.[code]??activeItems.find(i=>i.itemCode===code)?.itemName??code}</span><span className="shrink-0 font-medium">× {qty} · ₹{(unit*qty).toFixed(2)}</span></div>})}</div>
+  <div className="mt-3 flex justify-between border-t pt-3 font-bold"><span>Guest Total</span><span className="text-primary-700">₹{existingGuestTotal.toFixed(2)}</span></div>
+  {!holiday&&<button type="button" disabled={saving||!windowOpen} onClick={()=>void cancelGuest()} className="mt-4 min-h-12 w-full rounded-lg bg-red-600 px-4 font-semibold text-white disabled:opacity-50">{saving?'Working…':'Cancel Guest Order'}</button>}
+  {msg&&<p className="mt-3 rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{msg}</p>}
+ </section>;
+ return <section className="rounded-xl border bg-white p-4 shadow-sm sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-bold text-gray-800">Guest Order</h3><p className="mt-1 text-sm text-gray-500">Guest count and food quantities are independent.</p></div><span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600">Guest Total: ₹{guestTotal.toFixed(2)}</span></div>
+  {holiday&&<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Guest orders are not available on holidays.</div>}
+  {!holiday&&!windowOpen&&<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Ordering is currently closed.</div>}
+  <form onSubmit={save} className="mt-4 space-y-4"><div className="rounded-xl border bg-gray-50 p-3"><div className="flex items-center justify-between gap-3"><span className="font-semibold text-gray-700">Number of Guests</span><div className="flex items-center gap-2"><button type="button" disabled={holiday||!windowOpen} onClick={()=>setGuestCount(v=>Math.max(1,v-1))} className="h-10 w-10 rounded-lg border bg-white text-lg font-bold disabled:opacity-50">−</button><span className="w-8 text-center text-lg font-bold">{guestCount}</span><button type="button" disabled={holiday||!windowOpen} onClick={()=>setGuestCount(v=>Math.min(99,v+1))} className="h-10 w-10 rounded-lg border bg-white text-lg font-bold disabled:opacity-50">+</button></div></div></div><input value={guestName} onChange={e=>setGuestName(e.target.value)} placeholder="Guest Name (optional)" className="w-full rounded-md border px-3 py-2.5" maxLength={100}/><div className="space-y-2">{activeItems.map(item=>{const qty=Number(quantities[item.itemCode]||0);return <div key={item.itemCode} className={`flex min-h-14 items-center justify-between gap-3 rounded-xl border p-3 ${(holiday||!windowOpen)?'opacity-60':''}`}><div className="flex min-w-0 items-center gap-3"><input type="checkbox" disabled={holiday||!windowOpen} checked={qty>0} onChange={e=>setQty(item.itemCode,e.currentTarget.checked?1:0)} className="h-5 w-5 shrink-0"/><span className="min-w-0 break-words text-sm font-medium text-gray-700">{item.itemName}</span><span className="shrink-0 text-sm">₹{item.unitPrice}</span></div>{qty>0&&<div className="flex shrink-0 items-center gap-1"><button type="button" disabled={holiday||!windowOpen} onClick={()=>setQty(item.itemCode,qty-1)} className="h-9 w-9 rounded-lg border bg-white font-bold disabled:opacity-50">−</button><span className="w-7 text-center font-semibold">{qty}</span><button type="button" disabled={holiday||!windowOpen} onClick={()=>setQty(item.itemCode,qty+1)} className="h-9 w-9 rounded-lg border bg-white font-bold disabled:opacity-50">+</button></div>}</div>})}</div><div className="flex items-center justify-between border-t pt-3"><span className="font-semibold">Guest Total</span><span className="text-lg font-bold text-primary-700">₹{guestTotal.toFixed(2)}</span></div><button type="submit" disabled={saving||holiday||!windowOpen||!guestItems.length} className="min-h-12 w-full rounded-lg bg-primary-600 px-4 font-semibold text-white disabled:opacity-50">{saving?'Saving…':'Add Guest Meal'}</button>{msg&&<p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{msg}</p>}</form>
+ </section>;
+};
+export default GuestMealForm;
