@@ -1,15 +1,18 @@
 name: Build GoCanteen Android APK
+
 on:
   workflow_dispatch:
   push:
     branches:
       - main
       - fix/legacy-tenant-linking
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
     env:
       VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PirI2jk8r0rm5r3drpYMqA_f2IvAphx
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,11 +38,20 @@ jobs:
           set -e
           python3 - <<'PY'
           from pathlib import Path
-          manifest=Path('android/app/src/main/AndroidManifest.xml'); text=manifest.read_text(); marker='android:exported="true"'; pos=text.find(marker)
-          if pos<0: raise SystemExit('Android launcher activity was not found')
-          activity_start=text.rfind('<activity',0,pos); activity_end=text.find('>',pos)+1
-          intent_filter='''\n            <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="gocanteen" android:host="auth" android:path="/callback" />\n            </intent-filter>'''
-          if 'android:scheme="gocanteen"' not in text: manifest.write_text(text[:activity_end]+intent_filter+text[activity_end:])
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          marker = 'android:exported="true"'
+          pos = text.find(marker)
+          if pos < 0:
+              raise SystemExit('Android launcher activity was not found')
+          activity_start = text.rfind('<activity', 0, pos)
+          activity_end = text.find('>', pos) + 1
+          if activity_start < 0 or activity_end <= 0:
+              raise SystemExit('Could not locate Android activity tag')
+          intent_filter = '''\n            <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="gocanteen" android:host="auth" android:path="/callback" />\n            </intent-filter>'''
+          if 'android:scheme="gocanteen"' not in text:
+              text = text[:activity_end] + intent_filter + text[activity_end:]
+              manifest.write_text(text)
           PY
       - name: Configure Android system-bar insets
         run: |
@@ -47,30 +59,59 @@ jobs:
           mkdir -p android/app/src/main/java/com/gocanteen/app
           cat > android/app/src/main/java/com/gocanteen/app/MainActivity.java <<'EOF'
           package com.gocanteen.app;
-          import android.os.Bundle; import android.graphics.Color; import android.view.Window; import androidx.core.view.WindowCompat; import com.getcapacitor.BridgeActivity;
-          public class MainActivity extends BridgeActivity { @Override public void onCreate(Bundle savedInstanceState){ super.onCreate(savedInstanceState); Window window=getWindow(); WindowCompat.setDecorFitsSystemWindows(window,true); window.setStatusBarColor(Color.WHITE); window.setNavigationBarColor(Color.WHITE); WindowCompat.getInsetsController(window,window.getDecorView()).setAppearanceLightStatusBars(true); WindowCompat.getInsetsController(window,window.getDecorView()).setAppearanceLightNavigationBars(true); } }
+          import android.os.Bundle;
+          import android.graphics.Color;
+          import android.view.Window;
+          import androidx.core.view.WindowCompat;
+          import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity {
+              @Override public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  Window window = getWindow();
+                  WindowCompat.setDecorFitsSystemWindows(window, true);
+                  window.setStatusBarColor(Color.WHITE);
+                  window.setNavigationBarColor(Color.WHITE);
+                  WindowCompat.getInsetsController(window, window.getDecorView()).setAppearanceLightStatusBars(true);
+                  WindowCompat.getInsetsController(window, window.getDecorView()).setAppearanceLightNavigationBars(true);
+              }
+          }
           EOF
       - name: Remove Android system splash icon
         run: |
           set -e
           mkdir -p android/app/src/main/res/values-v31 android/app/src/main/res/drawable
           cat > android/app/src/main/res/drawable/transparent_splash_icon.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?><shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle"><solid android:color="@android:color/transparent" /></shape>
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="@android:color/transparent" />
+          </shape>
           EOF
           THEME_NAME=$(grep -o 'android:theme="@style/[^\"]*"' android/app/src/main/AndroidManifest.xml | head -1 | sed 's/.*@style\///;s/"//')
+          if [ -z "$THEME_NAME" ]; then echo "Could not determine Android application theme"; exit 1; fi
+          echo "Using Android theme: $THEME_NAME"
           cat > android/app/src/main/res/values-v31/styles.xml <<EOF
-          <?xml version="1.0" encoding="utf-8"?><resources><style name="$THEME_NAME"><item name="android:windowSplashScreenBackground">@android:color/white</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item><item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item></style></resources>
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="$THEME_NAME">
+                  <item name="android:windowSplashScreenBackground">@android:color/white</item>
+                  <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
+                  <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+              </style>
+          </resources>
           EOF
       - name: Apply text-only Go launcher icon
         run: |
           set -e
           python3 -m pip install --quiet pillow
           python3 - <<'PY'
-          from PIL import Image,ImageDraw,ImageFont
+          from PIL import Image, ImageDraw, ImageFont
           from pathlib import Path
-          sizes={'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}; root=Path('android/app/src/main/res'); font_path='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          root = Path('android/app/src/main/res'); green='#008A5A'; font_path='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
           for folder,size in sizes.items():
-            out=root/folder; out.mkdir(parents=True,exist_ok=True); image=Image.new('RGB',(size,size),'white'); draw=ImageDraw.Draw(image); font=ImageFont.truetype(font_path,max(10,int(size*.32))); bbox=draw.textbbox((0,0),'Go',font=font); tw,th=bbox[2]-bbox[0],bbox[3]-bbox[1]; draw.text(((size-tw)/2,(size-th)/2-bbox[1]),'Go',font=font,fill='#008A5A'); image.save(out/'ic_launcher.png'); image.save(out/'ic_launcher_round.png')
+              out=root/folder; out.mkdir(parents=True,exist_ok=True); image=Image.new('RGB',(size,size),'white'); draw=ImageDraw.Draw(image)
+              font=ImageFont.truetype(font_path,max(10,int(size*0.32))); text='Go'; bbox=draw.textbbox((0,0),text,font=font); tw,th=bbox[2]-bbox[0],bbox[3]-bbox[1]
+              draw.text(((size-tw)/2,(size-th)/2-bbox[1]),text,font=font,fill=green); image.save(out/'ic_launcher.png','PNG'); image.save(out/'ic_launcher_round.png','PNG')
           PY
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
       - name: Sync Capacitor
