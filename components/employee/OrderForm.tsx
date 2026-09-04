@@ -32,7 +32,7 @@ const OrderForm:React.FC=()=>{
   if(error)throw error;
   const row=(data||[]).find((o:any)=>(o.order_items||[]).some((i:any)=>i.item_source!=='guest'&&Number(i.quantity)>0));
   if(!row)return null;
-  const employeeItems:OrderItems={},itemQuantities:Record<string,number>={},itemPrices:Record<string,number>={},itemNames:Record<string,string>={},guestItems:OrderItems={},guestItemQuantities:Record<string,number>={},guestItemPrices:Record<string,number>={},guestItemNames:Record<string,string>{};
+  const employeeItems:OrderItems={},itemQuantities:Record<string,number>={},itemPrices:Record<string,number>={},itemNames:Record<string,string>={},guestItems:OrderItems={},guestItemQuantities:Record<string,number>={},guestItemPrices:Record<string,number>={},guestItemNames:Record<string,string>={};
   (row.order_items||[]).forEach((i:any)=>{
    if(Number(i.quantity)<=0)return;
    if(i.item_source==='guest'){
