@@ -1,59 +1,20 @@
 -- Tenant-scoped holiday management: declared dates + one recurring weekday rule per canteen.
-create table if not exists public.holiday_settings (
-  canteen_id uuid primary key references public.canteens(id) on delete cascade,
-  recurring_weekdays integer[] not null default '{}',
-  updated_at timestamptz not null default now(),
-  updated_by uuid
-);
-
-create table if not exists public.holiday_dates (
-  id uuid primary key default gen_random_uuid(),
-  canteen_id uuid not null references public.canteens(id) on delete cascade,
-  holiday_date date not null,
-  created_at timestamptz not null default now(),
-  created_by uuid,
-  unique (canteen_id, holiday_date)
-);
-
+create table if not exists public.holiday_settings (canteen_id uuid primary key references public.canteens(id) on delete cascade, recurring_weekdays integer[] not null default '{}', updated_at timestamptz not null default now(), updated_by uuid);
+create table if not exists public.holiday_dates (id uuid primary key default gen_random_uuid(), canteen_id uuid not null references public.canteens(id) on delete cascade, holiday_date date not null, created_at timestamptz not null default now(), created_by uuid, unique(canteen_id,holiday_date));
 alter table public.holiday_settings enable row level security;
 alter table public.holiday_dates enable row level security;
-
 drop policy if exists holiday_settings_admin_all on public.holiday_settings;
 drop policy if exists holiday_settings_employee_select on public.holiday_settings;
 drop policy if exists holiday_dates_admin_all on public.holiday_dates;
 drop policy if exists holiday_dates_employee_select on public.holiday_dates;
-
-create policy holiday_settings_admin_all on public.holiday_settings for all to authenticated using (canteen_id = public.current_canteen_id() and public.is_admin_user()) with check (canteen_id = public.current_canteen_id() and public.is_admin_user());
-create policy holiday_settings_employee_select on public.holiday_settings for select to authenticated using (canteen_id = public.current_canteen_id());
-create policy holiday_dates_admin_all on public.holiday_dates for all to authenticated using (canteen_id = public.current_canteen_id() and public.is_admin_user()) with check (canteen_id = public.current_canteen_id() and public.is_admin_user());
-create policy holiday_dates_employee_select on public.holiday_dates for select to authenticated using (canteen_id = public.current_canteen_id());
-
-create or replace function public.get_holiday_configuration()
-returns jsonb language sql security definer set search_path = public as $$
-  select jsonb_build_object(
-    'recurring_weekdays', coalesce((select recurring_weekdays from public.holiday_settings where canteen_id = public.current_canteen_id()), '{}'),
-    'declared_dates', coalesce((select jsonb_agg(to_char(holiday_date, 'YYYY-MM-DD') order by holiday_date) from public.holiday_dates where canteen_id = public.current_canteen_id()), '[]'::jsonb)
-  );
-$$;
-revoke all on function public.get_holiday_configuration() from public;
-grant execute on function public.get_holiday_configuration() to authenticated;
-
-create or replace function public.is_holiday_for_date(p_date date)
-returns boolean language sql security definer set search_path = public as $$
-  select exists (select 1 from public.holiday_dates where canteen_id = public.current_canteen_id() and holiday_date = p_date)
-      or extract(dow from p_date)::integer = any(coalesce((select recurring_weekdays from public.holiday_settings where canteen_id = public.current_canteen_id()), '{}'));
-$$;
-revoke all on function public.is_holiday_for_date(date) from public;
-grant execute on function public.is_holiday_for_date(date) to authenticated;
-
-create or replace function public.employee_order_window_open()
-returns boolean language plpgsql security definer set search_path = public as $$
-declare v_now timestamp := now() at time zone current_setting('TIMEZONE'); v_start time; v_end time; v_enabled boolean;
-begin
-  if public.is_holiday_for_date(v_now::date) then return false; end if;
-  select enabled,start_time,end_time into v_enabled,v_start,v_end from public.order_window_settings where canteen_id=public.current_canteen_id();
-  if not found or not coalesce(v_enabled,false) then return true; end if;
-  return v_now::time >= v_start and v_now::time < v_end;
-end; $$;
-revoke all on function public.employee_order_window_open() from public;
-grant execute on function public.employee_order_window_open() to authenticated;
+create policy holiday_settings_admin_all on public.holiday_settings for all to authenticated using(canteen_id=public.current_canteen_id() and public.is_admin_user()) with check(canteen_id=public.current_canteen_id() and public.is_admin_user());
+create policy holiday_settings_employee_select on public.holiday_settings for select to authenticated using(canteen_id=public.current_canteen_id());
+create policy holiday_dates_admin_all on public.holiday_dates for all to authenticated using(canteen_id=public.current_canteen_id() and public.is_admin_user()) with check(canteen_id=public.current_canteen_id() and public.is_admin_user());
+create policy holiday_dates_employee_select on public.holiday_dates for select to authenticated using(canteen_id=public.current_canteen_id());
+insert into public.holiday_dates(canteen_id,holiday_date) select h.canteen_id,h.holiday_date from public.holidays h where h.canteen_id is not null on conflict(canteen_id,holiday_date) do nothing;
+create or replace function public.get_holiday_configuration() returns jsonb language sql security definer set search_path=public as $$ select jsonb_build_object('recurring_weekdays',coalesce((select recurring_weekdays from public.holiday_settings where canteen_id=public.current_canteen_id()),'{}'),'declared_dates',coalesce((select jsonb_agg(to_char(holiday_date,'YYYY-MM-DD') order by holiday_date) from public.holiday_dates where canteen_id=public.current_canteen_id()),'[]'::jsonb)); $$;
+revoke all on function public.get_holiday_configuration() from public; grant execute on function public.get_holiday_configuration() to authenticated;
+create or replace function public.is_holiday_for_date(p_date date) returns boolean language sql security definer set search_path=public as $$ select exists(select 1 from public.holiday_dates where canteen_id=public.current_canteen_id() and holiday_date=p_date) or exists(select 1 from public.holidays where canteen_id=public.current_canteen_id() and holiday_date=p_date) or extract(dow from p_date)::integer=any(coalesce((select recurring_weekdays from public.holiday_settings where canteen_id=public.current_canteen_id()),'{}')); $$;
+revoke all on function public.is_holiday_for_date(date) from public; grant execute on function public.is_holiday_for_date(date) to authenticated;
+create or replace function public.employee_order_window_open() returns boolean language plpgsql security definer set search_path=public as $$ declare v_now timestamp:=now() at time zone current_setting('TIMEZONE'); v_start time; v_end time; v_enabled boolean; begin if public.is_holiday_for_date(v_now::date) then return false; end if; select enabled,start_time,end_time into v_enabled,v_start,v_end from public.order_window_settings where canteen_id=public.current_canteen_id(); if not found or not coalesce(v_enabled,false) then return true; end if; return v_now::time>=v_start and v_now::time<v_end; end; $$;
+revoke all on function public.employee_order_window_open() from public; grant execute on function public.employee_order_window_open() to authenticated;
