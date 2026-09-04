@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/legacy-tenant-linking
 
 jobs:
   build-android:
@@ -15,30 +16,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
-
       - name: Install dependencies
         run: npm install
-
       - name: Install Capacitor Android
         run: npm install @capacitor/android@7.4.0
-
       - name: Build web app
         run: npm run build
-
       - name: Add Android platform
         run: npx cap add android
-
       - name: Configure Google OAuth deep link
         run: |
           set -e
@@ -59,23 +53,19 @@ jobs:
               text = text[:activity_end] + intent_filter + text[activity_end:]
               manifest.write_text(text)
           PY
-
       - name: Configure Android system-bar insets
         run: |
           set -e
           mkdir -p android/app/src/main/java/com/gocanteen/app
           cat > android/app/src/main/java/com/gocanteen/app/MainActivity.java <<'EOF'
           package com.gocanteen.app;
-
           import android.os.Bundle;
           import android.graphics.Color;
           import android.view.Window;
           import androidx.core.view.WindowCompat;
           import com.getcapacitor.BridgeActivity;
-
           public class MainActivity extends BridgeActivity {
-              @Override
-              public void onCreate(Bundle savedInstanceState) {
+              @Override public void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   Window window = getWindow();
                   WindowCompat.setDecorFitsSystemWindows(window, true);
@@ -86,7 +76,6 @@ jobs:
               }
           }
           EOF
-
       - name: Remove Android system splash icon
         run: |
           set -e
@@ -98,10 +87,7 @@ jobs:
           </shape>
           EOF
           THEME_NAME=$(grep -o 'android:theme="@style/[^\"]*"' android/app/src/main/AndroidManifest.xml | head -1 | sed 's/.*@style\///;s/"//')
-          if [ -z "$THEME_NAME" ]; then
-            echo "Could not determine Android application theme"
-            exit 1
-          fi
+          if [ -z "$THEME_NAME" ]; then echo "Could not determine Android application theme"; exit 1; fi
           echo "Using Android theme: $THEME_NAME"
           cat > android/app/src/main/res/values-v31/styles.xml <<EOF
           <?xml version="1.0" encoding="utf-8"?>
@@ -113,7 +99,6 @@ jobs:
               </style>
           </resources>
           EOF
-
       - name: Apply text-only Go launcher icon
         run: |
           set -e
@@ -121,42 +106,20 @@ jobs:
           python3 - <<'PY'
           from PIL import Image, ImageDraw, ImageFont
           from pathlib import Path
-
-          sizes = {
-              'mipmap-mdpi': 48,
-              'mipmap-hdpi': 72,
-              'mipmap-xhdpi': 96,
-              'mipmap-xxhdpi': 144,
-              'mipmap-xxxhdpi': 192,
-          }
-          root = Path('android/app/src/main/res')
-          green = '#008A5A'
-          font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-          for folder, size in sizes.items():
-              out = root / folder
-              out.mkdir(parents=True, exist_ok=True)
-              image = Image.new('RGB', (size, size), 'white')
-              draw = ImageDraw.Draw(image)
-              font_size = max(10, int(size * 0.32))
-              font = ImageFont.truetype(font_path, font_size)
-              text = 'Go'
-              bbox = draw.textbbox((0, 0), text, font=font)
-              tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-              draw.text(((size - tw) / 2, (size - th) / 2 - bbox[1]), text, font=font, fill=green)
-              image.save(out / 'ic_launcher.png', 'PNG')
-              image.save(out / 'ic_launcher_round.png', 'PNG')
+          sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          root = Path('android/app/src/main/res'); green='#008A5A'; font_path='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          for folder,size in sizes.items():
+              out=root/folder; out.mkdir(parents=True,exist_ok=True); image=Image.new('RGB',(size,size),'white'); draw=ImageDraw.Draw(image)
+              font=ImageFont.truetype(font_path,max(10,int(size*0.32))); text='Go'; bbox=draw.textbbox((0,0),text,font=font); tw,th=bbox[2]-bbox[0],bbox[3]-bbox[1]
+              draw.text(((size-tw)/2,(size-th)/2-bbox[1]),text,font=font,fill=green); image.save(out/'ic_launcher.png','PNG'); image.save(out/'ic_launcher_round.png','PNG')
           PY
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
-
       - name: Sync Capacitor
         run: npx cap sync android
-
       - name: Make Gradle executable
         run: chmod +x android/gradlew
-
       - name: Build Debug APK
         run: cd android && ./gradlew assembleDebug
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
