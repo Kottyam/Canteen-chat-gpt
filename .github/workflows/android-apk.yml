@@ -39,6 +39,27 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Configure Google OAuth deep link
+        run: |
+          set -e
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          marker = 'android:exported="true"'
+          pos = text.find(marker)
+          if pos < 0:
+              raise SystemExit('Android launcher activity was not found')
+          activity_start = text.rfind('<activity', 0, pos)
+          activity_end = text.find('>', pos) + 1
+          if activity_start < 0 or activity_end <= 0:
+              raise SystemExit('Could not locate Android activity tag')
+          intent_filter = '''\n            <intent-filter>\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="gocanteen" android:host="auth" android:path="/callback" />\n            </intent-filter>'''
+          if 'android:scheme="gocanteen"' not in text:
+              text = text[:activity_end] + intent_filter + text[activity_end:]
+              manifest.write_text(text)
+          PY
+
       - name: Configure Android system-bar insets
         run: |
           set -e
