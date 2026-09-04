@@ -16,14 +16,15 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
  const ensureGoogleAdmin=useCallback(async(authUser:any)=>{if(!supabase||authUser?.app_metadata?.provider!=='google')return null;const{data,error}=await supabase.rpc('ensure_google_admin');if(error)throw error;return data as any},[]);
  const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null>=>{
    if(!supabase||!authUser?.id)return null;
-   if(authUser.app_metadata?.provider==='google')await ensureGoogleAdmin(authUser);
+   const provider=authUser.app_metadata?.provider==='google'?'google':'password';
+   if(provider==='google')await ensureGoogleAdmin(authUser);
    const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,status,is_first_login,canteen_id,onboarding_completed').eq('id',authUser.id).maybeSingle();
    if(error||!profile)return null;
    const employeeMatch=!requestedId||(String(profile.employee_code||'')===requestedId||String(profile.sr_number||'')===requestedId);
    if(!employeeMatch||String(profile.status||'')!=='active'||!['employee','admin'].includes(String(profile.role||'')))return null;
    let canteenName='';
    if(profile.canteen_id){const{data:c}=await supabase.from('canteens').select('name').eq('id',profile.canteen_id).maybeSingle();canteenName=c?.name||'';}
-   return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false};
+   return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false,authProvider:provider};
  },[ensureGoogleAdmin]);
  useEffect(()=>{let alive=true;let nativeHandle:{remove:()=>Promise<void>}|null=null;
    const handleUrl=async(url:string)=>{if(!supabase||!url.startsWith('gocanteen://auth/callback'))return;try{const parsed=new URL(url);const code=parsed.searchParams.get('code');if(code)await supabase.auth.exchangeCodeForSession(code);}catch(error){console.warn('Google callback handling failed.',error)}};
