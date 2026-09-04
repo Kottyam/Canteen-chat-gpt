@@ -1,0 +1,1 @@
+-- Holiday enforcement is implemented by the preceding migration; this marker keeps deployment ordering explicit.
