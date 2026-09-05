@@ -28,4 +28,10 @@ export const normalizeMobileNumber = (value: string) => {
   return /^91[6-9][0-9]{9}$/.test(digits) ? digits.slice(-10) : digits;
 };
 
-export const internalEmailForLogin = (id: string) => `${normalizeMobileNumber(id)}@gocanteen.local`;
+export const internalEmailForLogin = (id: string) => {
+  const normalizedId = normalizeMobileNumber(id);
+  // Preserve the existing legacy Admin Auth identity while exposing 229132 as
+  // the numeric human-facing Admin User ID.
+  if (normalizedId === '229132') return 'admin@gocanteen.local';
+  return `${normalizedId}@gocanteen.local`;
+};
