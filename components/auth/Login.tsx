@@ -32,7 +32,6 @@ const Login: React.FC = () => {
         <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg sm:p-8">
           <div className="text-center">
             <h2 className="text-2xl font-extrabold text-gray-900 sm:text-3xl">Go Canteen</h2>
-            <p className="mt-1 text-sm font-semibold text-gray-700">Member</p>
             <p className="mt-1 text-sm font-semibold text-gray-700">Member Login</p>
           </div>
           <form className="mt-7 space-y-4" onSubmit={handleSubmit}>
