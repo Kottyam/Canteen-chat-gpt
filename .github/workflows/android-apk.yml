@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PirI2jk8r0rm5r3drpYMqA_f2IvAphx
-      # This build-time flag makes the production Android OAuth redirect
-      # independent of the WebView/dev-server origin.
+      # Production Android OAuth must use the app deep link, never the WebView/dev-server origin.
       VITE_CAPACITOR_ANDROID_BUILD: 'true'
+      VITE_GOOGLE_REDIRECT_URL: 'gocanteen://auth/callback'
 
     steps:
       - name: Checkout
@@ -34,6 +34,14 @@ jobs:
         run: npm install @capacitor/android@7.4.0
       - name: Build web app
         run: npm run build
+      - name: Verify production OAuth redirect
+        run: |
+          set -e
+          test "$VITE_GOOGLE_REDIRECT_URL" = 'gocanteen://auth/callback'
+          if grep -R -F 'http://localhost:3000' dist >/dev/null 2>&1; then
+            echo 'Production web bundle contains forbidden localhost OAuth origin'
+            exit 1
+          fi
       - name: Add Android platform
         run: npx cap add android
       - name: Configure Google OAuth deep link
