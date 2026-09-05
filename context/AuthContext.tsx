@@ -17,14 +17,15 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
  const[user,setUser]=useState<User|null>(null);const[loading,setLoading]=useState(true);const restoringRef=useRef(true);
  const clearInvalidSession=useCallback(async()=>{sessionStorage.removeItem('canteen_user');setUser(null);if(supabaseEnabled&&supabase){try{await supabase.auth.signOut()}catch{}}},[]);
  const ensureGoogleAdmin=useCallback(async(authUser:any)=>{if(!supabase||authUser?.app_metadata?.provider!=='google')return null;const{data,error}=await supabase.rpc('ensure_google_admin');if(error)throw error;return data as any},[]);
- const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null>=>{
+ const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null=>{
    if(!supabase||!authUser?.id)return null;
    const provider=authUser.app_metadata?.provider==='google'?'google':'password';
    if(provider==='google')await ensureGoogleAdmin(authUser);
    const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,status,is_first_login,canteen_id,onboarding_completed').eq('id',authUser.id).maybeSingle();
    if(error)throw error;
    if(!profile)return null;
-   const employeeMatch=!requestedId||(String(profile.employee_code||'')===requestedId||String(profile.sr_number||'')===requestedId);
+   const requestedLegacyAdmin=requestedId==='229132'&&String(profile.employee_code||'')==='admin'&&String(profile.role||'')==='admin';
+   const employeeMatch=!requestedId||String(profile.employee_code||'')===requestedId||String(profile.sr_number||'')===requestedId||requestedLegacyAdmin;
    if(!employeeMatch||String(profile.status||'')!=='active'||!['employee','admin'].includes(String(profile.role||'')))return null;
    let canteenName='';let memberLoginMode:'sr'|'mobile'='sr';
    if(profile.canteen_id){const{data:c,error:canteenError}=await supabase.from('canteens').select('name,member_login_mode').eq('id',profile.canteen_id).maybeSingle();if(canteenError)throw canteenError;canteenName=c?.name||'';memberLoginMode=c?.member_login_mode==='mobile'?'mobile':'sr';}
