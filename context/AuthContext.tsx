@@ -27,13 +27,36 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
    return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false,authProvider:provider};
  },[ensureGoogleAdmin]);
  useEffect(()=>{let alive=true;let nativeHandle:{remove:()=>Promise<void>}|null=null;
-   const handleUrl=async(url:string)=>{if(!supabase||!url.startsWith('gocanteen://auth/callback'))return;try{const parsed=new URL(url);const code=parsed.searchParams.get('code');if(code)await supabase.auth.exchangeCodeForSession(code);}catch(error){console.warn('Google callback handling failed.',error)}};
-   const restore=async()=>{if(!supabaseEnabled||!supabase){const stored=sessionStorage.getItem('canteen_user');if(stored)try{if(alive)setUser(JSON.parse(stored))}catch{sessionStorage.removeItem('canteen_user')}if(alive)setLoading(false);return}
-     try{const{data:{session}}=await supabase.auth.getSession();if(!alive)return;if(session?.user){const resolved=await resolveAuthenticatedProfile(session.user);if(alive&&resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else if(alive){await clearInvalidSession()}}else{sessionStorage.removeItem('canteen_user');setUser(null)}}catch{if(alive){sessionStorage.removeItem('canteen_user');setUser(null)}}if(alive)setLoading(false);
+   const exchangeNativeCallback=async(url:string)=>{
+     if(!supabase||!url.startsWith('gocanteen://auth/callback'))return;
+     const parsed=new URL(url);
+     const errorDescription=parsed.searchParams.get('error_description')||parsed.searchParams.get('error');
+     if(errorDescription)throw new Error(errorDescription);
+     const code=parsed.searchParams.get('code');
+     if(code){const{error}=await supabase.auth.exchangeCodeForSession(code);if(error)throw error;}
+   };
+   const restore=async()=>{
+     if(!supabaseEnabled||!supabase){const stored=sessionStorage.getItem('canteen_user');if(stored)try{if(alive)setUser(JSON.parse(stored))}catch{sessionStorage.removeItem('canteen_user')}if(alive)setLoading(false);return}
+     try{
+       // On a cold Android launch, consume the deep link before reading the
+       // session. This prevents the initial render from falling through to
+       // Member Login while the OAuth code is still being exchanged.
+       if(Capacitor.isNativePlatform()||import.meta.env.VITE_CAPACITOR_ANDROID_BUILD==='true'){
+         const launch=await App.getLaunchUrl();
+         if(launch?.url)await exchangeNativeCallback(launch.url);
+       }
+       const{data:{session}}=await supabase.auth.getSession();
+       if(!alive)return;
+       if(session?.user){const resolved=await resolveAuthenticatedProfile(session.user);if(alive&&resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else if(alive){await clearInvalidSession()}}
+       else{sessionStorage.removeItem('canteen_user');setUser(null)}
+     }catch(error){
+       if(alive){console.warn('OAuth callback/session restore failed.',error);sessionStorage.removeItem('canteen_user');setUser(null)}
+     }
+     if(alive)setLoading(false);
    };
    void restore();
    if(supabase){const{data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{void(async()=>{if(!alive)return;if(session?.user){try{const resolved=await resolveAuthenticatedProfile(session.user);if(resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else{await clearInvalidSession()}}catch{await clearInvalidSession()}}else{sessionStorage.removeItem('canteen_user');setUser(null)}})()});
-     if(Capacitor.isNativePlatform()){void App.getLaunchUrl().then(result=>{if(result?.url)void handleUrl(result.url)});void App.addListener('appUrlOpen',event=>void handleUrl(event.url)).then(handle=>{nativeHandle=handle});}
+     if(Capacitor.isNativePlatform()||import.meta.env.VITE_CAPACITOR_ANDROID_BUILD==='true'){void App.addListener('appUrlOpen',event=>void exchangeNativeCallback(event.url).catch(error=>console.warn('Google callback handling failed.',error))).then(handle=>{nativeHandle=handle});}
      return()=>{alive=false;subscription.unsubscribe();if(nativeHandle)void nativeHandle.remove()}
    }
    return()=>{alive=false};
