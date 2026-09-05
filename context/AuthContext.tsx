@@ -21,7 +21,7 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
    if(!supabase||!authUser?.id)return null;
    const provider=authUser.app_metadata?.provider==='google'?'google':'password';
    if(provider==='google')await ensureGoogleAdmin(authUser);
-   const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,status,is_first_login,canteen_id,onboarding_completed').eq('id',authUser.id).maybeSingle();
+   const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,admin_role,status,is_first_login,canteen_id,onboarding_completed').eq('id',authUser.id).maybeSingle();
    if(error)throw error;
    if(!profile)return null;
    const requestedLegacyAdmin=requestedId==='229132'&&String(profile.employee_code||'')==='admin'&&String(profile.role||'')==='admin';
@@ -29,7 +29,7 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
    if(!employeeMatch||String(profile.status||'')!=='active'||!['employee','admin'].includes(String(profile.role||'')))return null;
    let canteenName='';let memberLoginMode:'sr'|'mobile'='sr';
    if(profile.canteen_id){const{data:c,error:canteenError}=await supabase.from('canteens').select('name,member_login_mode').eq('id',profile.canteen_id).maybeSingle();if(canteenError)throw canteenError;canteenName=c?.name||'';memberLoginMode=c?.member_login_mode==='mobile'?'mobile':'sr';}
-   return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false,authProvider:provider,memberLoginMode};
+   return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,adminRole:profile.role==='admin'?(profile.admin_role==='staff_admin'?'staff_admin':'owner'):undefined,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false,authProvider:provider,memberLoginMode};
  },[ensureGoogleAdmin]);
  const applyCurrentSession=useCallback(async()=>{if(!supabase)return false;const{data:{session}}=await supabase.auth.getSession();if(!session?.user){sessionStorage.removeItem('canteen_user');setUser(null);return false}const resolved=await resolveAuthenticatedProfile(session.user);if(!resolved){await clearInvalidSession();return false}sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved);return true},[clearInvalidSession,resolveAuthenticatedProfile]);
  useEffect(()=>{let alive=true;let nativeHandle:{remove:()=>Promise<void>}|null=null;
