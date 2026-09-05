@@ -6,9 +6,6 @@ export const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABL
 export const supabaseEnabled = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
 export const IS_NATIVE = Capacitor.isNativePlatform();
 
-// Android APK builds set this at build time so the OAuth redirect can never
-// fall back to the Vite development origin. The explicit redirect variable
-// makes the production callback part of the Android build contract.
 const IS_ANDROID_BUILD = import.meta.env.VITE_CAPACITOR_ANDROID_BUILD === 'true';
 const NATIVE_GOOGLE_REDIRECT_URL = import.meta.env.VITE_GOOGLE_REDIRECT_URL || 'gocanteen://auth/callback';
 export const GOOGLE_REDIRECT_URL = IS_NATIVE || IS_ANDROID_BUILD
@@ -20,11 +17,15 @@ export const supabase = supabaseEnabled
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        // Native OAuth is completed explicitly from the existing Capacitor
-        // appUrlOpen handler. Browser OAuth keeps URL detection enabled.
         detectSessionInUrl: !(IS_NATIVE || IS_ANDROID_BUILD),
         flowType: 'pkce'
       }
     })
   : null;
-export const internalEmailForLogin = (id: string) => `${id}@gocanteen.local`;
+
+export const normalizeMobileNumber = (value: string) => {
+  const digits = String(value || '').trim().replace(/[^0-9]/g, '');
+  return /^91[6-9][0-9]{9}$/.test(digits) ? digits.slice(-10) : digits;
+};
+
+export const internalEmailForLogin = (id: string) => `${normalizeMobileNumber(id)}@gocanteen.local`;
