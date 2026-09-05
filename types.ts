@@ -1,7 +1,8 @@
 export type Role = 'employee' | 'admin';
-export type AdminRole = 'owner' | 'staff_admin';
+export type AdminRole = 'owner' | 'master_admin' | 'staff_admin';
+export type AdminPermission = 'dashboard'|'members'|'orders'|'guest_orders'|'menu'|'daily_reports'|'monthly_reports'|'revenue'|'expenses'|'bills'|'payments'|'time_management'|'holidays';
 export type Status = 'active' | 'blocked' | 'deleted';
-export interface User { id:string; name:string; mobile:string; password:string; role:Role; adminRole?:AdminRole; status:Status; isFirstLogin?:boolean; canteenId?:string; canteenName?:string; needsCanteenSetup?:boolean; authProvider?:'password'|'google'; memberLoginMode?:'sr'|'mobile'; }
+export interface User { id:string; name:string; mobile:string; password:string; role:Role; adminRole?:AdminRole; permissions?:AdminPermission[]; status:Status; isFirstLogin?:boolean; canteenId?:string; canteenName?:string; needsCanteenSetup?:boolean; authProvider?:'password'|'google'; memberLoginMode?:'sr'|'mobile'; }
 export interface MenuItem { itemCode:string; itemName:string; unitPrice:number; active:boolean; archived?:boolean; }
 export interface DailyMenuItem extends MenuItem { menuDate:string; }
 export type OrderItems=Record<string,boolean>;
