@@ -21,7 +21,7 @@ export const supabase = supabaseEnabled
         autoRefreshToken: true,
         // Native OAuth is completed explicitly from the existing Capacitor
         // appUrlOpen handler. Browser OAuth keeps URL detection enabled.
-        detectSessionInUrl: !IS_NATIVE,
+        detectSessionInUrl: !(IS_NATIVE || IS_ANDROID_BUILD),
         flowType: 'pkce'
       }
     })
