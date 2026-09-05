@@ -26,18 +26,9 @@ settings as (
   limit 1
 )
 select case
-  -- Any completed month can be published at any time.
   when make_date(p_year,p_month,1) < (select month_start from current_period) then true
-
-  -- Future months are never publishable.
   when make_date(p_year,p_month,1) > (select month_start from current_period) then false
-
-  -- Current month: if order-time control is disabled, publishing is open.
   when not coalesce((select enabled from settings),false) then true
-
-  -- Current month: publishing opens after the employee order window closes.
-  -- Deliberately do not check holiday status here. Holidays restrict ordering,
-  -- not bill publishing.
   else (select ts::time >= end_time from local_now,settings)
 end;
 $$;
