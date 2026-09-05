@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
+import { normalizeMobileNumber } from '../../supabase';
 
 const Login: React.FC = () => {
     const [userId, setUserId] = useState('');
@@ -9,12 +10,18 @@ const Login: React.FC = () => {
     const [googleBusy, setGoogleBusy] = useState(false);
     const { loginWithCredentials, loginWithGoogle } = useAuth();
     const { users } = useData();
+    const looksLikeLegacyId = users.some(u => u.id === userId.trim()) || (userId.trim().length === 5 && /^\d{5}$/.test(userId.trim()));
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+        const normalized = normalizeMobileNumber(userId.trim());
+        if (!looksLikeLegacyId && normalized && !/^[6-9][0-9]{9}$/.test(normalized)) {
+            setError('Please enter a valid Mobile Number.');
+            return;
+        }
         const result = await loginWithCredentials(userId.trim(), password, users);
-        if (!result.ok) setError(result.error || 'Invalid User ID or Password.');
+        if (!result.ok) setError(result.error || (looksLikeLegacyId ? 'Employee ID or password is incorrect.' : 'Invalid Mobile Number or Password.'));
     };
 
     const handleGoogle = async () => {
@@ -36,7 +43,7 @@ const Login: React.FC = () => {
           </div>
           <form className="mt-7 space-y-4" onSubmit={handleSubmit}>
             {error && <div className="rounded-md bg-red-100 p-3 text-sm text-red-700">{error}</div>}
-            <input required className="relative block min-h-12 w-full rounded-lg border border-gray-300 px-3 py-3 text-gray-900" placeholder="SR Number / Member ID" value={userId} onChange={e => setUserId(e.target.value)} />
+            <input required inputMode="numeric" className="relative block min-h-12 w-full rounded-lg border border-gray-300 px-3 py-3 text-gray-900" placeholder={looksLikeLegacyId ? 'SR Number' : 'Mobile Number'} value={userId} onChange={e => setUserId(e.target.value)} />
             <input required type="password" className="relative block min-h-12 w-full rounded-lg border border-gray-300 px-3 py-3 text-gray-900" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
             <button className="relative flex min-h-12 w-full items-center justify-center rounded-lg bg-primary-600 px-4 py-3 text-sm font-semibold text-white hover:bg-primary-700">Sign in</button>
           </form>
