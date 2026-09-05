@@ -1,4 +1,4 @@
-import React,{createContext,useContext,useState,useEffect,useCallback,ReactNode}from'react';
+import React,{createContext,useContext,useState,useEffect,useCallback,useRef,ReactNode}from'react';
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { User } from '../types';
@@ -11,7 +11,7 @@ const AuthContext=createContext<AuthContextType|undefined>(undefined);
 const GENERIC_LOGIN_ERROR='Employee ID or password is incorrect.';
 
 export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
- const[user,setUser]=useState<User|null>(null);const[loading,setLoading]=useState(true);
+ const[user,setUser]=useState<User|null>(null);const[loading,setLoading]=useState(true);const restoringRef=useRef(true);
  const clearInvalidSession=useCallback(async()=>{sessionStorage.removeItem('canteen_user');setUser(null);if(supabaseEnabled&&supabase){try{await supabase.auth.signOut()}catch{}}},[]);
  const ensureGoogleAdmin=useCallback(async(authUser:any)=>{if(!supabase||authUser?.app_metadata?.provider!=='google')return null;const{data,error}=await supabase.rpc('ensure_google_admin');if(error)throw error;return data as any},[]);
  const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null>=>{
@@ -19,11 +19,12 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
    const provider=authUser.app_metadata?.provider==='google'?'google':'password';
    if(provider==='google')await ensureGoogleAdmin(authUser);
    const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,status,is_first_login,canteen_id,onboarding_completed').eq('id',authUser.id).maybeSingle();
-   if(error||!profile)return null;
+   if(error)throw error;
+   if(!profile)return null;
    const employeeMatch=!requestedId||(String(profile.employee_code||'')===requestedId||String(profile.sr_number||'')===requestedId);
    if(!employeeMatch||String(profile.status||'')!=='active'||!['employee','admin'].includes(String(profile.role||'')))return null;
    let canteenName='';
-   if(profile.canteen_id){const{data:c}=await supabase.from('canteens').select('name').eq('id',profile.canteen_id).maybeSingle();canteenName=c?.name||'';}
+   if(profile.canteen_id){const{data:c,error:canteenError}=await supabase.from('canteens').select('name').eq('id',profile.canteen_id).maybeSingle();if(canteenError)throw canteenError;canteenName=c?.name||'';}
    return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false,authProvider:provider};
  },[ensureGoogleAdmin]);
  useEffect(()=>{let alive=true;let nativeHandle:{remove:()=>Promise<void>}|null=null;
@@ -36,11 +37,8 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
      if(code){const{error}=await supabase.auth.exchangeCodeForSession(code);if(error)throw error;}
    };
    const restore=async()=>{
-     if(!supabaseEnabled||!supabase){const stored=sessionStorage.getItem('canteen_user');if(stored)try{if(alive)setUser(JSON.parse(stored))}catch{sessionStorage.removeItem('canteen_user')}if(alive)setLoading(false);return}
+     if(!supabaseEnabled||!supabase){const stored=sessionStorage.getItem('canteen_user');if(stored)try{if(alive)setUser(JSON.parse(stored))}catch{sessionStorage.removeItem('canteen_user')}if(alive)setLoading(false);restoringRef.current=false;return}
      try{
-       // On a cold Android launch, consume the deep link before reading the
-       // session. This prevents the initial render from falling through to
-       // Member Login while the OAuth code is still being exchanged.
        if(Capacitor.isNativePlatform()||import.meta.env.VITE_CAPACITOR_ANDROID_BUILD==='true'){
          const launch=await App.getLaunchUrl();
          if(launch?.url)await exchangeNativeCallback(launch.url);
@@ -53,9 +51,10 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
        if(alive){console.warn('OAuth callback/session restore failed.',error);sessionStorage.removeItem('canteen_user');setUser(null)}
      }
      if(alive)setLoading(false);
+     restoringRef.current=false;
    };
    void restore();
-   if(supabase){const{data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{void(async()=>{if(!alive)return;if(session?.user){try{const resolved=await resolveAuthenticatedProfile(session.user);if(resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else{await clearInvalidSession()}}catch{await clearInvalidSession()}}else{sessionStorage.removeItem('canteen_user');setUser(null)}})()});
+   if(supabase){const{data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{if(restoringRef.current)return;void(async()=>{if(!alive)return;if(session?.user){try{const resolved=await resolveAuthenticatedProfile(session.user);if(resolved){sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved)}else{await clearInvalidSession()}}catch(error){console.warn('Authenticated profile resolution failed after auth state change.',error)}}else{sessionStorage.removeItem('canteen_user');setUser(null)}})()});
      if(Capacitor.isNativePlatform()||import.meta.env.VITE_CAPACITOR_ANDROID_BUILD==='true'){void App.addListener('appUrlOpen',event=>void exchangeNativeCallback(event.url).catch(error=>console.warn('Google callback handling failed.',error))).then(handle=>{nativeHandle=handle});}
      return()=>{alive=false;subscription.unsubscribe();if(nativeHandle)void nativeHandle.remove()}
    }
