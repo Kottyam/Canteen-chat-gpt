@@ -2,12 +2,13 @@ import React,{createContext,useContext,useState,useEffect,useCallback,useRef,Rea
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
-import { User } from '../types';
+import { User,AdminPermission } from '../types';
 import { supabase,supabaseEnabled,internalEmailForLogin,normalizeMobileNumber,GOOGLE_REDIRECT_URL } from '../supabase';
 import { resetEmployeePassword } from '../services/supabaseSync';
 import { DEFAULT_EMPLOYEE_PASSWORD } from '../constants';
 
-interface AuthContextType{user:User|null;login:(user:User)=>void;loginWithCredentials:(userId:string,password:string,localUsers:User[])=>Promise<{ok:boolean;error?:string}>;loginWithGoogle:()=>Promise<{ok:boolean;error?:string}>;logout:()=>void;updateUser:(updatedUser:User)=>void;loading:boolean;}
+export const ADMIN_PERMISSIONS:AdminPermission[]=['dashboard','members','orders','guest_orders','menu','daily_reports','monthly_reports','revenue','expenses','bills','payments','time_management','holidays'];
+interface AuthContextType{user:User|null;login:(user:User)=>void;loginWithCredentials:(userId:string,password:string,localUsers:User[])=>Promise<{ok:boolean;error?:string}>;loginWithGoogle:()=>Promise<{ok:boolean;error?:string}>;logout:()=>void;updateUser:(updatedUser:User)=>void;loading:boolean;hasPermission:(permission:AdminPermission)=>boolean;isOwner:boolean;}
 const AuthContext=createContext<AuthContextType|undefined>(undefined);
 const GENERIC_LOGIN_ERROR='Employee ID or password is incorrect.';
 const MOBILE_LOGIN_ERROR='Invalid Mobile Number or Password.';
@@ -22,14 +23,17 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
    const provider=authUser.app_metadata?.provider==='google'?'google':'password';
    if(provider==='google')await ensureGoogleAdmin(authUser);
    const{data:profile,error}=await supabase.from('profiles').select('id,employee_code,sr_number,full_name,mobile_number,role,admin_role,status,is_first_login,canteen_id,onboarding_completed').eq('id',authUser.id).maybeSingle();
-   if(error)throw error;
-   if(!profile)return null;
+   if(error)throw error;if(!profile)return null;
    const requestedLegacyAdmin=requestedId==='229132'&&String(profile.employee_code||'')==='admin'&&String(profile.role||'')==='admin';
    const employeeMatch=!requestedId||String(profile.employee_code||'')===requestedId||String(profile.sr_number||'')===requestedId||requestedLegacyAdmin;
    if(!employeeMatch||String(profile.status||'')!=='active'||!['employee','admin'].includes(String(profile.role||'')))return null;
-   let canteenName='';let memberLoginMode:'sr'|'mobile'='sr';
+   let canteenName='';let memberLoginMode:'sr'|'mobile'='sr';let permissions:AdminPermission[]=[];
    if(profile.canteen_id){const{data:c,error:canteenError}=await supabase.from('canteens').select('name,member_login_mode').eq('id',profile.canteen_id).maybeSingle();if(canteenError)throw canteenError;canteenName=c?.name||'';memberLoginMode=c?.member_login_mode==='mobile'?'mobile':'sr';}
-   return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,adminRole:profile.role==='admin'?(profile.admin_role==='staff_admin'?'staff_admin':'owner'):undefined,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false,authProvider:provider,memberLoginMode};
+   if(profile.role==='admin'){
+     if(profile.admin_role==='owner'&&provider==='google')permissions=[...ADMIN_PERMISSIONS];
+     else{const{data:rows,error:permissionError}=await supabase.from('admin_permissions').select('permission').eq('admin_id',profile.id).eq('enabled',true);if(permissionError)throw permissionError;permissions=(rows||[]).map((r:any)=>r.permission).filter((p:any)=>ADMIN_PERMISSIONS.includes(p));}
+   }
+   return{id:profile.employee_code||profile.sr_number||profile.id,name:profile.full_name||'',mobile:profile.mobile_number||'',password:'',role:profile.role,adminRole:profile.role==='admin'?(profile.admin_role==='owner'?'owner':profile.admin_role==='master_admin'?'master_admin':'staff_admin'):undefined,permissions,status:profile.status,isFirstLogin:Boolean(profile.is_first_login),canteenId:profile.canteen_id||undefined,canteenName,needsCanteenSetup:profile.role==='admin'&&profile.onboarding_completed===false,authProvider:provider,memberLoginMode};
  },[ensureGoogleAdmin]);
  const applyCurrentSession=useCallback(async()=>{if(!supabase)return false;const{data:{session}}=await supabase.auth.getSession();if(!session?.user){sessionStorage.removeItem('canteen_user');setUser(null);return false}const resolved=await resolveAuthenticatedProfile(session.user);if(!resolved){await clearInvalidSession();return false}sessionStorage.setItem('canteen_user',JSON.stringify(resolved));setUser(resolved);return true},[clearInvalidSession,resolveAuthenticatedProfile]);
  useEffect(()=>{let alive=true;let nativeHandle:{remove:()=>Promise<void>}|null=null;
@@ -40,11 +44,7 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
  },[applyCurrentSession,clearInvalidSession,resolveAuthenticatedProfile]);
  const login=useCallback((u:User)=>{sessionStorage.setItem('canteen_user',JSON.stringify(u));setUser(u)},[]);
  const loginWithCredentials=useCallback(async(userId:string,password:string,localUsers:User[])=>{
-   const trimmed=userId.trim();
-   const local=localUsers.find(u=>u.id===trimmed);
-   const normalizedMobile=normalizeMobileNumber(trimmed);
-   const isValidMobile=/^[6-9][0-9]{9}$/.test(normalizedMobile);
-   const isLegacyLogin=Boolean(local)||!isValidMobile;
+   const trimmed=userId.trim();const local=localUsers.find(u=>u.id===trimmed);const normalizedMobile=normalizeMobileNumber(trimmed);const isValidMobile=/^[6-9][0-9]{9}$/.test(normalizedMobile);const isLegacyLogin=Boolean(local)||!isValidMobile;
    if(isLegacyLogin&&local&&(local.status==='blocked'||local.status==='deleted'))return{ok:false,error:GENERIC_LOGIN_ERROR};
    if(!isLegacyLogin&&!isValidMobile)return{ok:false,error:'Please enter a valid Mobile Number.'};
    const loginId=isLegacyLogin?trimmed:normalizedMobile;
@@ -54,6 +54,8 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
  const loginWithGoogle=useCallback(async()=>{if(!supabaseEnabled||!supabase)return{ok:false,error:'Google sign-in is unavailable.'};try{const{data,error}=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:GOOGLE_REDIRECT_URL,skipBrowserRedirect:true}});if(error)return{ok:false,error:error.message};if(IS_NATIVE_OAUTH){if(!data?.url)return{ok:false,error:'Google sign-in did not return an authorization URL.'};await Browser.open({url:data.url});}else if(data?.url){window.location.assign(data.url)}else{return{ok:false,error:'Google sign-in did not return an authorization URL.'}}return{ok:true}}catch(error:any){return{ok:false,error:error?.message||'Could not start Google sign-in.'}}},[]);
  const logout=useCallback(async()=>{if(supabaseEnabled&&supabase)await supabase.auth.signOut();sessionStorage.removeItem('canteen_user');setUser(null)},[]);
  const updateUser=useCallback((u:User)=>{sessionStorage.setItem('canteen_user',JSON.stringify(u));setUser(u)},[]);
- return <AuthContext.Provider value={{user,login,loginWithCredentials,loginWithGoogle,logout,updateUser,loading}}>{children}</AuthContext.Provider>;
+ const isOwner=user?.role==='admin'&&user.adminRole==='owner'&&user.authProvider==='google';
+ const hasPermission=useCallback((permission:AdminPermission)=>Boolean(user?.role==='admin'&&(isOwner||user.permissions?.includes(permission))),[isOwner,user]);
+ return <AuthContext.Provider value={{user,login,loginWithCredentials,loginWithGoogle,logout,updateUser,loading,hasPermission,isOwner:Boolean(isOwner)}}>{children}</AuthContext.Provider>;
 };
 export const useAuth=()=>{const context=useContext(AuthContext);if(!context)throw new Error('useAuth must be used within AuthProvider');return context};
