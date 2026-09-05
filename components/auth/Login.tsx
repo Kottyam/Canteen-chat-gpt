@@ -21,7 +21,7 @@ const Login: React.FC = () => {
             return;
         }
         const result = await loginWithCredentials(userId.trim(), password, users);
-        if (!result.ok) setError(result.error || (looksLikeLegacyId ? 'Employee ID or password is incorrect.' : 'Invalid Mobile Number or Password.'));
+        if (!result.ok) setError(result.error || (looksLikeLegacyId ? 'Member ID or password is incorrect.' : 'Invalid Mobile Number or Password.'));
     };
 
     const handleGoogle = async () => {
