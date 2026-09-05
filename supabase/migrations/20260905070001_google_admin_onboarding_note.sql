@@ -1,3 +1,0 @@
--- Tenant creation for a new Google Admin is handled by
--- 20260905070000_google_admin_onboarding_creates_tenant_on_save.sql.
--- This file intentionally contains no additional schema changes.
