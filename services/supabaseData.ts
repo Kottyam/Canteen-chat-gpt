@@ -9,7 +9,7 @@ const requireClient=()=>{if(!supabaseEnabled||!supabase)throw new Error('Supabas
 const profileSelect='id,employee_code,sr_number,full_name,mobile_number,role,status,is_first_login,canteen_id';
 
 const loadMemberLoginMode=async(profileRows:any[]):Promise<'sr'|'mobile'>=>{const client=requireClient();const canteenId=profileRows.find(p=>p?.canteen_id)?.canteen_id;if(!canteenId)return'sr';const{data,error}=await client.from('canteens').select('member_login_mode').eq('id',canteenId).maybeSingle();if(error)throw error;return data?.member_login_mode==='mobile'?'mobile':'sr'};
-const mapUsers=(data:any[],memberLoginMode:'sr'|'mobile'):User[]=>data.map((p:any)=>({id:p.employee_code||p.sr_number||p.id,name:p.full_name||'',mobile:p.mobile_number||'',password:'',role:p.role,status:p.status||'active',isFirstLogin:Boolean(p.is_first_login),canteenId:p.canteen_id||undefined,memberLoginMode}));
+const mapUsers=(data:any[],memberLoginMode:'sr'|'mobile'):User[]=>data.map((p:any)=>({id:p.role==='admin'&&p.employee_code==='admin'&&p.canteen_id?'229132':p.employee_code||p.sr_number||p.id,name:p.full_name||'',mobile:p.mobile_number||'',password:'',role:p.role,status:p.status||'active',isFirstLogin:Boolean(p.is_first_login),canteenId:p.canteen_id||undefined,memberLoginMode}));
 
 export async function loadScopedUsers():Promise<User[]>{const client=requireClient();const{data,error}=await client.from('profiles').select(profileSelect);if(error)throw error;const mode=await loadMemberLoginMode(data||[]);return mapUsers(data||[],mode)}
 
