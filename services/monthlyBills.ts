@@ -47,12 +47,31 @@ export async function loadAdminBillPublishStates(month:number,year:number):Promi
   if(!supabaseEnabled||!supabase)return{};
   const{data,error}=await supabase.rpc('get_admin_bill_publish_states',{p_month:month,p_year:year});
   if(error)throw error;
-  return Object.fromEntries((data||[]).map((row:any)=>[row.employee_id,{
-    employee_id:row.employee_id,bill_id:row.bill_id||null,current_total:Number(row.current_total||0),
-    requested_total:Number(row.requested_total||0),new_amount:Number(row.new_amount||0),
-    last_covered_at:row.last_covered_at||null,last_covered_through:row.last_covered_through||null,
-    can_publish:Boolean(row.can_publish),publish_message:row.publish_message||null,
-  }]));
+
+  // The application User.id is the employee code/SR number, while the publish-state
+  // RPC correctly returns the Supabase profile UUID. Resolve that UUID to the same
+  // stable employee key used by MonthlyReport before building the state map.
+  const stateRows=data||[];
+  const employeeIds=stateRows.map((row:any)=>row.employee_id).filter(Boolean);
+  const profileMap=new Map<string,string>();
+  if(employeeIds.length){
+    const{data:profiles,error:profileError}=await supabase.from('profiles').select('id,employee_code,sr_number').in('id',employeeIds);
+    if(profileError)throw profileError;
+    (profiles||[]).forEach((p:any)=>{
+      const key=p.employee_code||p.sr_number;
+      if(key)profileMap.set(p.id,key);
+    });
+  }
+
+  return Object.fromEntries(stateRows.map((row:any)=>{
+    const key=profileMap.get(row.employee_id)||row.employee_id;
+    return[key,{
+      employee_id:row.employee_id,bill_id:row.bill_id||null,current_total:Number(row.current_total||0),
+      requested_total:Number(row.requested_total||0),new_amount:Number(row.new_amount||0),
+      last_covered_at:row.last_covered_at||null,last_covered_through:row.last_covered_through||null,
+      can_publish:Boolean(row.can_publish),publish_message:row.publish_message||null,
+    }];
+  }));
 }
 
 async function employeeProfile(employeeCode:string){
