@@ -6,7 +6,7 @@ export interface MenuItem { itemCode:string; itemName:string; unitPrice:number; 
 export interface DailyMenuItem extends MenuItem { menuDate:string; }
 export type OrderItems=Record<string,boolean>;
 export type OrderItemPrices=Record<string,number>;
-export type OrderItemNames=Record<string,number>;
+export type OrderItemNames=Record<string,string>;
 export type GuestOrderItems=Record<string,boolean>;
 export type GuestOrderQuantities=Record<string,number>;
 export type OrderSource='employee'|'admin'|'guest';
