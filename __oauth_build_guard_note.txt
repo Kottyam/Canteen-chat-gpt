@@ -1,1 +1,0 @@
-Android OAuth build guard: production APK uses gocanteen://auth/callback and rejects localhost:3000 in the production web bundle.
