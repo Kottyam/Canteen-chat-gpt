@@ -1,0 +1,2 @@
+-- Payment publishing fix was applied to production through Supabase.
+-- This migration is intentionally a documentation marker and performs no schema/data mutation.
