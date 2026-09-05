@@ -17,7 +17,7 @@ export const AuthProvider:React.FC<{children:ReactNode}>=({children})=>{
  const[user,setUser]=useState<User|null>(null);const[loading,setLoading]=useState(true);const restoringRef=useRef(true);
  const clearInvalidSession=useCallback(async()=>{sessionStorage.removeItem('canteen_user');setUser(null);if(supabaseEnabled&&supabase){try{await supabase.auth.signOut()}catch{}}},[]);
  const ensureGoogleAdmin=useCallback(async(authUser:any)=>{if(!supabase||authUser?.app_metadata?.provider!=='google')return null;const{data,error}=await supabase.rpc('ensure_google_admin');if(error)throw error;return data as any},[]);
- const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null=>{
+ const resolveAuthenticatedProfile=useCallback(async(authUser:any,requestedId?:string):Promise<User|null>=>{
    if(!supabase||!authUser?.id)return null;
    const provider=authUser.app_metadata?.provider==='google'?'google':'password';
    if(provider==='google')await ensureGoogleAdmin(authUser);
