@@ -11,7 +11,7 @@ async function employeeProfile(employeeCode:string){
 }
 
 export async function saveEmployeeAdjustment(employeeCode:string,date:string,amount:number,description='') {
-  const profile=await employeeProfile(employeeCode); if(!profile) throw new Error('Employee profile not found.');
+  const profile=await employeeProfile(employeeCode); if(!profile) throw new Error('Member profile not found.');
   const { error }=await supabase!.from('employee_adjustments').insert({employee_id:profile.id,adjustment_date:date,amount:Number(amount),description:description.trim()});
   if(error) throw error;
 }
