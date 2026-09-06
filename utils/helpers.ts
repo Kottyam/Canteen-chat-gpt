@@ -1,11 +1,15 @@
+export const BUSINESS_TIME_ZONE = 'Asia/Kolkata';
 
-export const formatDate = (date: Date): string => {
-  // Always format using the local calendar date. Using toISOString() can
-  // move a selected date to the previous day in India and other timezones.
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+/** Canonical GoCanteen business date. Never derive business dates with toISOString(). */
+export const formatDate = (date: Date = new Date()): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 };
 
 export const parseLocalDate = (dateString: string): Date => {
