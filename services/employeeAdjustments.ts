@@ -1,6 +1,6 @@
 import { supabase, supabaseEnabled } from '../supabase';
 
-export interface EmployeeAdjustment { id:string; employee_id:string; adjustment_date:string; amount:number; description:string; created_at?:string; }
+export interface EmployeeAdjustment { id:string; employee_id:string; adjustment_date:string; amount:number; description:string; created_at?:string; member_name_snapshot?:string|null; member_mobile_snapshot?:string|null; }
 export interface EmployeeAdjustmentForReport extends EmployeeAdjustment { employeeCode:string; }
 
 async function employeeProfile(employeeCode:string){
@@ -24,7 +24,7 @@ export async function updateEmployeeAdjustment(id:string,date:string,amount:numb
 
 export async function loadEmployeeAdjustments(employeeCode:string) {
   const profile=await employeeProfile(employeeCode); if(!profile) return [] as EmployeeAdjustment[];
-  const { data,error }=await supabase!.from('employee_adjustments').select('id,employee_id,adjustment_date,amount,description,created_at').eq('employee_id',profile.id).order('adjustment_date',{ascending:false}).order('created_at',{ascending:false});
+  const { data,error }=await supabase!.from('employee_adjustments').select('id,employee_id,adjustment_date,amount,description,created_at,member_name_snapshot,member_mobile_snapshot').eq('employee_id',profile.id).order('adjustment_date',{ascending:false}).order('created_at',{ascending:false});
   if(error) throw error;
   return (data||[]).map((x:any)=>({...x,amount:Number(x.amount)})) as EmployeeAdjustment[];
 }
