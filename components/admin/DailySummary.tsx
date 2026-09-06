@@ -28,7 +28,7 @@ const DailySummary: React.FC = () => {
           selectedDate,
           selectedDate
         );
-        if (alive) setAdjustments(rows);
+        if (alive) setAdjustments(Array.isArray(rows) ? rows : []);
       } catch {
         if (alive) setAdjustments([]);
       } finally {
@@ -58,9 +58,11 @@ const DailySummary: React.FC = () => {
   const historicalIdentity = (code: string) => {
     const user = resolveUser(code);
     const historicalOrder = day.find(o => o.employeeId === code && (o.memberNameSnapshot || o.memberMobileSnapshot));
-    const name = historicalMemberName(historicalOrder?.memberNameSnapshot, user?.name, user?.status || (historicalOrder?.memberDeleted ? 'deleted' : undefined));
-    const mobile = historicalOrder?.memberMobileSnapshot || memberDisplayMobile({ mobile_number: user?.mobile });
-    return { user, name, mobile };
+    const adjustment = extras.find(a => a.employeeCode === code && (a.member_name_snapshot || a.member_mobile_snapshot));
+    const deleted = Boolean(user?.status === 'deleted' || historicalOrder?.memberDeleted);
+    const name = historicalMemberName(historicalOrder?.memberNameSnapshot || adjustment?.member_name_snapshot, user?.name, deleted ? 'deleted' : user?.status);
+    const mobile = memberDisplayMobile({ member_mobile_snapshot: historicalOrder?.memberMobileSnapshot || adjustment?.member_mobile_snapshot, mobile_number: user?.mobile });
+    return { name, mobile };
   };
 
   const itemSummary = useMemo<ItemSummary[]>(() => {
