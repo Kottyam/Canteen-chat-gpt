@@ -29,17 +29,17 @@ export async function loadEmployeeAdjustments(employeeCode:string) {
   return (data||[]).map((x:any)=>({...x,amount:Number(x.amount)})) as EmployeeAdjustment[];
 }
 
-export async function deleteEmployeeAdjustment(id:string) {
-  if(!supabaseEnabled||!supabase) return;
-  const { error }=await supabase.from('employee_adjustments').delete().eq('id',id);
-  if(error) throw error;
-}
-
 export async function loadEmployeeAdjustmentTotal(employeeCode:string,dateStart:string,dateEnd:string) {
   const profile=await employeeProfile(employeeCode); if(!profile) return 0;
   const { data,error }=await supabase!.from('employee_adjustments').select('amount').eq('employee_id',profile.id).gte('adjustment_date',dateStart).lte('adjustment_date',dateEnd);
   if(error) throw error;
   return (data||[]).reduce((s:number,x:any)=>s+Number(x.amount||0),0);
+}
+
+export async function deleteEmployeeAdjustment(id:string) {
+  if(!supabaseEnabled||!supabase) return;
+  const { error }=await supabase.from('employee_adjustments').delete().eq('id',id);
+  if(error) throw error;
 }
 
 export async function loadEmployeeAdjustmentsForUsers(employeeCodes:string[],dateStart:string,dateEnd:string) {
