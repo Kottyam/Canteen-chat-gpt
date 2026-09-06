@@ -3,6 +3,7 @@ import { useData } from '../../context/DataContext';
 import { downloadDailyPdf, orderTotal, guestOrderTotal, orderText } from '../../utils/pdf';
 import { formatDate } from '../../utils/helpers';
 import { EmployeeAdjustmentForReport, loadEmployeeAdjustmentsForUsers } from '../../services/employeeAdjustments';
+import { historicalMemberName, memberDisplayMobile } from '../../utils/memberIdentity';
 
 interface ItemSummary { name: string; totalQty: number; employeeQty: number; guestQty: number; }
 
@@ -46,6 +47,21 @@ const DailySummary: React.FC = () => {
     extras.forEach(a => { result[a.employeeCode] = (result[a.employeeCode] || 0) + Number(a.amount || 0); });
     return result;
   }, [extras]);
+
+  const userByIdentity = useMemo(() => {
+    const byId = new Map(users.map(u => [u.id, u]));
+    const byMobile = new Map(users.filter(u => u.mobile).map(u => [u.mobile, u]));
+    return { byId, byMobile };
+  }, [users]);
+
+  const resolveUser = (code: string) => userByIdentity.byId.get(code) || userByIdentity.byMobile.get(code);
+  const historicalIdentity = (code: string) => {
+    const user = resolveUser(code);
+    const historicalOrder = day.find(o => o.employeeId === code && (o.memberNameSnapshot || o.memberMobileSnapshot));
+    const name = historicalMemberName(historicalOrder?.memberNameSnapshot, user?.name, user?.status || (historicalOrder?.memberDeleted ? 'deleted' : undefined));
+    const mobile = historicalOrder?.memberMobileSnapshot || memberDisplayMobile({ mobile_number: user?.mobile });
+    return { user, name, mobile };
+  };
 
   const itemSummary = useMemo<ItemSummary[]>(() => {
     const result = new Map<string, ItemSummary>();
@@ -95,10 +111,11 @@ const DailySummary: React.FC = () => {
             const employeeFood = employeeOrders.reduce((s, o) => s + orderTotal(o, prices), 0);
             const guestFood = employeeOrders.reduce((s, o) => s + guestOrderTotal(o, prices), 0);
             const extra = extraByEmployee[code] || 0;
+            const { name, mobile } = historicalIdentity(code);
             const itemText = employeeOrders.flatMap(o => [orderText(o), ...Object.keys(o.guestItems || {}).filter(c => o.guestItems?.[c]).map(c => `${o.guestItemNames?.[c] || o.itemNames?.[c] || c} × ${Math.max(1, Number(o.guestItemQuantities?.[c] || 1))}`)]).filter(Boolean).join(' · ');
-            return <div key={code} className="rounded-lg border bg-white p-4"><div className="font-semibold text-gray-800">{users.find(u => u.id === code)?.name || code}</div><div className="text-sm text-gray-500">SR: {code}</div><div className="mt-2 text-sm">Member Food: ₹{employeeFood.toFixed(2)}</div><div className="mt-1 text-sm">Guest Food: ₹{guestFood.toFixed(2)}</div><div className="mt-2 text-xs text-gray-500">{itemText || 'No items'}</div>{extra !== 0 && <div className="mt-2 text-sm font-medium text-primary-700">Admin Added: ₹{extra.toFixed(2)}</div>}<div className="mt-2 border-t pt-2 font-semibold">Member Total: ₹{(employeeFood + guestFood + extra).toFixed(2)}</div></div>;
+            return <div key={code} className="rounded-lg border bg-white p-4"><div className="font-semibold text-gray-800">{name}</div><div className="text-sm text-gray-500">Mobile Number: {mobile || '—'}</div><div className="mt-2 text-sm">Member Food: ₹{employeeFood.toFixed(2)}</div><div className="mt-1 text-sm">Guest Food: ₹{guestFood.toFixed(2)}</div><div className="mt-2 text-xs text-gray-500">{itemText || 'No items'}</div>{extra !== 0 && <div className="mt-2 text-sm font-medium text-primary-700">Admin Added: ₹{extra.toFixed(2)}</div>}<div className="mt-2 border-t pt-2 font-semibold">Member Total: ₹{(employeeFood + guestFood + extra).toFixed(2)}</div></div>;
           })}</div>
-          <div className="hidden overflow-x-auto rounded-lg border md:block"><table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="p-3 text-left text-sm">Name</th><th className="p-3 text-left text-sm">SR Number</th><th className="p-3 text-right text-sm">Member Food</th><th className="p-3 text-right text-sm">Guest Food</th><th className="p-3 text-right text-sm">Admin Added</th><th className="p-3 text-right text-sm">Total</th></tr></thead><tbody>{employeeCodes.map(code => { const employeeOrders = day.filter(o => o.employeeId === code); const employeeFood = employeeOrders.reduce((s, o) => s + orderTotal(o, prices), 0); const guestFood = employeeOrders.reduce((s, o) => s + guestOrderTotal(o, prices), 0); const extra = extraByEmployee[code] || 0; return <tr key={code} className="border-t"><td className="p-3">{users.find(u => u.id === code)?.name || code}</td><td className="p-3">{code}</td><td className="p-3 text-right">₹{employeeFood.toFixed(2)}</td><td className="p-3 text-right">₹{guestFood.toFixed(2)}</td><td className="p-3 text-right">₹{extra.toFixed(2)}</td><td className="p-3 text-right font-semibold">₹{(employeeFood + guestFood + extra).toFixed(2)}</td></tr>; })}</tbody></table></div>
+          <div className="hidden overflow-x-auto rounded-lg border md:block"><table className="min-w-full bg-white"><thead className="bg-gray-50"><tr><th className="p-3 text-left text-sm">Name</th><th className="p-3 text-left text-sm">Mobile Number</th><th className="p-3 text-right text-sm">Member Food</th><th className="p-3 text-right text-sm">Guest Food</th><th className="p-3 text-right text-sm">Admin Added</th><th className="p-3 text-right text-sm">Total</th></tr></thead><tbody>{employeeCodes.map(code => { const employeeOrders = day.filter(o => o.employeeId === code); const employeeFood = employeeOrders.reduce((s, o) => s + orderTotal(o, prices), 0); const guestFood = employeeOrders.reduce((s, o) => s + guestOrderTotal(o, prices), 0); const extra = extraByEmployee[code] || 0; const { name, mobile } = historicalIdentity(code); return <tr key={code} className="border-t"><td className="p-3">{name}</td><td className="p-3">{mobile || '—'}</td><td className="p-3 text-right">₹{employeeFood.toFixed(2)}</td><td className="p-3 text-right">₹{guestFood.toFixed(2)}</td><td className="p-3 text-right">₹{extra.toFixed(2)}</td><td className="p-3 text-right font-semibold">₹{(employeeFood + guestFood + extra).toFixed(2)}</td></tr>; })}</tbody></table></div>
         </>
       )}
     </div>
