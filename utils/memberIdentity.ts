@@ -9,11 +9,16 @@ export type MemberIdentityRecord={
   id?:string|null;
 };
 
+const DELETED_MEMBER_PREFIX='Deleted Member';
+
+/** Strip existing Deleted Member prefixes so historical labels are added exactly once. */
+const normalizeDeletedMemberName=(name:string)=>name.replace(/^(?:Deleted Member\s*(?:—\s*|-)\s*)+/i,'').trim()||'Unknown';
+
 /** Single user-facing historical Member identity rule. Never exposes technical IDs. */
 export const memberDisplayName=(record?:MemberIdentityRecord|null)=>{
   if(!record)return 'Deleted Member';
   const name=record.member_name_snapshot||record.full_name||'';
-  if(record.status==='deleted' || Boolean(record.member_name_snapshot&&record.status==='deleted')) return `Deleted Member — ${name||'Unknown'}`;
+  if(record.status==='deleted')return `${DELETED_MEMBER_PREFIX} — ${normalizeDeletedMemberName(name)}`;
   return name||'Member';
 };
 
@@ -27,5 +32,5 @@ export const memberDisplayIdentity=(record?:MemberIdentityRecord|null)=>({
 /** For historical records, snapshots win; technical IDs are never a UI fallback. */
 export const historicalMemberName=(snapshot?:string|null,currentName?:string|null,status?:string|null)=>{
   const name=snapshot||currentName||'';
-  return status==='deleted'?`Deleted Member — ${name||'Unknown'}`:name||'Member';
+  return status==='deleted'?`${DELETED_MEMBER_PREFIX} — ${normalizeDeletedMemberName(name)}`:name||'Member';
 };
