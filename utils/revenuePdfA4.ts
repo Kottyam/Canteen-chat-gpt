@@ -139,9 +139,10 @@ function summary(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,gene
   const labelW=PRINT_W-60,amountW=60;
   d.setDrawColor(160,160,160);d.setLineWidth(.2);
   rows.forEach((row,i)=>{
-    const bold=i>=rows.length-3;setBodyFont(d,bold);
-    d.rect(M,y,labelW,rowH);d.rect(M+labelW,y,amountW,rowH);
+    const bold=i>=rows.length-3;
+    setBodyFont(d,bold);d.rect(M,y,labelW,rowH);d.rect(M+labelW,y,amountW,rowH);
     d.text(row[0],M+labelW/2,y+4.8,{align:'center'});
+    setBodyFont(d,false);
     const value=moneyValue(row[1]);const textW=d.getTextWidth(value),symbolW=2.7,gap=1.1,totalW=symbolW+gap+textW;const left=M+labelW+amountW/2-totalW/2;drawRupeeGlyph(d,left,y+4.8);d.text(value,left+symbolW+gap,y+4.8,{align:'left'});
     y+=rowH;
   });
