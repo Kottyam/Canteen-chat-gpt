@@ -10,10 +10,10 @@ const HEADER_H=8,ROW_LINE=3.8,BODY_TOP=64,BODY_BOTTOM=276,FOOT_Y=288;
 const COL_WIDTHS=[24,62,20,38,46] as const;
 const COL_X=COL_WIDTHS.reduce<number[]>((acc,w,i)=>{acc.push(i===0?M:acc[i-1]+COL_WIDTHS[i-1]);return acc},[]);
 const FONT='helvetica';
-const BODY_SIZE=8;
+const BODY_SIZE=7.5;
 const HEADER_SIZE=7.5;
 const BORDER=[145,145,145] as const;
-const money=(n:number)=>`₹${Number(n||0).toFixed(2)}`;
+const moneyValue=(n:number)=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 
 async function deliver(doc:jsPDF,filename:string){
   const blob=doc.output('blob');
@@ -36,10 +36,12 @@ function header(d:jsPDF,r:MonthlyRevenueReport,m:number,y:number,generatedAt:str
   d.setTextColor(...GREEN);d.setFont(FONT,'bold');d.setFontSize(20);d.text('GO CANTEEN',PAGE_W/2,15,{align:'center'});
   d.setTextColor(35,35,35);d.setFont(FONT,'normal');d.setFontSize(10);d.text('Canteen Management System',PAGE_W/2,22,{align:'center'});
   d.setFont(FONT,'bold');d.setFontSize(14);d.text('REVENUE REPORT',PAGE_W/2,31,{align:'center'});
-  d.setFont(FONT,'normal');d.setFontSize(9);d.text(`Canteen Name: ${r.canteen_name}`,M,43);
-  d.text(`Month: ${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}`,M,49);
-  d.text(`Period: ${formatReportDate(r.start_date)} to ${formatReportDate(r.end_date)}`,M,55);
-  d.setFontSize(8);d.text(`Generated: ${generatedAt}`,PAGE_W-M,43,{align:'right'});
+  d.setFont(FONT,'normal');d.setFontSize(9);
+  const canteenLines=split(d,`Canteen Name: ${r.canteen_name}`,105);
+  canteenLines.forEach((line,i)=>d.text(line,M,43+i*3.8));
+  d.text(`Month: ${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}`,M,49+(canteenLines.length-1)*3.8);
+  d.text(`Period: ${formatReportDate(r.start_date)} to ${formatReportDate(r.end_date)}`,M,55+(canteenLines.length-1)*3.8);
+  d.setFontSize(8);const generatedLines=split(d,`Generated: ${generatedAt}`,65);generatedLines.forEach((line,i)=>d.text(line,PAGE_W-M,43+i*3.8,{align:'right'}));
   return BODY_TOP;
 }
 
@@ -66,6 +68,26 @@ function drawCenteredCell(d:jsPDF,text:string,column:number,y:number,h:number){
   lines.forEach((line,index)=>d.text(line,centerX(column),startY+index*ROW_LINE,{align:'center',baseline:'alphabetic'}));
 }
 
+function drawRupeeGlyph(d:jsPDF,x:number,baseline:number){
+  const w=2.7,h=3.8,top=baseline-3.1;
+  d.setDrawColor(35,35,35);d.setLineWidth(.28);d.setLineCap('butt');
+  d.line(x,top,x+w,top);
+  d.line(x+.15,top+1.05,x+w-.15,top+1.05);
+  d.line(x+.85,top,x+.85,top+1.45);
+  d.line(x+.85,top+1.45,x+1.95,top+1.45);
+  d.line(x+1.95,top+1.45,x+2.35,top+2.05);
+  d.line(x+1.05,top+1.45,x+2.35,top+h);
+}
+
+function drawMoneyCentered(d:jsPDF,amount:number,column:number,y:number,h:number){
+  const value=moneyValue(amount);setBodyFont(d,false);
+  const textW=d.getTextWidth(value),symbolW=2.7,gap=1.1,totalW=symbolW+gap+textW;
+  const left=centerX(column)-totalW/2;
+  const baseline=y+(h-ROW_LINE)/2+2.9;
+  drawRupeeGlyph(d,left,baseline);
+  d.text(value,left+symbolW+gap,baseline,{align:'left'});
+}
+
 function drawRow(d:jsPDF,t:RevenueTransaction,y:number){
   const h=rowHeight(d,t);
   d.setDrawColor(...BORDER);d.setLineWidth(.2);
@@ -74,7 +96,7 @@ function drawRow(d:jsPDF,t:RevenueTransaction,y:number){
   drawCenteredCell(d,t.particulars,1,y,h);
   drawCenteredCell(d,t.quantity==null?'—':String(t.quantity),2,y,h);
   drawCenteredCell(d,t.type,3,y,h);
-  drawCenteredCell(d,money(t.amount),4,y,h);
+  drawMoneyCentered(d,t.amount,4,y,h);
   return h;
 }
 
@@ -120,10 +142,10 @@ function summary(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,gene
     const bold=i>=rows.length-3;setBodyFont(d,bold);
     d.rect(M,y,labelW,rowH);d.rect(M+labelW,y,amountW,rowH);
     d.text(row[0],M+labelW/2,y+4.8,{align:'center'});
-    d.text(money(row[1]),M+labelW+amountW/2,y+4.8,{align:'center'});
+    const value=moneyValue(row[1]);const textW=d.getTextWidth(value),symbolW=2.7,gap=1.1,totalW=symbolW+gap+textW;const left=M+labelW+amountW/2-totalW/2;drawRupeeGlyph(d,left,y+4.8);d.text(value,left+symbolW+gap,y+4.8,{align:'left'});
     y+=rowH;
   });
-  if(contributionActive){setBodyFont(d,false);d.setFontSize(7);d.text('Company Contribution is a breakdown of Gross Food Revenue and is not added again as separate revenue.',M,y+5)}
+  if(contributionActive){setBodyFont(d,false);d.setFontSize(7);const note=split(d,'Company Contribution is a breakdown of Gross Food Revenue and is not added again as separate revenue.',PRINT_W);note.forEach((line,i)=>d.text(line,M,y+5+i*3.2))}
 }
 
 export async function downloadRevenuePdfA4(report:MonthlyRevenueReport,month:number,year:number){
