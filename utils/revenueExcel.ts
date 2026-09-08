@@ -14,14 +14,15 @@ async function deliver(buffer:ArrayBuffer,filename:string){
 }
 
 export async function downloadRevenueExcel(report:MonthlyRevenueReport,month:number,year:number){
-  const rows:any[][]=[];const push=(...v:any[])=>rows.push(v);
-  push(['GO CANTEEN']);push(['Canteen Management System']);push(['REVENUE REPORT']);push([]);push(['Canteen',report.canteen_name]);push(['Month',new Date(year,month-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})]);push(['Period',`${formatReportDate(report.start_date)} to ${formatReportDate(report.end_date)}`]);push([]);
-  push(['Date','Particulars','Type','Amount']);const txStart=rows.length+1;report.transactions.forEach(t=>push(formatReportDate(t.date),t.particulars,t.type,t.amount));const txEnd=rows.length;
-  push([]);push(['EXPENSES']);push(['Date','Particulars','Type','Amount']);const expStart=rows.length+1;report.expenses.forEach(e=>push(formatReportDate(e.date),e.particulars,e.type,e.amount));const expEnd=rows.length;
-  push([]);push(['SUMMARY']);const summaryHeaderRow=rows.length;push(['Normal Food Revenue',null]);push(['Guest Revenue',null]);push(['Admin Added Amount',null]);push(['Additional Revenue',null]);push(['Total Revenue',null]);push(['Total Expenses',null]);push(['Net Revenue',null]);
-  const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:15},{wch:38},{wch:24},{wch:18}];ws['!freeze']={xSplit:0,ySplit:8};
-  const setFormula=(row:number,formula:string)=>{ws[`B${row}`]={t:'n',f:formula};ws[`B${row}`].z='₹#,##0.00'};
-  const s=summaryHeaderRow+1;setFormula(s,`SUMIF(C${txStart}:C${txEnd},"Food Revenue",D${txStart}:D${txEnd})`);setFormula(s+1,`SUMIF(C${txStart}:C${txEnd},"Guest Revenue",D${txStart}:D${txEnd})`);setFormula(s+2,`SUMIF(C${txStart}:C${txEnd},"Admin Added",D${txStart}:D${txEnd})`);setFormula(s+3,`SUMIF(C${txStart}:C${txEnd},"Additional Revenue",D${txStart}:D${txEnd})`);setFormula(s+4,`SUM(B${s}:B${s+3})`);setFormula(s+5,expEnd>=expStart?`SUM(D${expStart}:D${expEnd})`:'0');setFormula(s+6,`B${s+4}-B${s+5}`);
-  for(let r=txStart;r<=txEnd;r++)if(ws[`D${r}`])ws[`D${r}`].z='₹#,##0.00';for(let r=expStart;r<=expEnd;r++)if(ws[`D${r}`])ws[`D${r}`].z='₹#,##0.00';
-  ws['!autofilter']={ref:`A9:D${Math.max(9,txEnd)}`};const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Revenue Report');const out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellStyles:true});await deliver(out,`GoCanteen-Revenue-${year}-${String(month).padStart(2,'0')}.xlsx`);
+  const rows:any[][]=[];const push=(...v:any[])=>rows.push(v);const generatedAt=new Date().toLocaleString('en-IN');
+  push(['GO CANTEEN']);push(['Canteen Management System']);push(['REVENUE REPORT']);push([]);push(['Canteen',report.canteen_name]);push(['Month',new Date(year,month-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})]);push(['Period',`${formatReportDate(report.start_date)} to ${formatReportDate(report.end_date)}`]);push(['Generated',generatedAt]);push([]);
+  push(['Date','Particulars','Quantity','Type','Total Amount']);const txStart=rows.length+1;let lastDate='';report.transactions.forEach(t=>{const displayDate=t.date===lastDate?'':formatReportDate(t.date);lastDate=t.date;push(displayDate,t.particulars,t.quantity==null?null:t.quantity,t.type,t.amount)});const txEnd=rows.length;
+  push([]);push(['FINANCIAL SUMMARY']);
+  const contributionActive=Number(report.company_food_revenue||0)>0;
+  if(contributionActive){push(['Gross Food Revenue',report.gross_food_revenue]);push(['Employee Portion',report.employee_food_revenue]);push(['Company Contribution',report.company_food_revenue]);}
+  else push(['Food Revenue',report.food_revenue]);
+  push(['Guest Revenue',report.guest_revenue]);push(['Admin Added Amount',report.admin_added_revenue]);push(['Additional Revenue',report.additional_revenue]);push(['Total Revenue',report.total_collection]);push(['Total Expenses',report.total_expenses]);push(['NET REVENUE',report.net_revenue]);
+  const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:15},{wch:38},{wch:12},{wch:24},{wch:20}];ws['!freeze']={xSplit:0,ySplit:9};ws['!autofilter']={ref:`A10:E${Math.max(10,txEnd)}`};
+  for(let r=txStart;r<=txEnd;r++){if(ws[`E${r}`])ws[`E${r}`].z='₹#,##0.00';if(ws[`C${r}`]&&typeof ws[`C${r}`].v==='number')ws[`C${r}`].z='0';}
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Revenue Report');const out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellStyles:true});await deliver(out,`GoCanteen-Revenue-${year}-${String(month).padStart(2,'0')}.xlsx`);
 }
