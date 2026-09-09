@@ -31,15 +31,15 @@ as $$
 begin
   if public.bill_publish_order_time_closed(p_bill_date) then
     return query select true::boolean,null::text;
-  end if;
-  if p_bill_date < public.gocanteen_business_timestamp()::date then
-    return query select true::boolean,null::text;
+    return;
   end if;
   if p_bill_date > public.gocanteen_business_timestamp()::date then
     return query select false::boolean,'This bill date is in the future and cannot be published yet.'::text;
+    return;
   end if;
   if exists(select 1 from public.order_window_settings where canteen_id=public.current_canteen_id() and coalesce(enabled,false) and end_time is not null) then
     return query select false::boolean,'Today''s orders are still open. This bill can be published after the Order Time closes.'::text;
+    return;
   end if;
   return query select false::boolean,'Today''s Order Time has no configured closing point. This bill cannot be published yet.'::text;
 end;
