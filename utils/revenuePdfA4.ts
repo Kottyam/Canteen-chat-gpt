@@ -68,24 +68,9 @@ function drawCenteredCell(d:jsPDF,text:string,column:number,y:number,h:number){
   lines.forEach((line,index)=>d.text(line,centerX(column),startY+index*ROW_LINE,{align:'center',baseline:'alphabetic'}));
 }
 
-function drawRupeeGlyph(d:jsPDF,x:number,baseline:number){
-  const w=2.7,h=3.8,top=baseline-3.1;
-  d.setDrawColor(35,35,35);d.setLineWidth(.28);d.setLineCap('butt');
-  d.line(x,top,x+w,top);
-  d.line(x+.15,top+1.05,x+w-.15,top+1.05);
-  d.line(x+.85,top,x+.85,top+1.45);
-  d.line(x+.85,top+1.45,x+1.95,top+1.45);
-  d.line(x+1.95,top+1.45,x+2.35,top+2.05);
-  d.line(x+1.05,top+1.45,x+2.35,top+h);
-}
-
 function drawMoneyCentered(d:jsPDF,amount:number,column:number,y:number,h:number){
-  const value=moneyValue(amount);setBodyFont(d,false);
-  const textW=d.getTextWidth(value),symbolW=2.7,gap=1.1,totalW=symbolW+gap+textW;
-  const left=centerX(column)-totalW/2;
-  const baseline=y+(h-ROW_LINE)/2+2.9;
-  drawRupeeGlyph(d,left,baseline);
-  d.text(value,left+symbolW+gap,baseline,{align:'left'});
+  const text=`Rs ${moneyValue(amount)}`;setBodyFont(d,false);
+  const center=centerX(column);d.text(text,center,y+(h-ROW_LINE)/2+2.9,{align:'center'});
 }
 
 function drawRow(d:jsPDF,t:RevenueTransaction,y:number){
@@ -131,8 +116,8 @@ function summary(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,gene
   const contributionActive=Number(r.company_food_revenue||0)>0;
   const rows:[string,number][]=[];
   if(contributionActive)rows.push(['Gross Food Revenue',r.gross_food_revenue],['Employee Portion',r.employee_food_revenue],['Company Contribution',r.company_food_revenue]);
-  else rows.push(['Food Revenue',r.food_revenue]);
-  rows.push(['Guest Revenue',r.guest_revenue],['Admin Added Amount',r.admin_added_revenue],['Additional Revenue',r.additional_revenue],['Total Revenue',r.total_collection],['Total Expenses',r.total_expenses],['NET REVENUE',r.net_revenue]);
+  else rows.push(['Member Food Revenue',r.food_revenue]);
+  rows.push(['Guest Food Revenue',r.guest_revenue],['Admin Added Amount',r.admin_added_revenue],['Additional Revenue',r.additional_revenue],['Total Revenue',r.total_collection],['Total Expenses',r.total_expenses],['NET REVENUE',r.net_revenue]);
   const titleH=7,rowH=7,need=titleH+rows.length*rowH+13;
   if(y+need>BODY_BOTTOM){d.addPage();y=header(d,r,m,yr,generatedAt)+7}
   d.setFont(FONT,'bold');d.setFontSize(11);d.setTextColor(35,35,35);d.text('FINANCIAL SUMMARY',M,y);y+=titleH;
@@ -143,7 +128,7 @@ function summary(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,gene
     setBodyFont(d,bold);d.rect(M,y,labelW,rowH);d.rect(M+labelW,y,amountW,rowH);
     d.text(row[0],M+labelW/2,y+4.8,{align:'center'});
     setBodyFont(d,false);
-    const value=moneyValue(row[1]);const textW=d.getTextWidth(value),symbolW=2.7,gap=1.1,totalW=symbolW+gap+textW;const left=M+labelW+amountW/2-totalW/2;drawRupeeGlyph(d,left,y+4.8);d.text(value,left+symbolW+gap,y+4.8,{align:'left'});
+    d.text(`Rs ${moneyValue(row[1])}`,M+labelW+amountW/2,y+4.8,{align:'center'});
     y+=rowH;
   });
   if(contributionActive){setBodyFont(d,false);d.setFontSize(7);const note=split(d,'Company Contribution is a breakdown of Gross Food Revenue and is not added again as separate revenue.',PRINT_W);note.forEach((line,i)=>d.text(line,M,y+5+i*3.2))}
