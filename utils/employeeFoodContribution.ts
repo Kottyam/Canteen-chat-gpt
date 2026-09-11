@@ -19,4 +19,7 @@ export function calculateEmployeeFoodContribution(grossAmount:number,employeeCon
   return{grossAmount:gross,employeePercentage,employeeAmount,companyPercentage,companyAmount};
 }
 
+/** Apply the central contribution rule to each individual food entry before summing. */
+export const calculateEmployeeFoodAmountFromEntries=(grossAmounts:number[],employeeContributionPercentage:number)=>grossAmounts.reduce((sum,gross)=>sum+calculateEmployeeFoodContribution(gross,employeeContributionPercentage).employeeAmount,0);
+
 export const orderEmployeeFoodAmount=(grossAmount:number,storedEmployeeAmount?:number|null)=>storedEmployeeAmount==null?Number(grossAmount)||0:Number(storedEmployeeAmount)||0;
