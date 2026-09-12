@@ -6,6 +6,12 @@ export interface EmployeeAdjustmentForReport extends EmployeeAdjustment { employ
 const adjustmentSelect='id,employee_id,adjustment_date,amount,description,created_at,member_name_snapshot,member_mobile_snapshot,contribution_eligible,contribution_percentage,employee_food_amount,company_food_amount,order_id';
 async function employeeProfile(employeeCode:string){
   if(!supabaseEnabled||!supabase) return null;
+  const isProfileId=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(employeeCode);
+  if(isProfileId){
+    const { data,error }=await supabase.from('profiles').select('id').eq('id',employeeCode).maybeSingle();
+    if(error) throw error;
+    if(data) return data;
+  }
   const { data,error }=await supabase.from('profiles').select('id').or(`employee_code.eq.${employeeCode},sr_number.eq.${employeeCode}`).maybeSingle();
   if(error) throw error;
   return data;
