@@ -111,4 +111,8 @@ $$;
 revoke all on function public.cancel_order_source(uuid,text) from public;
 grant execute on function public.cancel_order_source(uuid,text) to authenticated;
 
+-- Adjustment writes/deletes must invalidate the same live history views that
+-- already subscribe to orders and notifications.
+alter publication supabase_realtime add table public.employee_adjustments;
+
 notify pgrst,'reload schema';
