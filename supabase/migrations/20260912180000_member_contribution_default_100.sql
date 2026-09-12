@@ -95,7 +95,7 @@ begin
 end;$$;
 
 drop trigger if exists employee_adjustments_contribution_snapshot on public.employee_adjustments;
-create trigger employee_adjustments_contribution_snapshot before insert on public.employee_adjustments for each row execute function public.snapshot_employee_adjustment_contribution();
+create trigger employee_adjustments_contribution_snapshot before insert or update of amount,adjustment_date,contribution_eligible on public.employee_adjustments for each row execute function public.snapshot_employee_adjustment_contribution();
 
 create or replace function public.recalculate_employee_month_contributions(p_employee_id uuid,p_canteen_id uuid,p_month_start date)
 returns void language plpgsql security definer set search_path='public' as $$
