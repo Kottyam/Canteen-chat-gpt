@@ -54,6 +54,7 @@ declare
   v_remaining_guest numeric:=0;
   v_remaining_items integer:=0;
   v_is_admin boolean:=false;
+  v_item_source text;
   v_message text;
   v_title text;
   v_type text;
@@ -71,7 +72,10 @@ begin
     raise exception 'Not allowed to cancel this order';
   end if;
 
-  delete from public.order_items where order_id=p_order_id and item_source=p_source;
+  -- Admin Employee Order uses the member-side action name 'employee' even
+  -- when the persisted item_source is 'admin'. Resolve that here once.
+  v_item_source:=case when v_is_admin and p_source='employee' and coalesce(v_order.order_source,'employee')='admin' then 'admin' else p_source end;
+  delete from public.order_items where order_id=p_order_id and item_source=v_item_source;
   select count(*) into v_remaining_items from public.order_items where order_id=p_order_id and coalesce(quantity,0)>0;
 
   if v_remaining_items=0 then
@@ -80,14 +84,7 @@ begin
       v_title:='Order Cancelled';
       v_message:=format('Your order for %s was cancelled by Admin.',to_char(v_order.ordered_for,'DD Mon YYYY'));
       v_event_key:=format('order_cancelled:%s',v_order.id::text);
-      perform public.create_member_notification(
-        v_order.employee_id,
-        v_type,
-        v_title,
-        v_message,
-        jsonb_build_object('cancelled_order_id',v_order.id,'order_date',v_order.ordered_for::text,'order_source',v_order.order_source,'cancelled_source',p_source),
-        v_event_key
-      );
+      perform public.create_member_notification(v_order.employee_id,v_type,v_title,v_message,jsonb_build_object('cancelled_order_id',v_order.id,'order_date',v_order.ordered_for::text,'order_source',v_order.order_source,'cancelled_source',p_source),v_event_key);
     end if;
     delete from public.orders where id=p_order_id;
     return;
@@ -107,14 +104,7 @@ begin
     v_title:='Order Updated';
     v_message:=format('Your %s order for %s was cancelled by Admin.',case when p_source='guest' then 'guest' else 'member' end,to_char(v_order.ordered_for,'DD Mon YYYY'));
     v_event_key:=format('order_part_cancelled:%s:%s',v_order.id::text,p_source);
-    perform public.create_member_notification(
-      v_order.employee_id,
-      v_type,
-      v_title,
-      v_message,
-      jsonb_build_object('cancelled_order_id',v_order.id,'order_date',v_order.ordered_for::text,'order_source',v_order.order_source,'cancelled_source',p_source),
-      v_event_key
-    );
+    perform public.create_member_notification(v_order.employee_id,v_type,v_title,v_message,jsonb_build_object('cancelled_order_id',v_order.id,'order_date',v_order.ordered_for::text,'order_source',v_order.order_source,'cancelled_source',p_source),v_event_key);
   end if;
 end;
 $$;
