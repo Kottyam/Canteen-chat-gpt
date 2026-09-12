@@ -115,7 +115,7 @@ function drawTransactions(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:nu
 function summary(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,generatedAt:string){
   const contributionActive=Boolean(r.contribution_enabled);
   const rows:[string,number][]=[];
-  if(contributionActive)rows.push(['Member Food Gross',r.gross_food_revenue],['Member Contribution',r.employee_food_revenue],['Company Contribution',r.company_food_revenue]);
+  if(contributionActive)rows.push(['Member Food Gross',r.gross_food_revenue],['Employee Payable',r.employee_food_revenue],['Company Contribution',r.company_food_revenue]);
   else rows.push(['Member Food Revenue',r.food_revenue]);
   rows.push(['Guest Food Revenue',r.guest_revenue],['Admin Added Amount',r.admin_added_revenue],['Additional Revenue',r.additional_revenue],['Total Revenue',r.total_collection],['Total Expenses',r.total_expenses],['NET REVENUE',r.net_revenue]);
   const titleH=7,rowH=7,need=titleH+rows.length*rowH+13;
