@@ -115,4 +115,10 @@ grant execute on function public.cancel_order_source(uuid,text) to authenticated
 -- already subscribe to orders and notifications.
 alter publication supabase_realtime add table public.employee_adjustments;
 
+-- create_member_notification stores event_key in payload and uses ON CONFLICT.
+-- Enforce event idempotency so refresh/login cannot create duplicate events.
+create unique index if not exists notifications_recipient_event_key_uidx
+  on public.notifications (recipient_id, (payload->>'event_key'))
+  where payload ? 'event_key';
+
 notify pgrst,'reload schema';
