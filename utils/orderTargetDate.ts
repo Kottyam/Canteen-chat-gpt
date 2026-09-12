@@ -4,10 +4,10 @@ import { formatDate } from './helpers';
 export type OrderFor = 'today' | 'tomorrow';
 
 export const getOrderTargetDate = (orderFor: OrderFor, now = new Date()): string => {
-  if (orderFor === 'today') return formatDate(now);
-  const nextDay = new Date(now.getTime());
-  nextDay.setDate(nextDay.getDate() + 1);
-  return formatDate(nextDay);
+  const businessDate = formatDate(now);
+  if (orderFor === 'today') return businessDate;
+  const [year,month,day]=businessDate.split('-').map(Number);
+  return formatDate(new Date(Date.UTC(year,month-1,day+1,12)));
 };
 
 export const loadOrderForSetting = async (): Promise<OrderFor> => {
