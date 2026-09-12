@@ -43,7 +43,7 @@ const EmployeeFoodArrangementSettings:React.FC=()=>{
    }catch(e:any){setMessage(e?.message||'Could not save employee food arrangement.','error')}
    finally{setSaving(false)}
  };
- const contributionSummary=mode==='percentage'?{member:100-(validPercentage?numericPercentage:0),company:validPercentage?numericPercentage:0}:{member:null,company:null};
+ const contributionSummary=mode==='percentage'?{member:validPercentage?numericPercentage:0,company:validPercentage?100-numericPercentage:0}:{member:null,company:null};
  return <section className="rounded-xl border bg-white p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><h4 className="font-bold">Employee Food Arrangement</h4><p className="mt-1 text-sm text-gray-500">Configure the All Employees default or an individual member override. Fixed Amount is a monthly company-covered allowance, not an order limit.</p></div>{!editing&&<button type="button" disabled={loading||saving||locked||selectedId===''} onClick={startEdit} className="min-h-11 rounded-lg border px-5 font-semibold text-gray-700">Edit</button>}</div>
  <div className="mt-4 max-w-2xl space-y-4">
   <label className="block text-sm font-semibold text-gray-700">Employee<select disabled={loading||saving} value={selectedId} onChange={e=>selectEmployee(e.target.value)} className="mt-1 block w-full rounded-lg border px-3 py-2.5 disabled:bg-gray-50"><option value="all">All Employees</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name}{e.id?` — ${e.id}`:''}</option>)}</select></label>
