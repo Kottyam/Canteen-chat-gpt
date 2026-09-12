@@ -1,0 +1,18 @@
+revoke execute on function public.employee_food_contribution_setting_for_employee(uuid) from anon,public;
+revoke execute on function public.get_employee_food_contribution_preview(uuid,numeric,date) from anon,public;
+revoke execute on function public.get_employee_food_contribution_settings_for_admin() from anon,public;
+revoke execute on function public.set_employee_food_contribution_settings(uuid,text,numeric,numeric) from anon,public;
+revoke execute on function public.get_employee_food_contribution_percentage() from anon,public;
+revoke execute on function public.set_employee_food_contribution_percentage(numeric) from anon,public;
+revoke execute on function public.recalculate_employee_month_contributions(uuid,uuid,date) from anon,authenticated,public;
+revoke execute on function public.recalculate_order_contribution_from_items() from anon,authenticated,public;
+revoke execute on function public.recalculate_employee_adjustment_contribution() from anon,authenticated,public;
+revoke execute on function public.snapshot_employee_adjustment_contribution() from anon,authenticated,public;
+revoke execute on function public.snapshot_order_contribution_setting() from anon,authenticated,public;
+grant execute on function public.employee_food_contribution_setting_for_employee(uuid) to authenticated;
+grant execute on function public.get_employee_food_contribution_preview(uuid,numeric,date) to authenticated;
+grant execute on function public.get_employee_food_contribution_settings_for_admin() to authenticated;
+grant execute on function public.set_employee_food_contribution_settings(uuid,text,numeric,numeric) to authenticated;
+grant execute on function public.get_employee_food_contribution_percentage() to authenticated;
+grant execute on function public.set_employee_food_contribution_percentage(numeric) to authenticated;
+notify pgrst,'reload schema';
