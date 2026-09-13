@@ -27,6 +27,7 @@ export async function sendPaymentReminder(
   billId: string,
   paymentId: string,
   employeeId: string,
+  canteenId: string,
   memberName: string,
   amount: number,
 ) {
@@ -43,12 +44,7 @@ export async function sendPaymentReminder(
 
   const { data, error } = await supabase
     .from('payment_reminders')
-    .insert({
-      bill_id: billId,
-      payment_id: paymentId,
-      employee_id: employeeId,
-      canteen_id: (await supabase.from('bill_payments').select('canteen_id').eq('id', paymentId).single()).data?.canteen_id,
-    })
+    .insert({ bill_id: billId, payment_id: paymentId, employee_id: employeeId, canteen_id: canteenId })
     .select('id,bill_id,payment_id,employee_id,canteen_id,sent_at')
     .single();
   if (error || !data) throw error || new Error(`Could not persist the reminder for ${memberName || 'this member'}.`);
