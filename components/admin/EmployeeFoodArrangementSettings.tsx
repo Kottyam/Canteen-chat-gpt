@@ -7,7 +7,7 @@ import AsyncActionButton from'../common/AsyncActionButton';
 const EMPTY_SETTING={contributionMode:'percentage' as EmployeeFoodContributionMode,employeeContributionPercentage:100,fixedMonthlyAmount:0};
 const EmployeeFoodArrangementSettings:React.FC=()=>{
  const{users}=useData();
- const employees=useMemo(()=>users.filter(u=>u.role==='employee'&&u.status!=='deleted'),[users]);
+ const employees=useMemo(()=>users.filter(u=>u.role==='employee'&&u.status!=='deleted'&&u.identityId),[users]);
  const[settings,setSettings]=useState<AdminEmployeeFoodContributionSetting[]>([]);
  const[selectedId,setSelectedId]=useState('all');
  const[mode,setMode]=useState<EmployeeFoodContributionMode>('percentage');
@@ -17,7 +17,7 @@ const EmployeeFoodArrangementSettings:React.FC=()=>{
  const[loading,setLoading]=useState(true);const[saving,setSaving]=useState(false);const[editing,setEditing]=useState(false);const[locked,setLocked]=useState(false);const[msg,setMsg]=useState('');const[msgKind,setMsgKind]=useState<'success'|'error'|'info'>('info');
  const globalSetting=settings.find(s=>s.scope==='all');
  const individualSetting=selectedId==='all'?undefined:settings.find(s=>s.scope==='employee'&&s.employeeId===selectedId);
- const selectedEmployee=employees.find(e=>e.id===selectedId);
+ const selectedEmployee=employees.find(e=>(e.identityId||'')===selectedId);
  const effective=selectedId==='all'?(globalSetting||EMPTY_SETTING):(individualSetting||globalSetting||EMPTY_SETTING);
  const effectiveSource=selectedId==='all'?(globalSetting?'All Employees':'No configuration'):(individualSetting?'Individual override':globalSetting?'All Employees default':'No configuration');
  const setMessage=(text:string,kind:'success'|'error'|'info'='info')=>{setMsg(text);setMsgKind(kind)};
@@ -43,10 +43,22 @@ const EmployeeFoodArrangementSettings:React.FC=()=>{
    }catch(e:any){setMessage(e?.message||'Could not save employee food arrangement.','error')}
    finally{setSaving(false)}
  };
+ const removeOverride=async(employeeId:string)=>{
+   if(saving||locked)return;
+   setSaving(true);setMessage('','info');
+   try{
+     await clearAdminEmployeeFoodContributionOverride(employeeId);
+     const rows=await loadAdminEmployeeFoodContributionSettings();setSettings(rows);
+     if(selectedId===employeeId)applyDraft(selectedId,rows);
+     setEditing(false);setMessage('Individual override removed. The employee now inherits the All Employees setting.','success');
+   }catch(e:any){setMessage(e?.message||'Could not remove employee food arrangement override.','error')}
+   finally{setSaving(false)}
+ };
  const contributionSummary=mode==='percentage'?{member:validPercentage?numericPercentage:100,company:validPercentage?100-numericPercentage:0}:{member:null,company:null};
+ const individualOverrides=settings.filter(s=>s.scope==='employee');
  return <section className="rounded-xl border bg-white p-4"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><h4 className="font-bold">Employee Food Arrangement</h4><p className="mt-1 text-sm text-gray-500">Configure the All Employees default or an individual member override. If no arrangement is configured, the member pays 100%. Fixed Amount is a monthly company-covered allowance, not an order limit.</p></div>{!editing&&<button type="button" disabled={loading||saving||locked||selectedId===''} onClick={startEdit} className="min-h-11 rounded-lg border px-5 font-semibold text-gray-700">Edit</button>}</div>
  <div className="mt-4 max-w-2xl space-y-4">
-  <label className="block text-sm font-semibold text-gray-700">Employee<select disabled={loading||saving} value={selectedId} onChange={e=>selectEmployee(e.target.value)} className="mt-1 block w-full rounded-lg border px-3 py-2.5 disabled:bg-gray-50"><option value="all">All Employees</option>{employees.map(e=><option key={e.id} value={e.id}>{e.name}{e.id?` — ${e.id}`:''}</option>)}</select></label>
+  <label className="block text-sm font-semibold text-gray-700">Employee<select disabled={loading||saving} value={selectedId} onChange={e=>selectEmployee(e.target.value)} className="mt-1 block w-full rounded-lg border px-3 py-2.5 disabled:bg-gray-50"><option value="all">All Employees</option>{employees.map(e=><option key={e.identityId} value={e.identityId}>{e.name}{e.id?` — ${e.id}`:''}</option>)}</select></label>
   {selectedId!=='all'&&editing&&<label className="flex min-h-11 items-center gap-3 rounded-lg border bg-gray-50 px-3 py-2.5 text-sm"><input type="checkbox" checked={useOverride} disabled={saving||locked} onChange={e=>{const next=e.target.checked;setUseOverride(next);if(next&&!individualSetting){setMode(globalSetting?.contributionMode||'percentage');setPercentage(String(globalSetting?.employeeContributionPercentage??100));setFixedAmount(String(globalSetting?.fixedMonthlyAmount??0))}setMessage('','info')}} className="h-5 w-5"/><span><span className="font-semibold">Use individual override</span><span className="block text-xs text-gray-500">Turn this off to inherit the All Employees arrangement. If neither is configured, the member pays 100%.</span></span></label>}
   {selectedId!=='all'&&!editing&&!individualSetting&&<div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">This member has no individual override. The All Employees setting is used when one exists; otherwise the member pays 100%.</div>}
   <div><div className="text-sm font-semibold text-gray-700">Contribution Mode</div><div className="mt-2 grid grid-cols-2 gap-2"><button type="button" disabled={loading||saving||locked||!editing||(selectedId!=='all'&&!useOverride)} onClick={()=>{setMode('percentage');setMessage('','info')}} className={`min-h-11 rounded-lg border px-3 py-2 text-sm font-semibold ${mode==='percentage'?'border-primary-600 bg-primary-50 text-primary-700':'text-gray-600'}`}>Percentage</button><button type="button" disabled={loading||saving||locked||!editing||(selectedId!=='all'&&!useOverride)} onClick={()=>{setMode('fixed_amount');setMessage('','info')}} className={`min-h-11 rounded-lg border px-3 py-2 text-sm font-semibold ${mode==='fixed_amount'?'border-primary-600 bg-primary-50 text-primary-700':'text-gray-600'}`}>Fixed Amount</button></div></div>
@@ -56,6 +68,7 @@ const EmployeeFoodArrangementSettings:React.FC=()=>{
   {locked&&<p className="rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-800">Locked — Order Time is currently open. The current employee food arrangement cannot be changed during the active order cycle.</p>}
   {!loading&&<div className="rounded-lg border bg-gray-50 p-3 text-sm"><div className="font-semibold">{selectedId==='all'?'All Employees default':`Current setting for ${selectedEmployee?.name||'member'}`}</div><div className="mt-1">{effective.contributionMode==='fixed_amount'?`Fixed Amount — ₹${Number(effective.fixedMonthlyAmount||0).toFixed(2)} / month`:`Percentage — Member Contribution ${Number(effective.employeeContributionPercentage)}% / Company Contribution ${100-Number(effective.employeeContributionPercentage)}%`}</div><div className="mt-1 text-xs text-gray-500">Source: {effectiveSource}. {effectiveSource==='No configuration'?'Default: Member Contribution 100% / Company Contribution 0%.':''}</div></div>}
   {editing&&<div className="flex flex-col gap-2 sm:flex-row"><AsyncActionButton type="button" loading={saving} loadingLabel="Saving…" disabled={loading||saving||locked||!valid} onClick={()=>void save()} className="min-h-11 rounded-lg bg-primary-600 px-5 font-semibold text-white">Save</AsyncActionButton><button type="button" disabled={saving} onClick={cancel} className="min-h-11 rounded-lg border px-5 font-semibold text-gray-700">Cancel</button></div>}
+  {individualOverrides.length>0&&<div className="rounded-lg border p-3"><div className="font-semibold text-gray-700">Saved individual overrides</div><div className="mt-2 space-y-2">{individualOverrides.map(s=><div key={s.employeeId} className="flex flex-col gap-2 rounded-lg border bg-gray-50 p-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="font-semibold text-gray-800">{s.employeeName||'Employee'}</div><div className="text-sm text-gray-600">{s.contributionMode==='fixed_amount'?`Fixed Amount — ₹${Number(s.fixedMonthlyAmount||0).toFixed(2)} / month`:`Percentage — ${Number(s.employeeContributionPercentage)}% Member / ${100-Number(s.employeeContributionPercentage)}% Company`}</div></div><button type="button" disabled={saving||locked} onClick={()=>void removeOverride(s.employeeId)} className="min-h-10 rounded-lg border px-4 text-sm font-semibold text-red-700">Remove</button></div>)}</div></div>}
   {msg&&<p role={msgKind==='error'?'alert':'status'} className={`rounded-lg p-3 text-sm ${msgKind==='success'?'bg-green-50 text-green-800':msgKind==='error'?'bg-red-50 text-red-700':'bg-gray-50 text-gray-700'}`}>{msg}</p>}
  </div></section>;
 };export default EmployeeFoodArrangementSettings;
