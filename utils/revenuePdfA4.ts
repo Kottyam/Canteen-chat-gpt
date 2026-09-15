@@ -7,7 +7,7 @@ import { MonthlyRevenueReport,RevenueTransaction,formatReportDate } from '../ser
 const GREEN=[5,150,105] as const;
 const PAGE_W=210,PAGE_H=297,M=10,PRINT_W=PAGE_W-M*2;
 const HEADER_H=8,ROW_LINE=3.8,BODY_TOP=64,BODY_BOTTOM=276,FOOT_Y=288;
-const COL_WIDTHS=[24,62,20,38,46] as const;
+const COL_WIDTHS=[22,62,18,32,28,28] as const;
 const COL_X=COL_WIDTHS.reduce<number[]>((acc,w,i)=>{acc.push(i===0?M:acc[i-1]+COL_WIDTHS[i-1]);return acc},[]);
 const FONT='helvetica';
 const BODY_SIZE=7.5;
@@ -48,17 +48,65 @@ function header(d:jsPDF,r:MonthlyRevenueReport,m:number,y:number,generatedAt:str
 function tableHead(d:jsPDF,y:number){
   d.setFillColor(245,247,246);d.setDrawColor(...BORDER);d.setLineWidth(.25);d.rect(M,y,PRINT_W,HEADER_H,'FD');
   d.setFont(FONT,'bold');d.setFontSize(HEADER_SIZE);d.setTextColor(35,35,35);
-  ['Date','Particulars','Quantity','Type','Total Amount'].forEach((h,i)=>{d.text(h,centerX(i),y+5.4,{align:'center'});if(i<4)d.line(COL_X[i]+COL_WIDTHS[i],y,COL_X[i]+COL_WIDTHS[i],y+HEADER_H)});
+  ['Date','Particulars','Quantity','Type','Amount','Grand Total'].forEach((h,i)=>{d.text(h,centerX(i),y+5.4,{align:'center'});if(i<COL_WIDTHS.length-1)d.line(COL_X[i]+COL_WIDTHS[i],y,COL_X[i]+COL_WIDTHS[i],y+HEADER_H)});
   return y+HEADER_H;
 }
 
-function rowHeight(d:jsPDF,t:RevenueTransaction){const particulars=split(d,t.particulars,COL_WIDTHS[1]);const type=split(d,t.type,COL_WIDTHS[3]);return Math.max(7.6,particulars.length*ROW_LINE+3,type.length*ROW_LINE+3,8.5)}
+function rowHeight(d:jsPDF,t:RevenueTransaction){
+  const cells=[split(d,t.particulars,COL_WIDTHS[1]),split(d,t.quantity==null?'—':String(t.quantity),COL_WIDTHS[2]),split(d,t.type,COL_WIDTHS[3]),split(d,`Rs ${moneyValue(t.amount)}`,COL_WIDTHS[4])];
+  return Math.max(8.5,...cells.map(lines=>lines.length*ROW_LINE+3));
+}
 function drawCenteredCell(d:jsPDF,text:string,column:number,y:number,h:number){const lines=split(d,text,COL_WIDTHS[column]);const blockH=lines.length*ROW_LINE;const startY=y+(h-blockH)/2+2.9;lines.forEach((line,index)=>d.text(line,centerX(column),startY+index*ROW_LINE,{align:'center',baseline:'alphabetic'}))}
-function drawMoneyCentered(d:jsPDF,amount:number,column:number,y:number,h:number){const text=`Rs ${moneyValue(amount)}`;setBodyFont(d,false);const center=centerX(column);d.text(text,center,y+(h-ROW_LINE)/2+2.9,{align:'center'})}
-function drawRow(d:jsPDF,t:RevenueTransaction,y:number){const h=rowHeight(d,t);d.setDrawColor(...BORDER);d.setLineWidth(.2);for(let c=1;c<5;c++)d.rect(COL_X[c],y,COL_WIDTHS[c],h);setBodyFont(d,false);drawCenteredCell(d,t.particulars,1,y,h);drawCenteredCell(d,t.quantity==null?'—':String(t.quantity),2,y,h);drawCenteredCell(d,t.type,3,y,h);drawMoneyCentered(d,t.amount,4,y,h);return h}
-function drawDateCell(d:jsPDF,date:string,y:number,h:number){d.setDrawColor(...BORDER);d.setLineWidth(.2);d.rect(COL_X[0],y,COL_WIDTHS[0],h);setBodyFont(d,false);drawCenteredCell(d,formatReportDate(date),0,y,h)}
+function drawMoneyCentered(d:jsPDF,amount:number,column:number,y:number,h:number){setBodyFont(d,false);d.text(`Rs ${moneyValue(amount)}`,centerX(column),y+(h-ROW_LINE)/2+2.9,{align:'center'})}
 
-function drawTransactions(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,generatedAt:string){const groups=new Map<string,RevenueTransaction[]>();r.transactions.forEach(t=>{if(!groups.has(t.date))groups.set(t.date,[]);groups.get(t.date)!.push(t)});for(const[date,items]of groups){let i=0;while(i<items.length){if(y+8.5>BODY_BOTTOM){d.addPage();y=header(d,r,m,yr,generatedAt);y=tableHead(d,y)}const start=i;let used=0;while(i<items.length){const h=rowHeight(d,items[i]);if(i>start&&y+used+h>BODY_BOTTOM)break;used+=h;i++}const pageItems=items.slice(start,i);drawDateCell(d,date,y,used);let ry=y;pageItems.forEach(t=>{ry+=drawRow(d,t,ry)});y=ry;if(i<items.length){d.addPage();y=header(d,r,m,yr,generatedAt);y=tableHead(d,y)}}}return y}
+function drawTransactionRow(d:jsPDF,t:RevenueTransaction,y:number){
+  const h=rowHeight(d,t);d.setDrawColor(...BORDER);d.setLineWidth(.2);
+  for(let c=1;c<=4;c++)d.rect(COL_X[c],y,COL_WIDTHS[c],h);
+  setBodyFont(d,false);
+  drawCenteredCell(d,t.particulars,1,y,h);
+  drawCenteredCell(d,t.quantity==null?'—':String(t.quantity),2,y,h);
+  drawCenteredCell(d,t.type,3,y,h);
+  drawMoneyCentered(d,t.amount,4,y,h);
+  return h;
+}
+
+function drawMergedCell(d:jsPDF,column:number,text:string,y:number,h:number,showText=true){
+  d.setDrawColor(...BORDER);d.setLineWidth(.2);d.rect(COL_X[column],y,COL_WIDTHS[column],h);
+  if(showText){setBodyFont(d,true);drawCenteredCell(d,text,column,y,h)}
+}
+
+function dailyTotal(items:RevenueTransaction[]){return items.reduce((sum,t)=>sum+Number(t.amount||0),0)}
+
+function drawTransactions(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,generatedAt:string){
+  const groups=new Map<string,RevenueTransaction[]>();
+  r.transactions.forEach(t=>{if(!groups.has(t.date))groups.set(t.date,[]);groups.get(t.date)!.push(t)});
+
+  for(const[date,items]of groups){
+    let index=0;
+    while(index<items.length){
+      if(y+8.5>BODY_BOTTOM){d.addPage();y=header(d,r,m,yr,generatedAt);y=tableHead(d,y)}
+      const start=index;
+      let used=0;
+      while(index<items.length){
+        const h=rowHeight(d,items[index]);
+        if(index>start&&y+used+h>BODY_BOTTOM)break;
+        used+=h;index++;
+      }
+      const pageItems=items.slice(start,index);
+      const isFirstChunk=start===0;
+      const total= dailyTotal(items);
+      drawMergedCell(d,0,formatReportDate(date),y,used,true);
+      drawMergedCell(d,5,`Rs ${moneyValue(total)}`,y,used,isFirstChunk);
+      let rowY=y;
+      pageItems.forEach(t=>{rowY+=drawTransactionRow(d,t,rowY)});
+      y=rowY;
+      if(index<items.length){
+        d.addPage();y=header(d,r,m,yr,generatedAt);y=tableHead(d,y);
+      }
+    }
+  }
+  return y;
+}
 
 function summary(d:jsPDF,r:MonthlyRevenueReport,y:number,m:number,yr:number,generatedAt:string){const contributionActive=true;const rows:[string,number][]=[];if(contributionActive)rows.push(['Member Food Gross',r.gross_food_revenue],['Member Payable',r.employee_food_revenue],['Company Contribution',r.company_food_revenue]);else rows.push(['Member Food Revenue',r.food_revenue]);rows.push(['Guest Food Revenue',r.guest_revenue],['Admin Added Amount',r.admin_added_revenue],['Additional Revenue',r.additional_revenue],['Total Revenue',r.total_collection],['Total Expenses',r.total_expenses],['NET REVENUE',r.net_revenue]);const titleH=7,rowH=7,need=titleH+rows.length*rowH+13;if(y+need>BODY_BOTTOM){d.addPage();y=header(d,r,m,yr,generatedAt)+7}d.setFont(FONT,'bold');d.setFontSize(11);d.setTextColor(35,35,35);d.text('FINANCIAL SUMMARY',M,y);y+=titleH;const labelW=PRINT_W-60,amountW=60;d.setDrawColor(160,160,160);d.setLineWidth(.2);rows.forEach((row,i)=>{const bold=i>=rows.length-3;setBodyFont(d,bold);d.rect(M,y,labelW,rowH);d.rect(M+labelW,y,amountW,rowH);d.text(row[0],M+labelW/2,y+4.8,{align:'center'});setBodyFont(d,false);d.text(`Rs ${moneyValue(row[1])}`,M+labelW+amountW/2,y+4.8,{align:'center'});y+=rowH});if(contributionActive){setBodyFont(d,false);d.setFontSize(7);const note=split(d,'Company Contribution is a breakdown of Gross Food Revenue and is not added again as separate revenue.',PRINT_W);note.forEach((line,i)=>d.text(line,M,y+5+i*3.2))}return y}
 
