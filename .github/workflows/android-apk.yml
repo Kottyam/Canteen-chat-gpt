@@ -44,6 +44,41 @@ jobs:
           fi
       - name: Add Android platform
         run: npx cap add android
+      - name: Configure Firebase Android client
+        env:
+          FIREBASE_ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_ANDROID_GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_ANDROID_GOOGLE_SERVICES_JSON:-}" ]; then
+            echo 'Missing GitHub Actions secret FIREBASE_ANDROID_GOOGLE_SERVICES_JSON.'
+            echo 'Add the Firebase Android google-services.json content as this repository secret before building Android.'
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_ANDROID_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          chmod 600 android/app/google-services.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('android/app/google-services.json')
+          data = json.loads(path.read_text())
+          clients = data.get('client') or []
+          packages = [
+              c.get('client_info', {}).get('android_client_info', {}).get('package_name')
+              for c in clients
+          ]
+          if 'com.gocanteen.app' not in packages:
+              raise SystemExit(f'Firebase config does not contain package com.gocanteen.app: {packages}')
+          print('Firebase Android config verified for com.gocanteen.app')
+          PY
+          if ! grep -Fq "classpath 'com.google.gms:google-services:" android/build.gradle; then
+            echo 'Capacitor generated Android project does not contain the Google Services Gradle classpath.'
+            exit 1
+          fi
+          if ! grep -Fq "apply plugin: 'com.google.gms.google-services'" android/app/build.gradle; then
+            echo 'Capacitor generated Android app does not contain the conditional Google Services plugin integration.'
+            exit 1
+          fi
+          echo 'Capacitor Google Services Gradle integration verified; no duplicate plugin was added.'
       - name: Configure Google OAuth deep link
         run: |
           set -e
