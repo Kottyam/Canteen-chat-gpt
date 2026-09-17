@@ -5,6 +5,11 @@ const config: CapacitorConfig = {
   appName: 'Go Canteen',
   webDir: 'dist',
   bundledWebRuntime: false,
+  plugins: {
+    PushNotifications: {
+      presentationOptions: ['alert', 'badge', 'sound'],
+    },
+  },
 };
 
 export default config;
