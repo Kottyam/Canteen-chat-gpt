@@ -1,5 +1,5 @@
 export * from './pdfLegacy';
-import { loadScopedMenu, loadScopedOrders, loadScopedUsers } from '../services/supabaseData';
+import { loadScopedOrders } from '../services/supabaseData';
 import { loadHistoricalEmployeeAdjustments } from '../services/employeeAdjustments';
 import { supabaseEnabled } from '../supabase';
 import type { EmployeeAdjustmentForReport } from '../services/employeeAdjustments';
@@ -33,19 +33,15 @@ export async function downloadMonthlyPdf(
 
     let freshUsers = users || [];
     let freshOrders = orders || [];
-    let freshPrices = prices || undefined;
+    const freshPrices = prices || undefined;
     let freshAdjustments = adjustments || [];
 
     if (supabaseEnabled) {
-      const [liveUsers, liveOrders, liveMenu, liveAdjustments] = await Promise.all([
-        loadScopedUsers(),
+      const [liveOrders, liveAdjustments] = await Promise.all([
         loadScopedOrders(),
-        loadScopedMenu(),
         loadHistoricalEmployeeAdjustments(start, end),
       ]);
-      freshUsers = liveUsers;
       freshOrders = liveOrders;
-      freshPrices = liveMenu.prices;
       freshAdjustments = Array.isArray(liveAdjustments) ? liveAdjustments : [];
     }
 
