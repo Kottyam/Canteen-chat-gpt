@@ -11,9 +11,7 @@ language plpgsql
 security definer
 set search_path=''
 as $fn$
-declare
-  v_profile public.profiles%rowtype;
-  v_row public.member_push_installations%rowtype;
+declare v_profile public.profiles%rowtype; v_row public.member_push_installations%rowtype;
 begin
   if (select auth.uid()) is null then raise exception 'Authentication required.'; end if;
   if length(trim(coalesce(p_installation_id,''))) < 8 then raise exception 'Invalid installation id.'; end if;
@@ -92,16 +90,14 @@ revoke all on function public.enqueue_member_push_delivery() from public,anon,au
 create or replace function public.notify_bill_payment_status_change()
 returns trigger language plpgsql security definer set search_path='public'
 as $fn$
-declare v_pending_count integer;
 begin
   if new.status='pending_verification' and new.status is distinct from old.status then
     perform public.create_member_notification(new.employee_id,'payment_submitted','Payment Submitted','Your payment has been submitted for verification.',
       jsonb_build_object('bill_id',new.bill_id,'payment_id',new.id,'request_sequence',new.request_sequence,'amount',new.amount),
       format('payment_submitted:%s:%s',new.id,coalesce(new.confirmed_at::text,new.updated_at::text)));
-    select count(*) into v_pending_count from public.bill_payments p where p.canteen_id=new.canteen_id and p.status='pending_verification';
     perform private.create_admin_notification(new.canteen_id,'payments','payment_pending_verification','Payment Verification Required',
-      format('%s submitted a payment of ₹%s. %s payments are now pending verification.',coalesce(new.member_name_snapshot,'Member'),to_char(new.amount,'FM999999990.00'),v_pending_count),
-      jsonb_build_object('screen','payment_verification','payment_id',new.id,'bill_id',new.bill_id,'amount',new.amount,'pending_payment_count',v_pending_count),
+      format('%s submitted a payment of ₹%s.',coalesce(new.member_name_snapshot,'Member'),to_char(new.amount,'FM999999990.00')),
+      jsonb_build_object('screen','payment_verification','payment_id',new.id,'bill_id',new.bill_id,'amount',new.amount),
       format('payment_pending:%s',new.id));
   elsif new.status='rejected' and new.status is distinct from old.status then
     perform public.create_member_notification(new.employee_id,'payment_status_updated','Payment Rejected','Your payment was rejected. Please review the payment request and try again.',
@@ -117,8 +113,7 @@ returns void language plpgsql security definer set search_path='public'
 as $fn$
 declare
   v_now timestamp:=now() at time zone 'Asia/Kolkata'; v_today date:=v_now::date; r record;
-  v_target_date date; v_order_label text; v_member_orders integer; v_guest_orders integer;
-  v_food_items integer; v_total_value numeric; v_weekday smallint; v_holiday boolean;
+  v_target_date date; v_order_label text; v_member_orders integer; v_guest_orders integer; v_food_items integer; v_total_value numeric; v_weekday smallint; v_holiday boolean;
 begin
   if v_now::time>=time '18:00' then
     for r in select hd.id,hd.canteen_id,hd.holiday_date from public.holiday_dates hd where hd.holiday_date=v_today+1 loop
@@ -127,48 +122,33 @@ begin
         jsonb_build_object('holiday_date',r.holiday_date::text,'holiday_id',r.id,'holiday_source','declared'));
     end loop;
   end if;
-
-  for r in select canteen_id,enabled,start_time,end_time,coalesce(order_for,'today') as order_for from public.order_window_settings
-    where coalesce(enabled,false) and start_time is not null and end_time is not null loop
+  for r in select canteen_id,enabled,start_time,end_time,coalesce(order_for,'today') as order_for from public.order_window_settings where coalesce(enabled,false) and start_time is not null and end_time is not null loop
     v_target_date:=case when r.order_for='tomorrow' then v_today+1 else v_today end;
     v_order_label:=case when r.order_for='tomorrow' then 'Tomorrow''s' else 'Today''s' end;
-
     if to_char(v_now,'HH24:MI')=to_char(r.start_time,'HH24:MI') then
-      perform public.notify_canteen_employees_for_canteen(r.canteen_id,'order_time_open:'||r.canteen_id::text||':'||v_today::text,'order_time_open','Order Time Open',
-        'Today''s orders are now open.',jsonb_build_object('business_date',v_today::text,'order_for',r.order_for,'order_window_state','open'));
+      perform public.notify_canteen_employees_for_canteen(r.canteen_id,'order_time_open:'||r.canteen_id::text||':'||v_today::text,'order_time_open','Order Time Open','Today''s orders are now open.',
+        jsonb_build_object('business_date',v_today::text,'order_for',r.order_for,'order_window_state','open'));
     end if;
     if to_char(v_now,'HH24:MI')=to_char(r.end_time-interval '10 minutes','HH24:MI') then
-      perform public.notify_canteen_employees_for_canteen(r.canteen_id,'order_time_closing_soon:'||r.canteen_id::text||':'||v_today::text||':'||r.order_for,'order_time_closing_soon','Order Time Closing Soon',
-        'Orders close in 10 minutes.',jsonb_build_object('business_date',v_today::text,'order_for',r.order_for,'order_window_state','closing_soon'));
+      perform public.notify_canteen_employees_for_canteen(r.canteen_id,'order_time_closing_soon:'||r.canteen_id::text||':'||v_today::text||':'||r.order_for,'order_time_closing_soon','Order Time Closing Soon','Orders close in 10 minutes.',
+        jsonb_build_object('business_date',v_today::text,'order_for',r.order_for,'order_window_state','closing_soon'));
     end if;
     if to_char(v_now,'HH24:MI')=to_char(r.end_time,'HH24:MI') then
-      perform public.notify_canteen_employees_for_canteen(r.canteen_id,'order_time_closed:'||r.canteen_id::text||':'||v_today::text,'order_time_closed','Order Time Closed',
-        'Today''s orders are now closed.',jsonb_build_object('business_date',v_today::text,'order_for',r.order_for,'order_window_state','closed'));
-
-      select count(*) filter(where coalesce(x.member_items,0)>0),count(*) filter(where coalesce(x.guest_items,0)>0),
-        coalesce(sum(x.total_items),0),coalesce(sum(x.total_value),0)
+      perform public.notify_canteen_employees_for_canteen(r.canteen_id,'order_time_closed:'||r.canteen_id::text||':'||v_today::text,'order_time_closed','Order Time Closed','Today''s orders are now closed.',
+        jsonb_build_object('business_date',v_today::text,'order_for',r.order_for,'order_window_state','closed'));
+      select count(*) filter(where coalesce(x.member_items,0)>0),count(*) filter(where coalesce(x.guest_items,0)>0),coalesce(sum(x.total_items),0),coalesce(sum(x.total_value),0)
       into v_member_orders,v_guest_orders,v_food_items,v_total_value
-      from (select o.id,count(*) filter(where oi.item_source<>'guest') member_items,count(*) filter(where oi.item_source='guest') guest_items,
-        coalesce(sum(oi.quantity),0) total_items,coalesce(sum(coalesce(oi.line_total,oi.quantity*oi.unit_price)),0) total_value
-        from public.orders o join public.order_items oi on oi.order_id=o.id
-        where o.canteen_id=r.canteen_id and o.ordered_for=v_target_date and o.status='active' group by o.id) x;
-
+      from (select o.id,count(*) filter(where oi.item_source<>'guest') member_items,count(*) filter(where oi.item_source='guest') guest_items,coalesce(sum(oi.quantity),0) total_items,coalesce(sum(coalesce(oi.line_total,oi.quantity*oi.unit_price)),0) total_value
+        from public.orders o join public.order_items oi on oi.order_id=o.id where o.canteen_id=r.canteen_id and o.ordered_for=v_target_date and o.status='active' group by o.id) x;
       perform private.create_admin_notification(r.canteen_id,'orders','order_window_closed',v_order_label||' Order Closed',
-        format('%s member orders%s%s%s.',coalesce(v_member_orders,0),
-          case when coalesce(v_guest_orders,0)>0 then format(', %s guest orders',v_guest_orders) else '' end,
-          case when coalesce(v_food_items,0)>0 then format(', %s food items',v_food_items) else '' end,
-          case when coalesce(v_total_value,0)>0 then format(', total ₹%s',to_char(v_total_value,'FM999999990.00')) else '' end),
-        jsonb_build_object('screen','orders','business_date',v_target_date::text,'order_for',r.order_for,
-          'member_order_count',coalesce(v_member_orders,0),'guest_order_count',coalesce(v_guest_orders,0),
-          'food_item_quantity',coalesce(v_food_items,0),'total_order_value',coalesce(v_total_value,0)),
+        format('%s member orders%s%s%s.',coalesce(v_member_orders,0),case when coalesce(v_guest_orders,0)>0 then format(', %s guest orders',v_guest_orders) else '' end,case when coalesce(v_food_items,0)>0 then format(', %s food items',v_food_items) else '' end,case when coalesce(v_total_value,0)>0 then format(', total ₹%s',to_char(v_total_value,'FM999999990.00')) else '' end),
+        jsonb_build_object('screen','orders','business_date',v_target_date::text,'order_for',r.order_for,'member_order_count',coalesce(v_member_orders,0),'guest_order_count',coalesce(v_guest_orders,0),'food_item_quantity',coalesce(v_food_items,0),'total_order_value',coalesce(v_total_value,0)),
         format('order_window_closed:%s:%s:%s',r.canteen_id::text,v_target_date::text,r.order_for));
     end if;
-
     if to_char(v_now,'HH24:MI')=to_char(r.start_time-interval '30 minutes','HH24:MI') then
       v_weekday:=extract(dow from v_target_date)::smallint;
       select exists(select 1 from public.holiday_dates h where h.canteen_id=r.canteen_id and h.holiday_date=v_target_date) into v_holiday;
-      if not coalesce(v_holiday,false) and not exists(
-        select 1 from public.weekly_menu wm where wm.canteen_id=r.canteen_id and wm.weekday=v_weekday and wm.active=true) then
+      if not coalesce(v_holiday,false) and not exists(select 1 from public.weekly_menu wm where wm.canteen_id=r.canteen_id and wm.weekday=v_weekday and wm.active=true) then
         perform private.create_admin_notification(r.canteen_id,'menu','menu_not_configured','Menu Not Configured',
           format('%s''s menu has not been configured yet.',to_char(v_target_date,'FMDay')),
           jsonb_build_object('screen','menu','weekday',v_weekday,'business_date',v_target_date::text,'order_for',r.order_for),
