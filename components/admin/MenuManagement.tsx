@@ -28,6 +28,8 @@ const MenuManagement:React.FC<MenuManagementProps>=({initialWeekday})=>{
     finally{setLoading(false)}
   };
 
+  useEffect(()=>{if(Number.isInteger(initialWeekday)&&initialWeekday>=0&&initialWeekday<=6)void loadDay(initialWeekday)},[initialWeekday]);
+
   const refreshDays=async()=>{
     setLoading(true);
     try{return await Promise.all(DAYS.map((_,day)=>getWeeklyMenu(day)))}
