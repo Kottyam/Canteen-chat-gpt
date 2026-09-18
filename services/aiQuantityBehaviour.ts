@@ -1,4 +1,5 @@
 import type { Order } from '../types';
+import { supabase, supabaseEnabled } from '../supabase';
 
 export interface AIQuantityItemRow{
   name:string;memberQuantity:number;guestQuantity:number;totalQuantity:number;
@@ -31,14 +32,29 @@ const aggregate=(order:Order)=>{
   return {member,guest};
 };
 
-export function loadAIQuantityBehaviour(orders:Order[],now=new Date()):AIQuantityBehaviour{
+export async function loadAIQuantityBehaviour(orders:Order[],now=new Date()):Promise<AIQuantityBehaviour>{
   const currentMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const prev=new Date(now.getFullYear(),now.getMonth()-1,1);
   const previousMonth=`${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
   const start=new Date(now.getFullYear(),now.getMonth()-5,1);
   const historicalFrom=`${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-01`;
   const endMonth=currentMonth;
-  const relevant=orders.filter(o=>o.status!=='cancelled'&&o.date>=historicalFrom&&monthKey(o.date)<=endMonth);
+  let sourceOrders=orders;
+  if(supabaseEnabled&&supabase){
+    const {data,error}=await supabase.from('orders').select('id,employee_id,ordered_for,status,order_source,order_items(id,item_code,item_name,quantity,item_source)').gte('ordered_for',historicalFrom).lte('ordered_for',`${endMonth}-31`);
+    if(error) throw error;
+    sourceOrders=(data||[]).map((o:any)=>({
+      id:o.id,employeeId:o.employee_id,memberIdentityId:o.employee_id,date:String(o.ordered_for),status:o.status==='cancelled'?'cancelled':'active',
+      orderSource:o.order_source==='admin'?'admin':'employee',
+      items:Object.fromEntries((o.order_items||[]).filter((i:any)=>i.item_source!=='guest'&&safeNumber(i.quantity)>0).map((i:any)=>[i.item_code,true])),
+      itemQuantities:Object.fromEntries((o.order_items||[]).filter((i:any)=>i.item_source!=='guest'&&safeNumber(i.quantity)>0).map((i:any)=>[i.item_code,safeNumber(i.quantity)])),
+      itemNames:Object.fromEntries((o.order_items||[]).filter((i:any)=>i.item_source!=='guest'&&safeNumber(i.quantity)>0).map((i:any)=>[i.item_code,i.item_name||i.item_code])),
+      guestItems:Object.fromEntries((o.order_items||[]).filter((i:any)=>i.item_source==='guest'&&safeNumber(i.quantity)>0).map((i:any)=>[i.item_code,true])),
+      guestItemQuantities:Object.fromEntries((o.order_items||[]).filter((i:any)=>i.item_source==='guest'&&safeNumber(i.quantity)>0).map((i:any)=>[i.item_code,safeNumber(i.quantity)])),
+      guestItemNames:Object.fromEntries((o.order_items||[]).filter((i:any)=>i.item_source==='guest'&&safeNumber(i.quantity)>0).map((i:any)=>[i.item_code,i.item_name||i.item_code]))
+    })) as Order[];
+  }
+  const relevant=sourceOrders.filter(o=>o.status!=='cancelled'&&o.date>=historicalFrom&&monthKey(o.date)<=endMonth);
   let totalMemberQuantity=0,totalGuestQuantity=0;
   const items=new Map<string,{member:number;guest:number;orders:number;days:Set<string>;current:number;previous:number}>();
   const weekdayMap=new Map<string,{member:number;guest:number;orders:number;days:Set<string>}>();
