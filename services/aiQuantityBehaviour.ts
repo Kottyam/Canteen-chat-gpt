@@ -39,7 +39,7 @@ export async function loadAIQuantityBehaviour(orders:Order[],now=new Date()):Pro
   const start=new Date(now.getFullYear(),now.getMonth()-5,1);
   const historicalFrom=`${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-01`;
   const endMonth=currentMonth;
-  const historicalTo=\`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}\`;
+  const historicalTo=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   let sourceOrders=orders;
   if(supabaseEnabled&&supabase){
     const {data,error}=await supabase.from('orders').select('id,employee_id,ordered_for,status,order_source,order_items(id,item_code,item_name,quantity,item_source)').gte('ordered_for',historicalFrom).lte('ordered_for',historicalTo);
