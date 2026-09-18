@@ -39,6 +39,7 @@ export async function loadAIQuantityBehaviour(orders:Order[],now=new Date()):Pro
   const start=new Date(now.getFullYear(),now.getMonth()-5,1);
   const historicalFrom=`${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-01`;
   const endMonth=currentMonth;
+  const historicalTo=\`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}\`;
   let sourceOrders=orders;
   if(supabaseEnabled&&supabase){
     const {data,error}=await supabase.from('orders').select('id,employee_id,ordered_for,status,order_source,order_items(id,item_code,item_name,quantity,item_source)').gte('ordered_for',historicalFrom).lte('ordered_for',`${endMonth}-31`);
@@ -73,5 +74,5 @@ export async function loadAIQuantityBehaviour(orders:Order[],now=new Date()):Pro
   }
   const rows=[...items.entries()].map(([name,r])=>{const total=r.member+r.guest;const change=r.current-r.previous;return{name,memberQuantity:r.member,guestQuantity:r.guest,totalQuantity:total,orders:r.orders,avgPerOrder:r.orders?total/r.orders:0,orderingDays:r.days.size,avgPerOrderingDay:r.days.size?total/r.days.size:0,currentQuantity:r.current,previousQuantity:r.previous,change,changePercent:r.previous===0?null:change/Math.abs(r.previous)*100}}).sort((a,b)=>b.totalQuantity-a.totalQuantity);
   const weekdayRows=weekdays.map(day=>{const r=weekdayMap.get(day)||{member:0,guest:0,orders:0,days:new Set<string>()};return{day,memberQuantity:r.member,guestQuantity:r.guest,totalQuantity:r.member+r.guest,orders:r.orders,orderingDays:r.days.size}});
-  return{currentMonth,previousMonth,historicalFrom,historicalTo:endMonth,totalMemberQuantity,totalGuestQuantity,totalQuantity:totalMemberQuantity+totalGuestQuantity,items:rows,weekdays:weekdayRows};
+  return{currentMonth,previousMonth,historicalFrom,historicalTo,totalMemberQuantity,totalGuestQuantity,totalQuantity:totalMemberQuantity+totalGuestQuantity,items:rows,weekdays:weekdayRows};
 }
