@@ -5,6 +5,7 @@ export type Status = 'active' | 'blocked' | 'deleted';
 export interface User { id:string; identityId?:string; name:string; mobile:string; password:string; role:Role; adminRole?:AdminRole; permissions?:AdminPermission[]; status:Status; isFirstLogin?:boolean; canteenId?:string; canteenName?:string; needsCanteenSetup?:boolean; authProvider?:'password'|'google'; memberLoginMode?:'sr'|'mobile'; }
 export interface MenuItem { itemCode:string; itemName:string; unitPrice:number; active:boolean; archived?:boolean; }
 export interface DailyMenuItem extends MenuItem { menuDate:string; }
+export interface WeeklyMenuItem extends MenuItem { weekday:number; }
 export type OrderItems=Record<string,boolean>;
 export type OrderItemPrices=Record<string,number>;
 export type OrderItemNames=Record<string,string>;
