@@ -23,3 +23,7 @@ create policy weekly_menu_admin on public.weekly_menu for all
 create policy weekly_menu_read on public.weekly_menu for select
   using (public.current_canteen_id() = canteen_id);
 create index if not exists weekly_menu_weekday_idx on public.weekly_menu(canteen_id,weekday) where active=true;
+
+create trigger weekly_menu_set_canteen_id
+before insert or update on public.weekly_menu
+for each row execute function public.set_canteen_id_from_context();
