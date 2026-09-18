@@ -35,6 +35,7 @@ type BillRow={
   published:boolean;
   published_at:string|null;
   member_name_snapshot:string|null;
+  created_at:string;
 };
 type PaymentRow={
   id:string;
@@ -188,7 +189,7 @@ export async function loadAIAttention(options:{
   if(options.canViewMembers){
     queryPromises.push(
       supabase.from('employee_adjustments')
-        .select('employee_id,adjustment_date,amount,contribution_eligible,employee_food_amount,company_food_amount,fixed_monthly_amount,contribution_mode,member_name_snapshot')
+        .select('employee_id,adjustment_date,amount,contribution_eligible,employee_food_amount,company_food_amount,fixed_monthly_amount,contribution_mode,member_name_snapshot,created_at')
         .gte('adjustment_date',`${currentMonth}-01`)
         .lte('adjustment_date',businessDate)
         .then(r=>{
@@ -418,7 +419,7 @@ export async function loadAIAttention(options:{
       row.mode='fixed_amount';
     });
 
-    (results.adjustments||[]).forEach(adjustment=>{
+    (results.adjustments||[]).sort((a,b)=>String(a.adjustment_date).localeCompare(String(b.adjustment_date))||String(a.created_at||'').localeCompare(String(b.created_at||''))).forEach(adjustment=>{
       if(!adjustment.contribution_eligible||adjustment.contribution_mode!=='fixed_amount')return;
       const row=ensureFixed(adjustment.employee_id,adjustment.member_name_snapshot);
       if(adjustment.fixed_monthly_amount!=null)row.allowance=Number(adjustment.fixed_monthly_amount);
