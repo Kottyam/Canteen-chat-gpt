@@ -8,11 +8,13 @@ const PROFILE_KEY = 'gocanteen_member_push_profile_id';
 const PENDING_TAP_KEY = 'gocanteen_pending_push_action';
 
 let listenersReady = false;
-let activeContext: { profileId: string; generation: number } | null = null;
+let activeMemberContext: { profileId: string; generation: number } | null = null;
+let activeAdminContext: { profileId: string; generation: number } | null = null;
 
 export type MemberPushUser = { identityId?: string; role?: string } | null;
 
 const isAndroid = () => Capacitor.getPlatform() === 'android';
+
 const getInstallationId = () => {
   const existing = localStorage.getItem(INSTALLATION_KEY);
   if (existing) return existing;
@@ -32,8 +34,6 @@ const getBindingGeneration = (profileId: string) => {
   return Math.max(1, generation);
 };
 
-const currentGeneration = () => Math.max(1, Number(localStorage.getItem(GENERATION_KEY) || '1'));
-
 const persistTap = (action: ActionPerformed) => {
   try {
     const payload = action.notification?.data || {};
@@ -45,15 +45,27 @@ const persistTap = (action: ActionPerformed) => {
 };
 
 const registerToken = async (token: Token) => {
-  const context = activeContext;
-  if (!context || !supabaseEnabled || !supabase) return;
+  if (!supabaseEnabled || !supabase) return;
+
   try {
-    await supabase.rpc('register_member_push_installation', {
-      p_installation_id: getInstallationId(),
-      p_fcm_token: token.value,
-      p_platform: 'android',
-      p_binding_generation: context.generation,
-    });
+    if (activeAdminContext) {
+      await supabase.rpc('register_admin_push_installation', {
+        p_installation_id: getInstallationId(),
+        p_fcm_token: token.value,
+        p_platform: 'android',
+        p_binding_generation: activeAdminContext.generation,
+      });
+      return;
+    }
+
+    if (activeMemberContext) {
+      await supabase.rpc('register_member_push_installation', {
+        p_installation_id: getInstallationId(),
+        p_fcm_token: token.value,
+        p_platform: 'android',
+        p_binding_generation: activeMemberContext.generation,
+      });
+    }
   } catch {
     // FCM registration is best-effort and must never block authentication/business flows.
   }
@@ -70,12 +82,62 @@ const ensureListeners = async () => {
   await PushNotifications.addListener('pushNotificationActionPerformed', persistTap);
 };
 
+const deactivateMemberForSwitch = async () => {
+  const context = activeMemberContext;
+  if (!context || !supabaseEnabled || !supabase) return;
+  try {
+    await supabase.rpc('deactivate_member_push_installation', {
+      p_installation_id: getInstallationId(),
+      p_binding_generation: context.generation,
+    });
+  } catch {
+    // Best-effort cleanup during account switching.
+  }
+  activeMemberContext = null;
+};
+
+const deactivateAdminForSwitch = async () => {
+  const context = activeAdminContext;
+  if (!context || !supabaseEnabled || !supabase) return;
+  try {
+    await supabase.rpc('deactivate_admin_push_installation', {
+      p_installation_id: getInstallationId(),
+      p_binding_generation: context.generation,
+    });
+  } catch {
+    // Best-effort cleanup during account switching.
+  }
+  activeAdminContext = null;
+};
+
 export const syncMemberPushForUser = async (user: MemberPushUser) => {
   if (!isAndroid() || !supabaseEnabled || !supabase) return;
   if (!user?.identityId || user.role !== 'employee') return;
+
+  if (activeAdminContext) await deactivateAdminForSwitch();
   const generation = getBindingGeneration(user.identityId);
-  activeContext = { profileId: user.identityId, generation };
+  activeMemberContext = { profileId: user.identityId, generation };
   await ensureListeners();
+
+  try {
+    let permission = await PushNotifications.checkPermissions();
+    if (permission.receive !== 'granted') permission = await PushNotifications.requestPermissions();
+    if (permission.receive !== 'granted') return;
+    await PushNotifications.register();
+  } catch {
+    // Push is optional; keep authentication and all existing app flows intact.
+  }
+};
+
+export const syncAdminPushForUser = async (user: MemberPushUser) => {
+  if (!isAndroid() || !supabaseEnabled || !supabase) return;
+  if (!user?.identityId || user.role !== 'admin') return;
+
+  if (activeMemberContext) await deactivateMemberForSwitch();
+  const generation = getBindingGeneration(user.identityId);
+  activeAdminContext = { profileId: user.identityId, generation };
+  await ensureListeners();
+
   try {
     let permission = await PushNotifications.checkPermissions();
     if (permission.receive !== 'granted') permission = await PushNotifications.requestPermissions();
@@ -87,9 +149,10 @@ export const syncMemberPushForUser = async (user: MemberPushUser) => {
 };
 
 export const deactivateCurrentMemberPush = async () => {
-  const context = activeContext;
+  const context = activeMemberContext;
   if (!isAndroid()) return;
-  activeContext = null;
+  activeMemberContext = null;
+
   try {
     if (context && supabaseEnabled && supabase) {
       await supabase.rpc('deactivate_member_push_installation', {
@@ -100,6 +163,27 @@ export const deactivateCurrentMemberPush = async () => {
   } catch {
     // Logout must continue even when push cleanup is unavailable.
   }
+
+  try { await PushNotifications.removeAllDeliveredNotifications(); } catch { /* optional native cleanup */ }
+  try { await PushNotifications.unregister(); } catch { /* optional native cleanup */ }
+};
+
+export const deactivateCurrentAdminPush = async () => {
+  const context = activeAdminContext;
+  if (!isAndroid()) return;
+  activeAdminContext = null;
+
+  try {
+    if (context && supabaseEnabled && supabase) {
+      await supabase.rpc('deactivate_admin_push_installation', {
+        p_installation_id: getInstallationId(),
+        p_binding_generation: context.generation,
+      });
+    }
+  } catch {
+    // Logout must continue even when push cleanup is unavailable.
+  }
+
   try { await PushNotifications.removeAllDeliveredNotifications(); } catch { /* optional native cleanup */ }
   try { await PushNotifications.unregister(); } catch { /* optional native cleanup */ }
 };
@@ -120,4 +204,4 @@ export const consumePendingPushAction = (): Record<string, string> | null => {
   }
 };
 
-export const getMemberPushBindingGeneration = currentGeneration;
+export const getMemberPushBindingGeneration = () => Math.max(1, Number(localStorage.getItem(GENERATION_KEY) || '1'));
