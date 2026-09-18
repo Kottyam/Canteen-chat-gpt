@@ -58,7 +58,7 @@ export async function loadAIMemberBehaviour(
   const end=`${endDate.getFullYear()}-${String(endDate.getMonth()+1).padStart(2,'0')}-${String(endDate.getDate()).padStart(2,'0')}`;
 
   const [billResult,adjustmentResult]=await Promise.all([
-    supabase.from('monthly_bills').select('employee_id,bill_month,bill_year,total').gte('bill_year',Number(previousMonth.slice(0,4))).lte('bill_year',year),
+    supabase.from('monthly_bills').select('employee_id,bill_month,bill_year,total').or(`and(bill_year.eq.${Number(previousMonth.slice(0,4))},bill_month.eq.${Number(previousMonth.slice(5,7))}),and(bill_year.eq.${year},bill_month.eq.${month})`),
     supabase.from('employee_adjustments').select('employee_id,adjustment_date,amount,contribution_eligible,employee_food_amount,company_food_amount,fixed_monthly_amount,contribution_mode').gte('adjustment_date',start).lte('adjustment_date',end),
   ]);
 
