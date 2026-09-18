@@ -56,6 +56,7 @@ type OrderRow={
   company_food_amount:number|null;
   employee_contribution_mode:string|null;
   fixed_monthly_amount:number|null;
+  created_at:string;
   order_items?:Array<{
     item_code:string;
     item_name:string|null;
@@ -174,7 +175,7 @@ export async function loadAIAttention(options:{
   if(options.canViewOrders){
     queryPromises.push(
       supabase.from('orders')
-        .select('ordered_for,status,employee_id,order_source,member_name_snapshot,employee_food_amount,company_food_amount,employee_contribution_mode,fixed_monthly_amount,order_items(item_code,item_name,quantity,item_source)')
+        .select('ordered_for,status,employee_id,order_source,member_name_snapshot,employee_food_amount,company_food_amount,employee_contribution_mode,fixed_monthly_amount,created_at,order_items(item_code,item_name,quantity,item_source)')
         .gte('ordered_for',historyFrom)
         .lte('ordered_for',businessDate)
         .then(r=>{
@@ -282,13 +283,13 @@ export async function loadAIAttention(options:{
       });
     });
 
-    const totalOutstanding=outstanding.reduce((sum,row)=>sum+row.outstanding,0);
+    const totalOutstanding=outstanding.reduce((sum,row)=>sum+row.outstanding,0);const outstandingMembers=new Set(outstanding.map(row=>row.bill.employee_id));
     if(outstanding.length>1){
       items.unshift({
         id:'outstanding-summary',
         category:'outstanding_bill',
         title:'OUTSTANDING BILLS',
-        detail:`${money(totalOutstanding)} outstanding across ${outstanding.length} members.`,
+        detail:`${money(totalOutstanding)} outstanding across ${outstandingMembers.size} members.`,
         action:'payment_verification',
         amount:totalOutstanding,
       });
@@ -409,7 +410,7 @@ export async function loadAIAttention(options:{
       return row;
     };
 
-    (results.orders||[]).filter(order=>order.status!=='cancelled'&&String(order.ordered_for).slice(0,7)===currentMonth).forEach(order=>{
+    (results.orders||[]).filter(order=>order.status!=='cancelled'&&String(order.ordered_for).slice(0,7)===currentMonth).sort((a,b)=>String(a.ordered_for).localeCompare(String(b.ordered_for))||String(a.created_at||'').localeCompare(String(b.created_at||''))).forEach(order=>{
       if(order.employee_contribution_mode!=='fixed_amount')return;
       const row=ensureFixed(order.employee_id,order.member_name_snapshot);
       if(order.fixed_monthly_amount!=null)row.allowance=Number(order.fixed_monthly_amount);
