@@ -1,4 +1,4 @@
-impor\n  useEffect(()=>{if(Number.isInteger(initialWeekday)&&initialWeekday>=0&&initialWeekday<=6)void loadDay(initialWeekday)},[initialWeekday]);t React,{useEffect,useMemo,useState}from'react';
+import React,{useEffect,useMemo,useState}from'react';
 import{MenuItem}from'../../types';
 import{getWeeklyMenu,saveWeeklyMenu}from'../../services/supabaseSync';
 import{useData}from'../../context/DataContext';
