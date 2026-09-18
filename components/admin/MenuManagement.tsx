@@ -1,4 +1,4 @@
-import React,{useEffect,useMemo,useState}from'react';
+impor\n  useEffect(()=>{if(Number.isInteger(initialWeekday)&&initialWeekday>=0&&initialWeekday<=6)void loadDay(initialWeekday)},[initialWeekday]);t React,{useEffect,useMemo,useState}from'react';
 import{MenuItem}from'../../types';
 import{getWeeklyMenu,saveWeeklyMenu}from'../../services/supabaseSync';
 import{useData}from'../../context/DataContext';
@@ -6,7 +6,8 @@ import AsyncActionButton from'../common/AsyncActionButton';
 
 const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
-const MenuManagement:React.FC=()=>{
+interface MenuManagementProps{initialWeekday?:number}
+const MenuManagement:React.FC<MenuManagementProps>=({initialWeekday})=>{
   const{menuItems}=useData();
   const[selectedDay,setSelectedDay]=useState<number|null>(null);
   const[items,setItems]=useState<MenuItem[]>([]);
