@@ -12,13 +12,13 @@ const MenuManagement:React.FC=()=>{
   const[items,setItems]=useState<MenuItem[]>([]);
   const[loading,setLoading]=useState(false);
   const[saving,setSaving]=useState(false);
-  const[message,setMessage]=useState('');
+  const[message,setMessage]=useState('');const[editingCode,setEditingCode]=useState<string|null>(null);
   const[newName,setNewName]=useState('');
   const[newPrice,setNewPrice]=useState('');
   const dayLabel=selectedDay==null?'':DAYS[selectedDay];
 
   const loadDay=async(day:number)=>{
-    setSelectedDay(day);setLoading(true);setMessage('');
+    setSelectedDay(day);setLoading(true);setMessage('');setEditingCode(null);
     try{setItems(await getWeeklyMenu(day))}catch(error:any){setItems([]);setMessage(error?.message||'Could not load this day menu.')}finally{setLoading(false)}
   };
 
@@ -75,9 +75,9 @@ const MenuManagement:React.FC=()=>{
         <div className="space-y-2">
           {activeItems.map(item=><div key={item.itemCode} className="rounded-xl border bg-white p-3 shadow-sm">
             <div className="flex items-center gap-2">
-              <input value={item.itemName} disabled={saving} onChange={e=>patch(item.itemCode,{itemName:e.target.value})} className="min-h-11 min-w-0 flex-1 rounded-lg border px-3 text-sm outline-none focus:border-primary-500"/>
-              <div className="flex w-28 shrink-0 items-center"><span className="flex min-h-11 items-center rounded-l-lg border border-r-0 bg-gray-50 px-3 text-gray-500">₹</span><input type="number" min="0" step="0.5" inputMode="decimal" disabled={saving} value={item.unitPrice} onChange={e=>patch(item.itemCode,{unitPrice:Number(e.target.value)})} className="min-h-11 w-full rounded-r-lg border px-2 text-right text-sm outline-none focus:border-primary-500"/></div>
-              <button type="button" disabled={saving} title="Delete" aria-label={`Delete ${item.itemName}`} onClick={()=>remove(item.itemCode)} className="min-h-11 min-w-11 rounded-lg border text-red-600 hover:bg-red-50">🗑</button>
+              <input value={item.itemName} readOnly={saving||editingCode!==item.itemCode} disabled={saving} onChange={e=>patch(item.itemCode,{itemName:e.target.value})} className="min-h-11 min-w-0 flex-1 rounded-lg border px-3 text-sm outline-none focus:border-primary-500"/>
+              <div className="flex w-28 shrink-0 items-center"><span className="flex min-h-11 items-center rounded-l-lg border border-r-0 bg-gray-50 px-3 text-gray-500">₹</span><input type="number" min="0" step="0.5" inputMode="decimal" disabled={saving||editingCode!==item.itemCode} value={item.unitPrice} onChange={e=>patch(item.itemCode,{unitPrice:Number(e.target.value)})} className="min-h-11 w-full rounded-r-lg border px-2 text-right text-sm outline-none focus:border-primary-500"/></div>
+              <button type="button" disabled={saving} title="Edit" aria-label={`Edit ${item.itemName}`} onClick={()=>setEditingCode(editingCode===item.itemCode?null:item.itemCode)} className="min-h-11 min-w-11 rounded-lg border text-primary-700 hover:bg-primary-50">✎</button><button type="button" disabled={saving} title="Delete" aria-label={`Delete ${item.itemName}`} onClick={()=>remove(item.itemCode)} className="min-h-11 min-w-11 rounded-lg border text-red-600 hover:bg-red-50">🗑</button>
             </div>
           </div>)}
           {!activeItems.length&&<div className="rounded-xl border border-dashed bg-gray-50 p-5 text-center text-sm text-gray-500">No menu added yet.</div>}
