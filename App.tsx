@@ -5,6 +5,7 @@ import Login from'./components/auth/Login';
 import CanteenOnboarding from'./components/auth/CanteenOnboarding';
 import EmployeeDashboard from'./components/employee/EmployeeDashboard';
 import AdminDashboard from'./components/admin/AdminDashboard';
+import SuperAdminDashboard from'./components/admin/SuperAdminDashboard';
 import InitialPasswordChange from'./components/auth/InitialPasswordChange';
 
 const SplashScreen:React.FC=()=> <div className="flex min-h-screen flex-col items-center justify-center bg-white"><span className="text-4xl font-extrabold text-primary-700">Go Canteen</span><span className="mt-2 text-[9px] font-medium text-black">Powered by Alien 1729</span></div>;
