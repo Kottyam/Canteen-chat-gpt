@@ -10,6 +10,20 @@ export interface SubscriptionPayment{id:string;canteen_id:string;subscription_id
 
 const requireClient=()=>{if(!supabase)throw new Error('Supabase is not enabled.');return supabase};
 
+export interface CanteenAccessState{allowed:boolean;status:SubscriptionStatus|null;subscription:CanteenSubscription|null;reason:'trial'|'active'|'payment_pending'|'expired'|'suspended'|'unassigned'|'verification_error'}
+
+export async function loadCanteenAccessState(canteenId:string):Promise<CanteenAccessState>{
+  await syncSubscriptionStatuses(canteenId);
+  const c=requireClient();
+  const {data,error}=await c.from('canteen_subscriptions').select('*').eq('canteen_id',canteenId).maybeSingle();
+  if(error)throw error;
+  if(!data)return{allowed:false,status:null,subscription:null,reason:'unassigned'};
+  const subscription=data as CanteenSubscription;
+  const now=Date.now();
+  const allowed=subscription.status==='payment_pending'||(subscription.status==='trial'&&Boolean(subscription.trial_end)&&new Date(subscription.trial_end as string).getTime()>now)||(subscription.status==='active'&&Boolean(subscription.subscription_end)&&new Date(subscription.subscription_end as string).getTime()>now);
+  return{allowed,status:subscription.status,subscription,reason:subscription.status};
+}
+
 export async function syncSubscriptionStatuses(canteenId?:string){const {error}=await requireClient().rpc('sync_subscription_statuses',{p_canteen_id:canteenId||null});if(error)throw error}
 export async function getPlatformStats(){const {data,error}=await requireClient().rpc('super_admin_platform_stats');if(error)throw error;return data as Record<string,number>}
 export async function setSubscription(canteenId:string,action:string,planId?:string,trialDays?:number){const {data,error}=await requireClient().rpc('super_admin_set_subscription',{p_canteen_id:canteenId,p_action:action,p_plan_id:planId||null,p_trial_days:trialDays??null,p_amount:null,p_currency:null});if(error)throw error;return data as CanteenSubscription}
