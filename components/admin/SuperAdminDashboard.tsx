@@ -2,7 +2,7 @@ import React,{useCallback,useEffect,useMemo,useState}from'react';
 import CanteenHeader from'../shared/CanteenHeader';
 import ChangePasswordModal from'../auth/ChangePasswordModal';
 import{useAuth}from'../../context/AuthContext';
-import{createPlan,loadPlatformData,reviewSubscriptionPayment,setSubscription,updatePlan,SubscriptionPlan,SubscriptionPayment,CanteenSubscription}from'../../services/subscriptionPlatform';
+import{createPlan,loadPlatformData,reviewSubscriptionPayment,setSubscription,updatePlan,setDefaultPlan,deletePlan,SubscriptionPlan,SubscriptionPayment,CanteenSubscription}from'../../services/subscriptionPlatform';
 
 type Tab='dashboard'|'canteens'|'subscriptions'|'payments'|'admins'|'plans'|'settings';
 const money=(n:number,c='INR')=>new Intl.NumberFormat('en-IN',{style:'currency',currency:c,maximumFractionDigits:2}).format(n||0);
@@ -33,5 +33,60 @@ return <div className="min-h-screen w-full bg-gray-100 pb-14"><CanteenHeader onC
 {tab==='settings'&&<section className="rounded-xl bg-white p-5 shadow-sm"><h2 className="text-2xl font-extrabold">Platform Settings</h2><p className="mt-2 text-sm text-gray-600">Subscription gateway integration is intentionally not enabled in this foundation phase.</p><p className="mt-1 text-sm text-gray-600">Subscription payment records and activation are separated from employee food-bill payments.</p></section>}
 </main><ChangePasswordModal isOpen={passwordOpen} onClose={()=>setPasswordOpen(false)}/></div>};
 
-const Plans:React.FC<{plans:SubscriptionPlan[];refresh:()=>Promise<void>;busy:boolean}>=({plans,refresh,busy})=>{const[form,setForm]=useState({name:'',description:'',price:'',billing_period:'monthly',currency:'INR',trial_days:'0'});const[err,setErr]=useState('');const save=async()=>{setErr('');try{await createPlan({name:form.name.trim(),description:form.description||null,price:Number(form.price||0),billing_period:form.billing_period as any,currency:form.currency.toUpperCase(),trial_days:Number(form.trial_days||0),active:true});setForm({name:'',description:'',price:'',billing_period:'monthly',currency:'INR',trial_days:'0'});await refresh()}catch(e:any){setErr(e?.message||'Could not create plan.')}};return <section className="space-y-4"><div><h2 className="text-2xl font-extrabold">Subscription Plans</h2><p className="text-sm text-gray-500">Only Super Admin can create and manage platform plan definitions.</p></div><div className="rounded-xl bg-white p-4 shadow-sm"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><input className="rounded-lg border p-3" placeholder="Plan name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/><input className="rounded-lg border p-3" placeholder="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/><input className="rounded-lg border p-3" type="number" min="0" placeholder="Price" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/><select className="rounded-lg border p-3" value={form.billing_period} onChange={e=>setForm({...form,billing_period:e.target.value})}><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select><input className="rounded-lg border p-3" maxLength={3} value={form.currency} onChange={e=>setForm({...form,currency:e.target.value})}/><input className="rounded-lg border p-3" type="number" min="0" placeholder="Trial days" value={form.trial_days} onChange={e=>setForm({...form,trial_days:e.target.value})}/></div>{err&&<p className="mt-3 text-sm font-semibold text-red-600">{err}</p>}<button disabled={busy||!form.name.trim()} onClick={()=>void save()} className="mt-3 rounded-lg bg-primary-600 px-4 py-2.5 font-bold text-white disabled:opacity-40">Create Plan</button></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{plans.map(p=><div key={p.id} className="rounded-xl bg-white p-4 shadow-sm"><div className="flex items-center justify-between"><h3 className="font-extrabold">{p.name}</h3>{p.active?badge('active'):badge('suspended')}</div><p className="mt-1 text-sm text-gray-500">{p.description||'No description'}</p><p className="mt-3 text-xl font-extrabold">{money(p.price,p.currency)} <span className="text-xs font-semibold text-gray-500">/ {p.billing_period}</span></p><p className="mt-1 text-xs text-gray-500">Trial: {p.trial_days} days</p><button onClick={()=>void (async()=>{try{await updatePlan(p.id,{active:!p.active});await refresh()}catch{}})()} className={`mt-3 rounded-lg px-3 py-2 text-xs font-bold ${p.active?'bg-gray-800 text-white':'bg-green-600 text-white'}`}>{p.active?'Deactivate':'Activate'}</button></div>)}</div></section>};
+const Plans:React.FC<{plans:SubscriptionPlan[];refresh:()=>Promise<void>;busy:boolean}>=({plans,refresh,busy})=>{
+  const[form,setForm]=useState({name:'',description:'',price:'',billing_period:'monthly',currency:'INR',trial_days:'30',is_default:false});
+  const[editing,setEditing]=useState<string|null>(null);
+  const[err,setErr]=useState('');
+  const save=async()=>{
+    setErr('');
+    try{
+      const input={name:form.name.trim(),description:form.description||null,price:Number(form.price||0),billing_period:form.billing_period as any,currency:form.currency.toUpperCase(),trial_days:Number(form.trial_days||0),active:true,is_default:Boolean(form.is_default)};
+      if(editing) await updatePlan(editing,input); else await createPlan(input);
+      if(input.is_default){const p=plans.find(x=>x.id===editing);if(!p||!p.is_default) await setDefaultPlan(editing||'');}
+      setForm({name:'',description:'',price:'',billing_period:'monthly',currency:'INR',trial_days:'30',is_default:false});setEditing(null);await refresh();
+    }catch(e:any){setErr(e?.message||'Could not save plan.')}
+  };
+  const edit=(p:SubscriptionPlan)=>{setEditing(p.id);setForm({name:p.name,description:p.description||'',price:String(p.price),billing_period:p.billing_period,currency:p.currency,trial_days:String(p.trial_days),is_default:p.is_default})};
+  const cancel=()=>{setEditing(null);setErr('');setForm({name:'',description:'',price:'',billing_period:'monthly',currency:'INR',trial_days:'30',is_default:false})};
+  const remove=async(p:SubscriptionPlan)=>{
+    if(!window.confirm(`Delete plan "${p.name}"? Used plans are protected.`))return;
+    setErr('');
+    try{await deletePlan(p.id);await refresh()}catch(e:any){setErr(e?.message||'Plan cannot be deleted. Deactivate it instead.')}
+  };
+  return <section className="space-y-4">
+    <div><h2 className="text-2xl font-extrabold">Subscription Plans</h2><p className="text-sm text-gray-500">Create, edit, activate/deactivate and safely delete platform plans.</p></div>
+    <div className="rounded-xl bg-white p-4 shadow-sm">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <input className="rounded-lg border p-3" placeholder="Plan name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
+        <input className="rounded-lg border p-3" placeholder="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/>
+        <input className="rounded-lg border p-3" type="number" min="0" placeholder="Price" value={form.price} onChange={e=>setForm({...form,price:e.target.value})}/>
+        <select className="rounded-lg border p-3" value={form.billing_period} onChange={e=>setForm({...form,billing_period:e.target.value})}><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
+        <input className="rounded-lg border p-3" maxLength={3} value={form.currency} onChange={e=>setForm({...form,currency:e.target.value})}/>
+        <input className="rounded-lg border p-3" type="number" min="1" placeholder="Trial days" value={form.trial_days} onChange={e=>setForm({...form,trial_days:e.target.value})}/>
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={form.is_default} onChange={e=>setForm({...form,is_default:e.target.checked})}/> Default plan for automatic trials</label>
+      {err&&<p className="mt-3 text-sm font-semibold text-red-600">{err}</p>}
+      <div className="mt-3 flex gap-2">
+        <button disabled={busy||!form.name.trim()} onClick={()=>void save()} className="rounded-lg bg-primary-600 px-4 py-2.5 font-bold text-white disabled:opacity-40">{editing?'Save Changes':'Create Plan'}</button>
+        {editing&&<button onClick={cancel} className="rounded-lg bg-gray-200 px-4 py-2.5 font-bold text-gray-700">Cancel</button>}
+      </div>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {plans.map(p=>{
+        const used=plans.length>0 && false;
+        return <div key={p.id} className="rounded-xl bg-white p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-2"><div><h3 className="font-extrabold">{p.name}</h3><div className="mt-1 flex flex-wrap gap-1">{p.active?badge('active'):badge('suspended')}{p.is_default&&<span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">DEFAULT</span>}</div></div></div>
+          <p className="mt-2 text-sm text-gray-500">{p.description||'No description'}</p>
+          <p className="mt-3 text-xl font-extrabold">{money(p.price,p.currency)} <span className="text-xs font-semibold text-gray-500">/ {p.billing_period}</span></p>
+          <p className="mt-1 text-xs text-gray-500">Trial: {p.trial_days} days</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={()=>edit(p)} className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-bold text-white">Edit</button>
+            <button onClick={()=>void (async()=>{try{await updatePlan(p.id,{active:!p.active});await refresh()}catch(e:any){setErr(e?.message||'Could not change plan status.')}})()} className={`rounded-lg px-3 py-2 text-xs font-bold ${p.active?'bg-gray-800 text-white':'bg-green-600 text-white'}`}>{p.active?'Deactivate':'Activate'}</button>
+            {!p.is_default&&p.active&&<button onClick={()=>void (async()=>{try{await setDefaultPlan(p.id);await refresh()}catch(e:any){setErr(e?.message||'Could not set default plan.')}})()} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white">Set Default</button>}
+            <button onClick={()=>void remove(p)} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white">Delete</button>
+          </div>
+        </div>
+      })}
+    </div>
+  </section>};
 export default SuperAdminDashboard;
