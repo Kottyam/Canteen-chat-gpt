@@ -91,7 +91,7 @@ begin
 end;
 $$;
 
-revoke execute on function public.canteen_submit_subscription_payment(uuid,numeric,text,date) from public;
+revoke execute on function public.canteen_submit_subscription_payment(uuid,numeric,text,date) from public, anon;
 grant execute on function public.canteen_submit_subscription_payment(uuid,numeric,text,date) to authenticated;
 
 create or replace function public.super_admin_review_subscription_payment(
@@ -199,5 +199,5 @@ begin
 end;
 $$;
 
-revoke execute on function public.super_admin_review_subscription_payment(uuid,text) from public;
+revoke execute on function public.super_admin_review_subscription_payment(uuid,text) from public, anon;
 grant execute on function public.super_admin_review_subscription_payment(uuid,text) to authenticated;
