@@ -13,7 +13,7 @@ const SuperAdminDashboard:React.FC=()=>{const{user}=useAuth();const[tab,setTab]=
 const refresh=useCallback(async()=>{setBusy(true);setMessage('');try{setData(await loadPlatformData())}catch(e:any){setMessage(e?.message||'Could not load platform data.')}finally{setBusy(false)}},[]);
 useEffect(()=>{void refresh()},[refresh]);
 if(user?.adminRole!=='super_admin')return null;
-const plans:SubscriptionPlan[]=data?.plans||[];const subs:CanteenSubscription[]=data?.subscriptions||[];const payments:SubscriptionPayment[]=data?.payments||[];const canteens=data?.canteens||[];const profiles=data?.profiles||[];
+const plans:SubscriptionPlan[]=data?.plans||[];const subs:CanteenSubscription[]=data?.subscriptions||[];const payments:SubscriptionPayment[]=data?.payments||[];const profiles=data?.profiles||[];const rawCanteens=data?.canteens||[];const platformOwnerIds=new Set(profiles.filter((p:any)=>p.role==='admin'&&p.admin_role==='super_admin'&&p.status==='active').map((p:any)=>p.id));const canteens=rawCanteens.filter((c:any)=>!platformOwnerIds.has(c.owner_id));
 const ownerByCanteen=new Map(profiles.filter((p:any)=>p.role==='admin'&&p.admin_role==='owner').map((p:any)=>[p.canteen_id,p]));
 const subByCanteen=new Map(subs.map(s=>[s.canteen_id,s]));const planById=new Map(plans.map(p=>[p.id,p]));
 const admins=profiles.filter((p:any)=>p.role==='admin'&&p.admin_role!=='super_admin');
