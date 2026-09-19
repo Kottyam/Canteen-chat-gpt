@@ -7,6 +7,8 @@ import{createPlan,loadPlatformData,reviewSubscriptionPayment,setSubscription,upd
 type Tab='dashboard'|'canteens'|'subscriptions'|'payments'|'admins'|'plans'|'settings';
 const money=(n:number,c='INR')=>new Intl.NumberFormat('en-IN',{style:'currency',currency:c,maximumFractionDigits:2}).format(n||0);
 const date=(v:string|null)=>v?new Date(v).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
+const planRange=(p?:SubscriptionPlan)=>!p?'—':p.pricing_model==='FIXED_AMOUNT'?'Fixed Amount':`${p.min_members??0}–${p.max_members??'∞'}`;
+const planDescription=(p?:SubscriptionPlan)=>!p?'—':p.pricing_model==='FIXED_AMOUNT'?`Fixed ${money(p.price,p.currency)} / ${p.billing_period}`:`${planRange(p)} members · ${money(p.price,p.currency)} / ${p.billing_period}`;
 const badge=(s:string)=>{const m:Record<string,string>={active:'bg-green-100 text-green-700',trial:'bg-blue-100 text-blue-700',payment_pending:'bg-amber-100 text-amber-700',expired:'bg-red-100 text-red-700',suspended:'bg-gray-200 text-gray-700',paid:'bg-green-100 text-green-700',pending:'bg-amber-100 text-amber-700',failed:'bg-red-100 text-red-700',refunded:'bg-purple-100 text-purple-700'};return <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${m[s]||'bg-gray-100 text-gray-700'}`}>{s.replace('_',' ').toUpperCase()}</span>};
 
 const SuperAdminDashboard:React.FC=()=>{const{user}=useAuth();const[tab,setTab]=useState<Tab>('dashboard');const[data,setData]=useState<any>(null);const[busy,setBusy]=useState(false);const[message,setMessage]=useState('');const[passwordOpen,setPasswordOpen]=useState(false);const[selectedCanteen,setSelectedCanteen]=useState<string|null>(null);
@@ -18,8 +20,6 @@ const ownerByCanteen=new Map(profiles.filter((p:any)=>p.role==='admin'&&p.admin_
 const subByCanteen=new Map(subs.map(s=>[s.canteen_id,s]));const planById=new Map(plans.map(p=>[p.id,p]));
 const admins=profiles.filter((p:any)=>p.role==='admin'&&p.admin_role!=='super_admin');
 const employeeCount=(id:string)=>profiles.filter((p:any)=>p.canteen_id===id&&p.role==='employee'&&p.status==='active').length;
-const planRange=(p?:SubscriptionPlan)=>!p?'—':p.pricing_model==='FIXED_AMOUNT'?'Fixed Amount':`${p.min_members??0}–${p.max_members??'∞'}`;
-const planDescription=(p?:SubscriptionPlan)=>!p?'—':p.pricing_model==='FIXED_AMOUNT'?`Fixed ${money(p.price,p.currency)} / ${p.billing_period}`:`${planRange(p)} members · ${money(p.price,p.currency)} / ${p.billing_period}`;
 const runAction=async(fn:()=>Promise<unknown>)=>{setBusy(true);setMessage('');try{await fn();await refresh();}catch(e:any){setMessage(e?.message||'Action failed.')}finally{setBusy(false)}};
 const statusAction=async(c:string,a:string,p?:string,d?:number)=>runAction(()=>setSubscription(c,a,p,d));
 const selected=selectedCanteen?canteens.find((c:any)=>c.id===selectedCanteen):null;const selectedSub=selectedCanteen?subByCanteen.get(selectedCanteen):null;
