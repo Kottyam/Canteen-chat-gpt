@@ -34,6 +34,57 @@ type ReminderRow = {
   sent_at: string;
 };
 
+export interface AIPaymentTiming {
+  submissionCount: number;
+  completionCount: number;
+  averageSubmissionDelayHours: number | null;
+  averageVerificationDelayHours: number | null;
+  averageCompletionDelayHours: number | null;
+  medianSubmissionDelayHours: number | null;
+  within24Submission: number;
+  after24Submission: number;
+  within24Completion: number;
+  after24Completion: number;
+}
+
+export interface AIPaymentMonthSummary extends AIPaymentTiming {
+  month: string;
+  bills: number;
+  paid: number;
+  pendingVerification: number;
+  unpaid: number;
+  notReceived: number;
+  outstandingAmount: number;
+}
+
+export interface AIPaymentPeriodSummary extends AIPaymentTiming {
+  key: 'current' | 'previous' | 'last3' | 'last6' | 'last12' | 'all';
+  label: string;
+  fromMonth: string | null;
+  toMonth: string | null;
+  available: boolean;
+  monthsAnalysed: number;
+  bills: number;
+  paid: number;
+  pendingVerification: number;
+  unpaid: number;
+  notReceived: number;
+  outstandingAmount: number;
+}
+
+export interface AIPaymentMemberMonth {
+  month: string;
+  bills: number;
+  submissionCount: number;
+  averageSubmissionDelayHours: number | null;
+  within24Submission: number;
+  after24Submission: number;
+  completionCount: number;
+  averageCompletionDelayHours: number | null;
+  within24Completion: number;
+  after24Completion: number;
+}
+
 export interface AIPaymentMemberRow {
   employeeId: string;
   name: string;
@@ -59,22 +110,43 @@ export interface AIPaymentMemberRow {
   historicalUnpaid: number;
   historicalReminderFollowedSubmissions: number;
   historicalReminderFollowedVerifications: number;
-  historicalPending: number;
   historicalAverageDelayHours: number | null;
+  historicalAverageCompletionDelayHours: number | null;
+  historicalSubmissionCount: number;
+  historicalCompletionCount: number;
+  fastestSubmissionHours: number | null;
+  slowestSubmissionHours: number | null;
+  fastestCompletionHours: number | null;
+  slowestCompletionHours: number | null;
+  within24Submission: number;
+  after24Submission: number;
+  within24Completion: number;
+  after24Completion: number;
   historicalDelayDirection: 'Increasing' | 'Decreasing' | 'Stable' | null;
+  recentVsEarlier: {
+    recentMonths: number;
+    earlierMonths: number;
+    recentAverageSubmissionHours: number | null;
+    earlierAverageSubmissionHours: number | null;
+    recentAverageCompletionHours: number | null;
+    earlierAverageCompletionHours: number | null;
+    recentWithin24Submission: number;
+    recentAfter24Submission: number;
+    earlierWithin24Submission: number;
+    earlierAfter24Submission: number;
+    statement: string | null;
+  };
+  monthlyHistory: AIPaymentMemberMonth[];
 }
 
-export interface AIPaymentMonthSummary {
-  month: string;
-  bills: number;
-  paid: number;
-  pendingVerification: number;
-  unpaid: number;
-  notReceived: number;
-  outstandingAmount: number;
-  averageSubmissionDelayHours: number | null;
-  averageVerificationDelayHours: number | null;
-  averageCompletionDelayHours: number | null;
+export interface AIPaymentObservation {
+  memberName: string;
+  employeeId: string;
+  billMonth: string;
+  billPublishedAt: string;
+  paymentAt: string;
+  hours: number;
+  type: 'submission' | 'completion';
 }
 
 export interface AIPaymentReminderSummary {
@@ -90,7 +162,18 @@ export interface AIPaymentBehaviour {
   previousMonth: string;
   historicalFromMonth: string;
   historicalToMonth: string;
-  overview: {
+  availableMonths: string[];
+  historicalMonthsAvailable: number;
+  availabilityStatement: string;
+  periods: {
+    current: AIPaymentPeriodSummary;
+    previous: AIPaymentPeriodSummary;
+    last3: AIPaymentPeriodSummary;
+    last6: AIPaymentPeriodSummary;
+    last12: AIPaymentPeriodSummary;
+    all: AIPaymentPeriodSummary;
+  };
+  overview: AIPaymentTiming & {
     totalBills: number;
     paid: number;
     pendingVerification: number;
@@ -98,13 +181,36 @@ export interface AIPaymentBehaviour {
     notReceived: number;
     outstandingAmount: number;
   };
-  current: AIPaymentMonthSummary;
-  previous: AIPaymentMonthSummary;
+  monthlyTrend: AIPaymentMonthSummary[];
+  fastestSubmission: AIPaymentObservation | null;
+  slowestSubmission: AIPaymentObservation | null;
+  fastestCompletion: AIPaymentObservation | null;
+  slowestCompletion: AIPaymentObservation | null;
+  recentVsEarlier: {
+    available: boolean;
+    recentMonths: number;
+    earlierMonths: number;
+    recentAverageSubmissionHours: number | null;
+    earlierAverageSubmissionHours: number | null;
+    recentAverageCompletionHours: number | null;
+    earlierAverageCompletionHours: number | null;
+    recentWithin24Submission: number;
+    recentAfter24Submission: number;
+    earlierWithin24Submission: number;
+    earlierAfter24Submission: number;
+    statement: string | null;
+  };
   reminder: AIPaymentReminderSummary;
   members: AIPaymentMemberRow[];
 }
 
 const monthKey = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`;
+const monthParts = (key: string) => key.split('-').map(Number);
+const monthOffset = (key: string, offset: number) => {
+  const [year, month] = monthParts(key);
+  const d = new Date(year, month - 1 + offset, 1);
+  return monthKey(d.getFullYear(), d.getMonth() + 1);
+};
 
 const safeHours = (from: string | null | undefined, to: string | null | undefined): number | null => {
   if (!from || !to) return null;
@@ -115,9 +221,12 @@ const safeHours = (from: string | null | undefined, to: string | null | undefine
   return Number.isFinite(hours) && hours >= 0 ? hours : null;
 };
 
-const average = (values: number[]) => {
-  const valid = values.filter(Number.isFinite);
-  return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+const median = (values: number[]) => {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
 const statusForBill = (bill: BillRow, payments: PaymentRow[]): AIPaymentStatus => {
@@ -139,14 +248,52 @@ const latestPaymentEvent = (payments: PaymentRow[]) => {
   return timestamps.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
 };
 
-const completionDelay = (bill: BillRow, payment: PaymentRow): number | null =>
-  safeHours(bill.published_at, payment.confirmed_at && payment.approved_at ? payment.approved_at : null);
+const submissionDelay = (bill: BillRow, payment: PaymentRow) => safeHours(bill.published_at, payment.confirmed_at);
+const completionDelay = (bill: BillRow, payment: PaymentRow) => safeHours(bill.published_at, payment.approved_at);
+const verificationDelay = (payment: PaymentRow) => safeHours(payment.confirmed_at, payment.approved_at);
 
-const submissionDelay = (bill: BillRow, payment: PaymentRow): number | null =>
-  safeHours(bill.published_at, payment.confirmed_at);
+const classify24 = (hours: number | null) => hours === null ? null : hours <= 24 ? 'within' : 'after';
 
-const verificationDelay = (payment: PaymentRow): number | null =>
-  safeHours(payment.confirmed_at, payment.approved_at);
+const emptyTiming = (): AIPaymentTiming => ({
+  submissionCount: 0,
+  completionCount: 0,
+  averageSubmissionDelayHours: null,
+  averageVerificationDelayHours: null,
+  averageCompletionDelayHours: null,
+  medianSubmissionDelayHours: null,
+  within24Submission: 0,
+  after24Submission: 0,
+  within24Completion: 0,
+  after24Completion: 0,
+});
+
+const emptyMonth = (month: string): AIPaymentMonthSummary => ({
+  month, bills: 0, paid: 0, pendingVerification: 0, unpaid: 0, notReceived: 0, outstandingAmount: 0, ...emptyTiming()
+});
+
+const timingFrom = (submission: number[], verification: number[], completion: number[]): AIPaymentTiming => {
+  const out = emptyTiming();
+  out.submissionCount = submission.length;
+  out.completionCount = completion.length;
+  out.averageSubmissionDelayHours = average(submission);
+  out.averageVerificationDelayHours = average(verification);
+  out.averageCompletionDelayHours = average(completion);
+  out.medianSubmissionDelayHours = median(submission);
+  submission.forEach(hours => classify24(hours) === 'within' ? out.within24Submission++ : out.after24Submission++);
+  completion.forEach(hours => classify24(hours) === 'within' ? out.within24Completion++ : out.after24Completion++);
+  return out;
+};
+
+const addTiming = (target: AIPaymentTiming, source: AIPaymentTiming) => {
+  target.submissionCount += source.submissionCount;
+  target.completionCount += source.completionCount;
+  target.within24Submission += source.within24Submission;
+  target.after24Submission += source.after24Submission;
+  target.within24Completion += source.within24Completion;
+  target.after24Completion += source.after24Completion;
+};
+
+const summarizeTiming = (submission: number[], verification: number[], completion: number[]) => timingFrom(submission, verification, completion);
 
 const firstPaymentAfter = (billPayments: PaymentRow[], reminderAt: string, field: 'confirmed_at' | 'approved_at') => {
   const reminderMs = new Date(reminderAt).getTime();
@@ -159,73 +306,109 @@ const firstPaymentAfter = (billPayments: PaymentRow[], reminderAt: string, field
   });
 };
 
+const period = (
+  key: AIPaymentPeriodSummary['key'],
+  label: string,
+  monthKeys: string[],
+  monthMap: Map<string, AIPaymentMonthSummary>,
+  billCount: number,
+  allBills: BillRow[],
+  paymentsByBill: Map<string, PaymentRow[]>
+): AIPaymentPeriodSummary => {
+  const months = monthKeys.filter(m => monthMap.has(m));
+  const submission: number[] = [];
+  const verification: number[] = [];
+  const completion: number[] = [];
+  let paid = 0, pendingVerification = 0, unpaid = 0, notReceived = 0, outstandingAmount = 0;
+  allBills.forEach(bill => {
+    const m = monthKey(Number(bill.bill_year), Number(bill.bill_month));
+    if (!monthKeys.includes(m)) return;
+    const payments = paymentsByBill.get(bill.id) || [];
+    const status = statusForBill(bill, payments);
+    const total = Math.max(0, Number(bill.total || 0));
+    const paidAmount = payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + Math.max(0, Number(p.amount || 0)), 0);
+    outstandingAmount += Math.max(0, total - paidAmount);
+    if (status === 'paid') paid++;
+    else if (status === 'pending_verification') pendingVerification++;
+    else if (status === 'not_received') notReceived++;
+    else unpaid++;
+    payments.forEach(payment => {
+      const s = submissionDelay(bill, payment);
+      const v = verificationDelay(payment);
+      const c = completionDelay(bill, payment);
+      if (s !== null) submission.push(s);
+      if (v !== null) verification.push(v);
+      if (c !== null) completion.push(c);
+    });
+  });
+  const timing = summarizeTiming(submission, verification, completion);
+  return {
+    key, label,
+    fromMonth: months[0] || null,
+    toMonth: months[months.length - 1] || null,
+    available: months.length === monthKeys.length && monthKeys.length > 0,
+    monthsAnalysed: months.length,
+    bills: billCount,
+    paid, pendingVerification, unpaid, notReceived,
+    outstandingAmount: Number(outstandingAmount.toFixed(2)),
+    ...timing
+  };
+};
+
 export async function loadAIPaymentBehaviour(): Promise<AIPaymentBehaviour> {
   if (!supabaseEnabled || !supabase) throw new Error('Supabase is not enabled.');
 
   const { data: businessDate, error: businessDateError } = await supabase.rpc('gocanteen_business_timestamp');
   if (businessDateError) throw businessDateError;
   const dateText = String(businessDate || '').slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText)) throw new Error('Could not determine the application business date.');
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateText)) throw new Error('Could not determine the application business date.');
 
   const business = new Date(`${dateText}T00:00:00`);
   const currentMonth = monthKey(business.getFullYear(), business.getMonth() + 1);
-  const previousDate = new Date(business.getFullYear(), business.getMonth() - 1, 1);
-  const previousMonth = monthKey(previousDate.getFullYear(), previousDate.getMonth() + 1);
-  const historicalStart = new Date(business.getFullYear(), business.getMonth() - 5, 1);
-  const historicalFromMonth = monthKey(historicalStart.getFullYear(), historicalStart.getMonth() + 1);
+  const previousMonth = monthOffset(currentMonth, -1);
 
   const { data: billsData, error: billsError } = await supabase
     .from('monthly_bills')
     .select('id,employee_id,bill_month,bill_year,total,published,published_at,member_name_snapshot')
-    .gte('bill_year', historicalStart.getFullYear())
-    .lte('bill_year', business.getFullYear());
+    .eq('published', true)
+    .not('published_at', 'is', null)
+    .order('bill_year', { ascending: true })
+    .order('bill_month', { ascending: true });
   if (billsError) throw billsError;
 
-  const bills = ((billsData || []) as BillRow[]).filter(b => {
-    if (!b.published || !b.published_at) return false;
-    const key = monthKey(Number(b.bill_year), Number(b.bill_month));
-    return key >= historicalFromMonth && key <= currentMonth;
-  });
+  const bills = (billsData || []) as BillRow[];
+  const availableMonths = [...new Set(bills.map(b => monthKey(Number(b.bill_year), Number(b.bill_month))))].sort();
+  const historicalFromMonth = availableMonths[0] || currentMonth;
+  const historicalToMonth = availableMonths[availableMonths.length - 1] || currentMonth;
+  const availabilityStatement = `Payment behaviour analysis based on ${availableMonths.length} available month${availableMonths.length === 1 ? '' : 's'} of payment history.`;
 
-  if (!bills.length) {
-    const empty = (month: string): AIPaymentMonthSummary => ({
-      month,
-      bills: 0,
-      paid: 0,
-      pendingVerification: 0,
-      unpaid: 0,
-      notReceived: 0,
-      outstandingAmount: 0,
-      averageSubmissionDelayHours: null,
-      averageVerificationDelayHours: null,
-      averageCompletionDelayHours: null,
+  const emptyBehaviour = (): AIPaymentBehaviour => {
+    const current = emptyMonth(currentMonth);
+    const previous = emptyMonth(previousMonth);
+    const emptyPeriod = (key: AIPaymentPeriodSummary['key'], label: string): AIPaymentPeriodSummary => ({
+      key, label, fromMonth: null, toMonth: null, available: false, monthsAnalysed: 0, bills: 0, paid: 0, pendingVerification: 0, unpaid: 0, notReceived: 0, outstandingAmount: 0, ...emptyTiming()
     });
     return {
-      currentMonth,
-      previousMonth,
-      historicalFromMonth,
-      historicalToMonth: currentMonth,
-      overview: { totalBills: 0, paid: 0, pendingVerification: 0, unpaid: 0, notReceived: 0, outstandingAmount: 0 },
-      current: empty(currentMonth),
-      previous: empty(previousMonth),
-      reminder: { remindersSent: 0, membersReceivedReminders: 0, billsWithReminders: 0, remindersFollowedBySubmission: 0, remindersFollowedByVerification: 0 },
-      members: [],
+      currentMonth, previousMonth, historicalFromMonth, historicalToMonth, availableMonths, historicalMonthsAvailable: availableMonths.length, availabilityStatement,
+      periods: {
+        current: emptyPeriod('current','Current Month'), previous: emptyPeriod('previous','Previous Month'),
+        last3: emptyPeriod('last3','Last 3 Months'), last6: emptyPeriod('last6','Last 6 Months'),
+        last12: emptyPeriod('last12','Last 12 Months'), all: emptyPeriod('all','All Available History')
+      },
+      overview: { totalBills:0, paid:0, pendingVerification:0, unpaid:0, notReceived:0, outstandingAmount:0, ...emptyTiming() },
+      monthlyTrend: [], fastestSubmission:null, slowestSubmission:null, fastestCompletion:null, slowestCompletion:null,
+      recentVsEarlier: { available:false,recentMonths:0,earlierMonths:0,recentAverageSubmissionHours:null,earlierAverageSubmissionHours:null,recentAverageCompletionHours:null,earlierAverageCompletionHours:null,recentWithin24Submission:0,recentAfter24Submission:0,earlierWithin24Submission:0,earlierAfter24Submission:0,statement:null },
+      reminder:{remindersSent:0,membersReceivedReminders:0,billsWithReminders:0,remindersFollowedBySubmission:0,remindersFollowedByVerification:0}, members:[]
     };
-  }
+  };
+  if (!bills.length) return emptyBehaviour();
 
   const billIds = bills.map(b => b.id);
-  const { data: paymentsData, error: paymentsError } = await supabase
-    .from('bill_payments')
-    .select('id,bill_id,employee_id,amount,status,confirmed_at,approved_at,created_at,updated_at,request_sequence')
-    .in('bill_id', billIds)
-    .order('created_at', { ascending: true });
+  const [{ data: paymentsData, error: paymentsError }, { data: remindersData, error: remindersError }] = await Promise.all([
+    supabase.from('bill_payments').select('id,bill_id,employee_id,amount,status,confirmed_at,approved_at,created_at,updated_at,request_sequence').in('bill_id', billIds).order('created_at',{ascending:true}),
+    supabase.from('payment_reminders').select('id,bill_id,payment_id,employee_id,sent_at').in('bill_id', billIds).order('sent_at',{ascending:true})
+  ]);
   if (paymentsError) throw paymentsError;
-
-  const { data: remindersData, error: remindersError } = await supabase
-    .from('payment_reminders')
-    .select('id,bill_id,payment_id,employee_id,sent_at')
-    .in('bill_id', billIds)
-    .order('sent_at', { ascending: true });
   if (remindersError) throw remindersError;
 
   const payments = (paymentsData || []) as PaymentRow[];
@@ -236,210 +419,192 @@ export async function loadAIPaymentBehaviour(): Promise<AIPaymentBehaviour> {
     rows.push(payment);
     paymentsByBill.set(payment.bill_id, rows);
   });
-  const billsById = new Map(bills.map(b => [b.id, b]));
 
-  const classify = (bill: BillRow) => {
+  const monthMap = new Map<string,AIPaymentMonthSummary>();
+  const monthTimingValues = new Map<string,{submission:number[];verification:number[];completion:number[]}>();
+  bills.forEach(bill => {
+    const month = monthKey(Number(bill.bill_year),Number(bill.bill_month));
+    const summary = monthMap.get(month) || emptyMonth(month);
     const billPayments = paymentsByBill.get(bill.id) || [];
-    const status = statusForBill(bill, billPayments);
-    const outstanding = Math.max(0, Number(bill.total || 0) - billPayments.filter(p => p.status === 'paid').reduce((sum, p) => sum + Math.max(0, Number(p.amount || 0)), 0));
-    return { billPayments, status, outstanding };
-  };
-
-  const summaries = new Map<string, AIPaymentMonthSummary>();
-  const makeSummary = (month: string): AIPaymentMonthSummary => ({
-    month,
-    bills: 0,
-    paid: 0,
-    pendingVerification: 0,
-    unpaid: 0,
-    notReceived: 0,
-    outstandingAmount: 0,
-    averageSubmissionDelayHours: null,
-    averageVerificationDelayHours: null,
-    averageCompletionDelayHours: null,
-  });
-
-  const delayBuckets = new Map<string, { submission: number[]; verification: number[]; completion: number[] }>();
-  const getDelayBucket = (month: string) => {
-    const existing = delayBuckets.get(month);
-    if (existing) return existing;
-    const created = { submission: [] as number[], verification: [] as number[], completion: [] as number[] };
-    delayBuckets.set(month, created);
-    return created;
-  };
-
-  bills.forEach(bill => {
-    const month = monthKey(Number(bill.bill_year), Number(bill.bill_month));
-    const summary = summaries.get(month) || makeSummary(month);
-    const { billPayments, status, outstanding } = classify(bill);
-    summary.bills += 1;
-    summary.outstandingAmount += outstanding;
-    if (status === 'paid') summary.paid += 1;
-    else if (status === 'pending_verification') summary.pendingVerification += 1;
-    else if (status === 'not_received') summary.notReceived += 1;
-    else summary.unpaid += 1;
-
-    const bucket = getDelayBucket(month);
-    billPayments.forEach(payment => {
-      const submission = submissionDelay(bill, payment);
-      const verification = verificationDelay(payment);
-      const completion = completionDelay(bill, payment);
-      if (submission !== null) bucket.submission.push(submission);
-      if (verification !== null) bucket.verification.push(verification);
-      if (completion !== null) bucket.completion.push(completion);
+    const status = statusForBill(bill,billPayments);
+    const paidAmount = billPayments.filter(p=>p.status==='paid').reduce((sum,p)=>sum+Math.max(0,Number(p.amount||0)),0);
+    summary.bills++;
+    summary.outstandingAmount += Math.max(0,Number(bill.total||0)-paidAmount);
+    if(status==='paid')summary.paid++; else if(status==='pending_verification')summary.pendingVerification++; else if(status==='not_received')summary.notReceived++; else summary.unpaid++;
+    const values=monthTimingValues.get(month)||{submission:[],verification:[],completion:[]};
+    billPayments.forEach(payment=>{
+      const s=submissionDelay(bill,payment); const v=verificationDelay(payment); const c=completionDelay(bill,payment);
+      if(s!==null)values.submission.push(s); if(v!==null)values.verification.push(v); if(c!==null)values.completion.push(c);
     });
-    summaries.set(month, summary);
+    monthTimingValues.set(month,values); monthMap.set(month,summary);
+  });
+  const monthlyTrend=availableMonths.map(month=>{
+    const base=monthMap.get(month)||emptyMonth(month); const v=monthTimingValues.get(month)||{submission:[],verification:[],completion:[]};
+    return {...base,outstandingAmount:Number(base.outstandingAmount.toFixed(2)),...timingFrom(v.submission,v.verification,v.completion)};
   });
 
-  const finalizeSummary = (month: string): AIPaymentMonthSummary => {
-    const summary = summaries.get(month) || makeSummary(month);
-    const bucket = delayBuckets.get(month);
-    return {
-      ...summary,
-      outstandingAmount: Number(summary.outstandingAmount.toFixed(2)),
-      averageSubmissionDelayHours: average(bucket?.submission || []),
-      averageVerificationDelayHours: average(bucket?.verification || []),
-      averageCompletionDelayHours: average(bucket?.completion || []),
-    };
+  const allMonthKeys = availableMonths;
+  const countBills = (keys:string[]) => bills.filter(b=>keys.includes(monthKey(Number(b.bill_year),Number(b.bill_month)))).length;
+  const windowKeys = (count:number) => availableMonths.length>=count ? availableMonths.slice(-count) : [];
+  const currentKeys = availableMonths.includes(currentMonth)?[currentMonth]:[];
+  const previousKeys = availableMonths.includes(previousMonth)?[previousMonth]:[];
+  const periods = {
+    current: period('current','Current Month',currentKeys,monthMap,countBills(currentKeys),bills,paymentsByBill),
+    previous: period('previous','Previous Month',previousKeys,monthMap,countBills(previousKeys),bills,paymentsByBill),
+    last3: period('last3','Last 3 Months',windowKeys(3),monthMap,countBills(windowKeys(3)),bills,paymentsByBill),
+    last6: period('last6','Last 6 Months',windowKeys(6),monthMap,countBills(windowKeys(6)),bills,paymentsByBill),
+    last12: period('last12','Last 12 Months',windowKeys(12),monthMap,countBills(windowKeys(12)),bills,paymentsByBill),
+    all: period('all','All Available History',allMonthKeys,monthMap,bills.length,bills,paymentsByBill)
   };
 
-  const current = finalizeSummary(currentMonth);
-  const previous = finalizeSummary(previousMonth);
+  const allTiming = (() => {
+    const submission:number[]=[]; const verification:number[]=[]; const completion:number[]=[];
+    bills.forEach(bill=>(paymentsByBill.get(bill.id)||[]).forEach(payment=>{
+      const s=submissionDelay(bill,payment); const v=verificationDelay(payment); const c=completionDelay(bill,payment);
+      if(s!==null)submission.push(s); if(v!==null)verification.push(v); if(c!==null)completion.push(c);
+    }));
+    return timingFrom(submission,verification,completion);
+  })();
 
-  const memberMap = new Map<string, AIPaymentMemberRow>();
-  const ensureMember = (employeeId: string, name: string) => {
-    const existing = memberMap.get(employeeId);
-    if (existing) return existing;
-    const row: AIPaymentMemberRow = {
-      employeeId,
-      name: name || 'Member',
-      currentBills: 0, currentPaid: 0, currentPending: 0, currentUnpaid: 0, currentNotReceived: 0, currentOutstanding: 0,
-      previousBills: 0, previousPaid: 0, previousPending: 0, previousUnpaid: 0, previousNotReceived: 0, previousOutstanding: 0,
-      currentAverageDelayHours: null, previousAverageDelayHours: null,
-      currentLatestStatus: null, previousLatestStatus: null,
-      currentLatestPaymentAt: null, previousLatestPaymentAt: null,
-      historicalBills: 0, historicalUnpaid: 0, historicalReminderFollowedSubmissions: 0, historicalReminderFollowedVerifications: 0,
-      historicalPending: 0, historicalAverageDelayHours: null, historicalDelayDirection: null,
-    };
-    memberMap.set(employeeId, row);
-    return row;
-  };
-
-  const memberDelayValues = new Map<string, { current: number[]; previous: number[]; historicalRecent: number[]; historicalEarlier: number[] }>();
-
-  bills.forEach(bill => {
-    const key = monthKey(Number(bill.bill_year), Number(bill.bill_month));
-    const { billPayments, status, outstanding } = classify(bill);
-    const row = ensureMember(bill.employee_id, bill.member_name_snapshot || 'Member');
-    row.historicalBills += 1;
-    row.historicalUnpaid += status === 'unpaid' || status === 'not_received' ? 1 : 0;
-    row.historicalPending += status === 'pending_verification' ? 1 : 0;
-
-    if (key === currentMonth) {
-      row.currentBills += 1;
-      row.currentOutstanding += outstanding;
-      row.currentPaid += status === 'paid' ? 1 : 0;
-      row.currentPending += status === 'pending_verification' ? 1 : 0;
-      row.currentUnpaid += status === 'unpaid' ? 1 : 0;
-      row.currentNotReceived += status === 'not_received' ? 1 : 0;
-      row.currentLatestStatus = status;
-      row.currentLatestPaymentAt = latestPaymentEvent(billPayments) || row.currentLatestPaymentAt;
-    } else if (key === previousMonth) {
-      row.previousBills += 1;
-      row.previousOutstanding += outstanding;
-      row.previousPaid += status === 'paid' ? 1 : 0;
-      row.previousPending += status === 'pending_verification' ? 1 : 0;
-      row.previousUnpaid += status === 'unpaid' ? 1 : 0;
-      row.previousNotReceived += status === 'not_received' ? 1 : 0;
-      row.previousLatestStatus = status;
-      row.previousLatestPaymentAt = latestPaymentEvent(billPayments) || row.previousLatestPaymentAt;
-    }
-
-    const delays: number[] = [];
-    billPayments.forEach(payment => {
-      const delay = completionDelay(bill, payment);
-      if (delay !== null) delays.push(delay);
+  const observations:{submissions:AIPaymentObservation[];completions:AIPaymentObservation[]}={submissions:[],completions:[]};
+  bills.forEach(bill=>{
+    const memberName=bill.member_name_snapshot||'Member';
+    const billMonth=monthKey(Number(bill.bill_year),Number(bill.bill_month));
+    (paymentsByBill.get(bill.id)||[]).forEach(payment=>{
+      const s=submissionDelay(bill,payment); const c=completionDelay(bill,payment);
+      if(s!==null)observations.submissions.push({memberName,employeeId:bill.employee_id,billMonth,billPublishedAt:bill.published_at!,paymentAt:payment.confirmed_at!,hours:s,type:'submission'});
+      if(c!==null)observations.completions.push({memberName,employeeId:bill.employee_id,billMonth,billPublishedAt:bill.published_at!,paymentAt:payment.approved_at!,hours:c,type:'completion'});
     });
-    const memberDelay = memberDelayValues.get(bill.employee_id) || { current: [], previous: [], historicalRecent: [], historicalEarlier: [] };
-    if (key === currentMonth) memberDelay.current.push(...delays);
-    if (key === previousMonth) memberDelay.previous.push(...delays);
-    const historicalCut = monthKey(previousDate.getFullYear(), previousDate.getMonth() - 1 + 1);
-    if (key >= historicalCut) memberDelay.historicalRecent.push(...delays);
-    else memberDelay.historicalEarlier.push(...delays);
-    memberDelayValues.set(bill.employee_id, memberDelay);
   });
+  const fastest=(rows:AIPaymentObservation[])=>rows.length?[...rows].sort((a,b)=>a.hours-b.hours)[0]:null;
+  const slowest=(rows:AIPaymentObservation[])=>rows.length?[...rows].sort((a,b)=>b.hours-a.hours)[0]:null;
 
-  const reminderByMember = new Map<string, { submitted: number; verified: number }>();
-  const remindersByBill = new Map<string, ReminderRow[]>();
-  reminders.forEach(reminder => {
-    const list = remindersByBill.get(reminder.bill_id) || [];
-    list.push(reminder);
-    remindersByBill.set(reminder.bill_id, list);
-    const billPayments = paymentsByBill.get(reminder.bill_id) || [];
-    const submitted = firstPaymentAfter(billPayments, reminder.sent_at, 'confirmed_at');
-    const verified = firstPaymentAfter(billPayments, reminder.sent_at, 'approved_at');
-    const counts = reminderByMember.get(reminder.employee_id) || { submitted: 0, verified: 0 };
-    if (submitted) counts.submitted += 1;
-    if (verified) counts.verified += 1;
-    reminderByMember.set(reminder.employee_id, counts);
-  });
-
-  const historicalCutoff = new Date(business.getFullYear(), business.getMonth() - 2, 1);
-  const historicalCutMonth = monthKey(historicalCutoff.getFullYear(), historicalCutoff.getMonth() + 1);
-  memberMap.forEach(row => {
-    const delays = memberDelayValues.get(row.employeeId);
-    row.currentAverageDelayHours = average(delays?.current || []);
-    row.previousAverageDelayHours = average(delays?.previous || []);
-    row.historicalAverageDelayHours = average([...(delays?.historicalRecent || []), ...(delays?.historicalEarlier || [])]);
-    const recentAverage = average(delays?.historicalRecent || []);
-    const earlierAverage = average(delays?.historicalEarlier || []);
-    row.historicalDelayDirection = recentAverage === null || earlierAverage === null
-      ? null
-      : recentAverage > earlierAverage * 1.15
-        ? 'Increasing'
-        : recentAverage < earlierAverage * 0.85
-          ? 'Decreasing'
-          : 'Stable';
-    const reminderCounts = reminderByMember.get(row.employeeId);
-    row.historicalReminderFollowedSubmissions = reminderCounts?.submitted || 0;
-    row.historicalReminderFollowedVerifications = reminderCounts?.verified || 0;
-  });
-
-  const overview = bills.reduce((acc, bill) => {
-    const { status, outstanding } = classify(bill);
-    acc.totalBills += 1;
-    acc.outstandingAmount += outstanding;
-    if (status === 'paid') acc.paid += 1;
-    else if (status === 'pending_verification') acc.pendingVerification += 1;
-    else if (status === 'not_received') acc.notReceived += 1;
-    else acc.unpaid += 1;
-    return acc;
-  }, { totalBills: 0, paid: 0, pendingVerification: 0, unpaid: 0, notReceived: 0, outstandingAmount: 0 });
-
-  const membersReceived = new Set(reminders.map(r => r.employee_id)).size;
-  const billsWithReminders = new Set(reminders.map(r => r.bill_id)).size;
-  const reminder = {
-    remindersSent: reminders.length,
-    membersReceivedReminders: membersReceived,
-    billsWithReminders,
-    remindersFollowedBySubmission: reminders.filter(r => firstPaymentAfter(paymentsByBill.get(r.bill_id) || [], r.sent_at, 'confirmed_at')).length,
-    remindersFollowedByVerification: reminders.filter(r => firstPaymentAfter(paymentsByBill.get(r.bill_id) || [], r.sent_at, 'approved_at')).length,
+  const recentKeys=availableMonths.length>=6?availableMonths.slice(-3):[];
+  const earlierKeys=availableMonths.length>=6?availableMonths.slice(-6,-3):[];
+  const recentValues=(keys:string[])=>{
+    const sub:number[]=[];const comp:number[]=[];let within=0;let after=0;
+    keys.forEach(k=>{const v=monthTimingValues.get(k)||{submission:[],verification:[],completion:[]};sub.push(...v.submission);comp.push(...v.completion);v.submission.forEach(h=>classify24(h)==='within'?within++:after++)});
+    return {sub,comp,within,after};
+  };
+  const recent=recentValues(recentKeys), earlier=recentValues(earlierKeys);
+  const recentVsEarlierAvailable=recentKeys.length===3&&earlierKeys.length===3;
+  const direction=(r:number|null,e:number|null):'Increasing'|'Decreasing'|'Stable'|null=>r===null||e===null?null:r>e*1.15?'Increasing':r<e*.85?'Decreasing':'Stable';
+  const recentVsEarlier={
+    available:recentVsEarlierAvailable,recentMonths:recentKeys.length,earlierMonths:earlierKeys.length,
+    recentAverageSubmissionHours:average(recent.sub),earlierAverageSubmissionHours:average(earlier.sub),
+    recentAverageCompletionHours:average(recent.comp),earlierAverageCompletionHours:average(earlier.comp),
+    recentWithin24Submission:recent.within,recentAfter24Submission:recent.after,earlierWithin24Submission:earlier.within,earlierAfter24Submission:earlier.after,
+    statement: recentVsEarlierAvailable
+      ? `Recent 3 observed months: ${average(recent.sub)==null?'no valid submission timing':average(recent.sub)!.toFixed(1)+'h average submission'}; earlier 3 observed months: ${average(earlier.sub)==null?'no valid submission timing':average(earlier.sub)!.toFixed(1)+'h average submission'}.`
+      : null
   };
 
-  const historicalStartLabel = historicalFromMonth;
-  void historicalCutMonth;
-  void billsById;
-  void remindersByBill;
+  const memberMap=new Map<string,AIPaymentMemberRow>();
+  const ensureMember=(employeeId:string,name:string)=>{
+    const existing=memberMap.get(employeeId); if(existing)return existing;
+    const row:AIPaymentMemberRow={
+      employeeId,name:name||'Member',
+      currentBills:0,currentPaid:0,currentPending:0,currentUnpaid:0,currentNotReceived:0,currentOutstanding:0,
+      previousBills:0,previousPaid:0,previousPending:0,previousUnpaid:0,previousNotReceived:0,previousOutstanding:0,
+      currentAverageDelayHours:null,previousAverageDelayHours:null,currentLatestStatus:null,previousLatestStatus:null,currentLatestPaymentAt:null,previousLatestPaymentAt:null,
+      historicalBills:0,historicalUnpaid:0,historicalReminderFollowedSubmissions:0,historicalReminderFollowedVerifications:0,
+      historicalAverageDelayHours:null,historicalAverageCompletionDelayHours:null,historicalSubmissionCount:0,historicalCompletionCount:0,
+      fastestSubmissionHours:null,slowestSubmissionHours:null,fastestCompletionHours:null,slowestCompletionHours:null,
+      within24Submission:0,after24Submission:0,within24Completion:0,after24Completion:0,historicalDelayDirection:null,
+      recentVsEarlier:{recentMonths:recentKeys.length,earlierMonths:earlierKeys.length,recentAverageSubmissionHours:null,earlierAverageSubmissionHours:null,recentAverageCompletionHours:null,earlierAverageCompletionHours:null,recentWithin24Submission:0,recentAfter24Submission:0,earlierWithin24Submission:0,earlierAfter24Submission:0,statement:null},
+      monthlyHistory:[]
+    };
+    memberMap.set(employeeId,row);return row;
+  };
+
+  bills.forEach(bill=>{
+    const row=ensureMember(bill.employee_id,bill.member_name_snapshot||'Member');
+    const key=monthKey(Number(bill.bill_year),Number(bill.bill_month));
+    const billPayments=paymentsByBill.get(bill.id)||[];
+    const status=statusForBill(bill,billPayments);
+    const paidAmount=billPayments.filter(p=>p.status==='paid').reduce((sum,p)=>sum+Math.max(0,Number(p.amount||0)),0);
+    const outstanding=Math.max(0,Number(bill.total||0)-paidAmount);
+    row.historicalBills++;
+    row.historicalUnpaid+=status==='unpaid'||status==='not_received'?1:0;
+    row.currentBills+=key===currentMonth?1:0; row.previousBills+=key===previousMonth?1:0;
+    if(key===currentMonth){row.currentOutstanding+=outstanding;row.currentPaid+=status==='paid'?1:0;row.currentPending+=status==='pending_verification'?1:0;row.currentUnpaid+=status==='unpaid'?1:0;row.currentNotReceived+=status==='not_received'?1:0;row.currentLatestStatus=status;row.currentLatestPaymentAt=latestPaymentEvent(billPayments)||row.currentLatestPaymentAt;}
+    if(key===previousMonth){row.previousOutstanding+=outstanding;row.previousPaid+=status==='paid'?1:0;row.previousPending+=status==='pending_verification'?1:0;row.previousUnpaid+=status==='unpaid'?1:0;row.previousNotReceived+=status==='not_received'?1:0;row.previousLatestStatus=status;row.previousLatestPaymentAt=latestPaymentEvent(billPayments)||row.previousLatestPaymentAt;}
+    const sub:number[]=[];const comp:number[]=[];
+    billPayments.forEach(payment=>{
+      const s=submissionDelay(bill,payment);const c=completionDelay(bill,payment);
+      if(s!==null){sub.push(s);row.historicalSubmissionCount++;row.within24Submission+=s<=24?1:0;row.after24Submission+=s>24?1:0;}
+      if(c!==null){comp.push(c);row.historicalCompletionCount++;row.within24Completion+=c<=24?1:0;row.after24Completion+=c>24?1:0;}
+    });
+    const existing=row.monthlyHistory.find(x=>x.month===key);
+    const monthSummary=existing||{month:key,bills:0,submissionCount:0,averageSubmissionDelayHours:null,within24Submission:0,after24Submission:0,completionCount:0,averageCompletionDelayHours:null,within24Completion:0,after24Completion:0};
+    monthSummary.bills++;
+    const monthSubs=[...sub].filter(Number.isFinite); const monthComps=[...comp].filter(Number.isFinite);
+    monthSummary.submissionCount+=monthSubs.length; monthSummary.completionCount+=monthComps.length;
+    monthSummary.averageSubmissionDelayHours=monthSubs.length?average([...(existing?.averageSubmissionDelayHours==null?[]:[existing.averageSubmissionDelayHours]),...monthSubs]):monthSummary.averageSubmissionDelayHours;
+    monthSummary.averageCompletionDelayHours=monthComps.length?average([...(existing?.averageCompletionDelayHours==null?[]:[existing.averageCompletionDelayHours]),...monthComps]):monthSummary.averageCompletionDelayHours;
+    monthSummary.within24Submission+=monthSubs.filter(h=>h<=24).length;monthSummary.after24Submission+=monthSubs.filter(h=>h>24).length;
+    monthSummary.within24Completion+=monthComps.filter(h=>h<=24).length;monthSummary.after24Completion+=monthComps.filter(h=>h>24).length;
+    if(!existing)row.monthlyHistory.push(monthSummary);
+  });
+
+  const memberTimingValues=new Map<string,{sub:number[];comp:number[];recentSub:number[];earlierSub:number[];recentComp:number[];earlierComp:number[]}>();
+  bills.forEach(bill=>{
+    const key=monthKey(Number(bill.bill_year),Number(bill.bill_month));const row=memberMap.get(bill.employee_id)!;
+    const v=memberTimingValues.get(bill.employee_id)||{sub:[],comp:[],recentSub:[],earlierSub:[],recentComp:[],earlierComp:[]};
+    (paymentsByBill.get(bill.id)||[]).forEach(payment=>{
+      const s=submissionDelay(bill,payment);const c=completionDelay(bill,payment);
+      if(s!==null){v.sub.push(s);if(recentKeys.includes(key))v.recentSub.push(s);if(earlierKeys.includes(key))v.earlierSub.push(s);}
+      if(c!==null){v.comp.push(c);if(recentKeys.includes(key))v.recentComp.push(c);if(earlierKeys.includes(key))v.earlierComp.push(c);}
+    });
+    memberTimingValues.set(row.employeeId,v);
+  });
+
+  const reminderByMember=new Map<string,{submitted:number;verified:number}>();
+  reminders.forEach(reminder=>{
+    const counts=reminderByMember.get(reminder.employee_id)||{submitted:0,verified:0};
+    const billPayments=paymentsByBill.get(reminder.bill_id)||[];
+    if(firstPaymentAfter(billPayments,reminder.sent_at,'confirmed_at'))counts.submitted++;
+    if(firstPaymentAfter(billPayments,reminder.sent_at,'approved_at'))counts.verified++;
+    reminderByMember.set(reminder.employee_id,counts);
+  });
+
+  memberMap.forEach(row=>{
+    const v=memberTimingValues.get(row.employeeId)||{sub:[],comp:[],recentSub:[],earlierSub:[],recentComp:[],earlierComp:[]};
+    row.currentAverageDelayHours=average(v.sub.filter((_,i)=>true).filter((_,i)=>true).length?[]:[]);
+    const currentSub:number[]=[];const previousSub:number[]=[];
+    bills.filter(b=>b.employee_id===row.employeeId).forEach(b=>{const k=monthKey(Number(b.bill_year),Number(b.bill_month));(paymentsByBill.get(b.id)||[]).forEach(p=>{const s=submissionDelay(b,p);if(s!==null&&(k===currentMonth))currentSub.push(s);if(s!==null&&(k===previousMonth))previousSub.push(s);});});
+    row.currentAverageDelayHours=average(currentSub);row.previousAverageDelayHours=average(previousSub);
+    row.historicalAverageDelayHours=average(v.sub);row.historicalAverageCompletionDelayHours=average(v.comp);
+    row.fastestSubmissionHours=v.sub.length?Math.min(...v.sub):null;row.slowestSubmissionHours=v.sub.length?Math.max(...v.sub):null;
+    row.fastestCompletionHours=v.comp.length?Math.min(...v.comp):null;row.slowestCompletionHours=v.comp.length?Math.max(...v.comp):null;
+    row.recentVsEarlier={
+      recentMonths:recentKeys.length,earlierMonths:earlierKeys.length,recentAverageSubmissionHours:average(v.recentSub),earlierAverageSubmissionHours:average(v.earlierSub),recentAverageCompletionHours:average(v.recentComp),earlierAverageCompletionHours:average(v.earlierComp),
+      recentWithin24Submission:row.monthlyHistory.filter(x=>recentKeys.includes(x.month)).reduce((s,x)=>s+x.within24Submission,0),
+      recentAfter24Submission:row.monthlyHistory.filter(x=>recentKeys.includes(x.month)).reduce((s,x)=>s+x.after24Submission,0),
+      earlierWithin24Submission:row.monthlyHistory.filter(x=>earlierKeys.includes(x.month)).reduce((s,x)=>s+x.within24Submission,0),
+      earlierAfter24Submission:row.monthlyHistory.filter(x=>earlierKeys.includes(x.month)).reduce((s,x)=>s+x.after24Submission,0),
+      statement:recentVsEarlierAvailable?(`Recent observed submissions average ${average(v.recentSub)==null?'not available':average(v.recentSub)!.toFixed(1)+'h'} versus ${average(v.earlierSub)==null?'not available':average(v.earlierSub)!.toFixed(1)+'h'} in the earlier observed period.`):null
+    };
+    row.historicalDelayDirection=direction(average(v.recentSub),average(v.earlierSub));
+    const reminderCounts=reminderByMember.get(row.employeeId);row.historicalReminderFollowedSubmissions=reminderCounts?.submitted||0;row.historicalReminderFollowedVerifications=reminderCounts?.verified||0;
+    row.monthlyHistory.sort((a,b)=>a.month.localeCompare(b.month));
+  });
+
+  const overview={totalBills:periods.all.bills,paid:periods.all.paid,pendingVerification:periods.all.pendingVerification,unpaid:periods.all.unpaid,notReceived:periods.all.notReceived,outstandingAmount:periods.all.outstandingAmount,...allTiming};
+  const remindersSent=reminders.length;
+  const reminder={
+    remindersSent,
+    membersReceivedReminders:new Set(reminders.map(r=>r.employee_id)).size,
+    billsWithReminders:new Set(reminders.map(r=>r.bill_id)).size,
+    remindersFollowedBySubmission:reminders.filter(r=>firstPaymentAfter(paymentsByBill.get(r.bill_id)||[],r.sent_at,'confirmed_at')).length,
+    remindersFollowedByVerification:reminders.filter(r=>firstPaymentAfter(paymentsByBill.get(r.bill_id)||[],r.sent_at,'approved_at')).length
+  };
 
   return {
-    currentMonth,
-    previousMonth,
-    historicalFromMonth: historicalStartLabel,
-    historicalToMonth: currentMonth,
-    overview: { ...overview, outstandingAmount: Number(overview.outstandingAmount.toFixed(2)) },
-    current,
-    previous,
-    reminder,
-    members: [...memberMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    currentMonth,previousMonth,historicalFromMonth,historicalToMonth,availableMonths,historicalMonthsAvailable:availableMonths.length,availabilityStatement,
+    periods,overview,monthlyTrend,
+    fastestSubmission:fastest(observations.submissions),slowestSubmission:slowest(observations.submissions),
+    fastestCompletion:fastest(observations.completions),slowestCompletion:slowest(observations.completions),
+    recentVsEarlier,reminder,members:[...memberMap.values()].sort((a,b)=>a.name.localeCompare(b.name))
   };
 }
