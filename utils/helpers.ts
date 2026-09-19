@@ -24,3 +24,10 @@ export const getMonthName = (monthIndex: number): string => {
   ];
   return monthNames[monthIndex];
 };
+
+export const getBusinessWeekday = (dateString: string): number => {
+  const [year, month, day] = dateString.split('-').map(Number);
+  const noonUtc = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: BUSINESS_TIME_ZONE, weekday: 'short' }).format(noonUtc);
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday);
+};
