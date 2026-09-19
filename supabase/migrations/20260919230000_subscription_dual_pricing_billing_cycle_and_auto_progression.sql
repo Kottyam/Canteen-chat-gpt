@@ -586,6 +586,8 @@ begin
     v_allowed:=true;
   end if;
   if not v_allowed then raise exception 'Not authorized'; end if;
+  -- A failed verification must not be able to change subscription state. This RPC is
+  -- only a synchronization helper and is invoked by an already-authenticated user.
 
   for v_sub in
     select *
