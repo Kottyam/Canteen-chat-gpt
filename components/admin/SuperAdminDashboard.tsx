@@ -76,7 +76,7 @@ const Plans:React.FC<{plans:SubscriptionPlan[];subscriptions:CanteenSubscription
       {plans.map(p=>{
         const used=subscriptions.some(s=>s.plan_id===p.id)||payments.some(x=>x.plan_id===p.id);
         return <div key={p.id} className="rounded-xl bg-white p-4 shadow-sm">
-          <div className="flex items-start justify-between gap-2"><div><h3 className="font-extrabold">{p.name}</h3><div className="mt-1 flex flex-wrap gap-1">{p.active?badge('active'):badge('suspended')}{p.is_default&&<span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">DEFAULT</span>}{used&&<span className="rounded-full bg-gray-200 px-2.5 py-1 text-xs font-bold text-gray-700">USED / PROTECTED</span>}</div></div></div>
+          <div className="flex items-start justify-between gap-2"><div><h3 className="font-extrabold">{p.name}</h3><div className="mt-1 flex flex-wrap gap-1">{p.active?<span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-700">ACTIVE</span>:<span className="rounded-full bg-gray-200 px-2.5 py-1 text-xs font-bold text-gray-700">INACTIVE</span>}{p.is_default&&<span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">DEFAULT</span>}{used&&<span className="rounded-full bg-gray-200 px-2.5 py-1 text-xs font-bold text-gray-700">USED / PROTECTED</span>}</div></div></div>
           <p className="mt-2 text-sm text-gray-500">{p.description||'No description'}</p>
           <p className="mt-3 text-xl font-extrabold">{money(p.price,p.currency)} <span className="text-xs font-semibold text-gray-500">/ {p.billing_period}</span></p>
           <p className="mt-1 text-xs text-gray-500">Trial: {p.trial_days} days</p>
