@@ -13,15 +13,20 @@ const requireClient=()=>{if(!supabase)throw new Error('Supabase is not enabled.'
 export interface CanteenAccessState{allowed:boolean;status:SubscriptionStatus|null;subscription:CanteenSubscription|null;reason:'trial'|'active'|'payment_pending'|'expired'|'suspended'|'unassigned'|'verification_error'}
 
 export async function loadCanteenAccessState(canteenId:string):Promise<CanteenAccessState>{
-  await syncSubscriptionStatuses(canteenId);
   const c=requireClient();
-  const {data,error}=await c.from('canteen_subscriptions').select('*').eq('canteen_id',canteenId).maybeSingle();
+  await syncSubscriptionStatuses(canteenId);
+  const {data:allowed,error:accessError}=await c.rpc('can_canteen_operate',{p_canteen_id:canteenId});
+  if(accessError)throw accessError;
+  const {data:subscription,error}=await c.from('canteen_subscriptions').select('*').eq('canteen_id',canteenId).maybeSingle();
   if(error)throw error;
-  if(!data)return{allowed:false,status:null,subscription:null,reason:'unassigned'};
-  const subscription=data as CanteenSubscription;
+  if(!subscription){
+    return{allowed:Boolean(allowed),status:null,subscription:null,reason:allowed?'payment_pending':'verification_error'};
+  }
+  const sub=subscription as CanteenSubscription;
   const now=Date.now();
-  const allowed=subscription.status==='payment_pending'||(subscription.status==='trial'&&Boolean(subscription.trial_end)&&new Date(subscription.trial_end as string).getTime()>now)||(subscription.status==='active'&&Boolean(subscription.subscription_end)&&new Date(subscription.subscription_end as string).getTime()>now);
-  return{allowed,status:subscription.status,subscription,reason:subscription.status};
+  const dateValid=(sub.status==='trial'&&Boolean(sub.trial_end)&&new Date(sub.trial_end).getTime()>now)||(sub.status==='active'&&Boolean(sub.subscription_end)&&new Date(sub.subscription_end).getTime()>now);
+  const effectiveAllowed=sub.status==='payment_pending'||dateValid;
+  return{allowed:Boolean(allowed)&&effectiveAllowed,status:sub.status,subscription:sub,reason:sub.status};
 }
 
 export async function syncSubscriptionStatuses(canteenId?:string){const {error}=await requireClient().rpc('sync_subscription_statuses',{p_canteen_id:canteenId||null});if(error)throw error}
