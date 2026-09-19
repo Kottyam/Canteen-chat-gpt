@@ -43,21 +43,14 @@ alter table public.subscription_payment_settings enable row level security;
 drop policy if exists subscription_payment_settings_super_admin_select on public.subscription_payment_settings;
 drop policy if exists subscription_payment_settings_super_admin_write on public.subscription_payment_settings;
 drop policy if exists subscription_payment_settings_canteen_admin_select on public.subscription_payment_settings;
+drop policy if exists subscription_payment_settings_select on public.subscription_payment_settings;
 
-create policy subscription_payment_settings_super_admin_select
+create policy subscription_payment_settings_select
 on public.subscription_payment_settings for select to authenticated
-using ((select public.is_super_admin()));
-
-create policy subscription_payment_settings_super_admin_write
-on public.subscription_payment_settings for all to authenticated
-using ((select public.is_super_admin()))
-with check ((select public.is_super_admin()));
-
-create policy subscription_payment_settings_canteen_admin_select
-on public.subscription_payment_settings for select to authenticated
-using ((select public.is_active_canteen_admin()));
+using ((select public.is_super_admin()) or (select public.is_active_canteen_admin()));
 
 revoke all on public.subscription_payment_settings from anon;
+revoke insert, update, delete on public.subscription_payment_settings from authenticated;
 grant select on public.subscription_payment_settings to authenticated;
 
 create or replace function public.super_admin_update_subscription_payment_settings(
