@@ -40,9 +40,9 @@ const Plans:React.FC<{plans:SubscriptionPlan[];refresh:()=>Promise<void>;busy:bo
   const save=async()=>{
     setErr('');
     try{
-      const input={name:form.name.trim(),description:form.description||null,price:Number(form.price||0),billing_period:form.billing_period as any,currency:form.currency.toUpperCase(),trial_days:Number(form.trial_days||0),active:true,is_default:Boolean(form.is_default)};
-      if(editing) await updatePlan(editing,input); else await createPlan(input);
-      if(input.is_default){const p=plans.find(x=>x.id===editing);if(!p||!p.is_default) await setDefaultPlan(editing||'');}
+      const input={name:form.name.trim(),description:form.description||null,price:Number(form.price||0),billing_period:form.billing_period as any,currency:form.currency.toUpperCase(),trial_days:Number(form.trial_days||0),active:true,is_default:false};
+      const saved=editing?await updatePlan(editing,input):await createPlan(input);
+      if(form.is_default) await setDefaultPlan(saved.id);
       setForm({name:'',description:'',price:'',billing_period:'monthly',currency:'INR',trial_days:'30',is_default:false});setEditing(null);await refresh();
     }catch(e:any){setErr(e?.message||'Could not save plan.')}
   };
@@ -73,7 +73,6 @@ const Plans:React.FC<{plans:SubscriptionPlan[];refresh:()=>Promise<void>;busy:bo
     </div>
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {plans.map(p=>{
-        const used=plans.length>0 && false;
         return <div key={p.id} className="rounded-xl bg-white p-4 shadow-sm">
           <div className="flex items-start justify-between gap-2"><div><h3 className="font-extrabold">{p.name}</h3><div className="mt-1 flex flex-wrap gap-1">{p.active?badge('active'):badge('suspended')}{p.is_default&&<span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">DEFAULT</span>}</div></div></div>
           <p className="mt-2 text-sm text-gray-500">{p.description||'No description'}</p>
