@@ -40,7 +40,8 @@ const Plans:React.FC<{plans:SubscriptionPlan[];subscriptions:CanteenSubscription
   const save=async()=>{
     setErr('');
     try{
-      const input={name:form.name.trim(),description:form.description||null,price:Number(form.price||0),billing_period:form.billing_period as any,currency:form.currency.toUpperCase(),trial_days:Number(form.trial_days||0),active:true,is_default:false};
+      const current=editing?plans.find(x=>x.id===editing):null;
+      const input={name:form.name.trim(),description:form.description||null,price:Number(form.price||0),billing_period:form.billing_period as any,currency:form.currency.toUpperCase(),trial_days:Number(form.trial_days||0),active:current?current.active:true,is_default:false};
       const saved=editing?await updatePlan(editing,input):await createPlan(input);
       if(form.is_default) await setDefaultPlan(saved.id);
       setForm({name:'',description:'',price:'',billing_period:'monthly',currency:'INR',trial_days:'30',is_default:false});setEditing(null);await refresh();
