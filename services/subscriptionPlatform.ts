@@ -5,7 +5,7 @@ export type PaymentStatus='pending'|'paid'|'failed'|'refunded';
 export type BillingPeriod='monthly'|'quarterly'|'yearly';
 export type PaymentProvider='manual'|'razorpay';
 
-export interface SubscriptionPlan{id:string;name:string;description:string|null;price:number;billing_period:BillingPeriod;currency:string;trial_days:number;active:boolean;is_default:boolean;created_at:string;updated_at:string}
+export interface SubscriptionPlan{id:string;name:string;description:string|null;price:number;billing_period:BillingPeriod;currency:string;trial_days:number;active:boolean;is_default:boolean;min_members:number;max_members:number;created_at:string;updated_at:string}
 export interface CanteenSubscription{id:string;canteen_id:string;plan_id:string;status:SubscriptionStatus;trial_start:string|null;trial_end:string|null;subscription_start:string|null;subscription_end:string|null;amount:number;currency:string;payment_status:PaymentStatus;created_at:string;updated_at:string}
 export interface SubscriptionPayment{id:string;canteen_id:string;subscription_id:string;plan_id:string;amount:number;currency:string;payment_date:string|null;payment_status:PaymentStatus;transaction_reference:string|null;payment_provider:PaymentProvider;payment_note:string|null;billing_period_start:string|null;billing_period_end:string|null;created_at:string;updated_at:string}
 export interface SubscriptionPaymentSettings{id:boolean;payment_provider:PaymentProvider;manual_payment_enabled:boolean;razorpay_enabled:boolean;upi_id:string|null;payment_display_name:string|null;payment_instructions:string|null;bank_payment_details:string|null;created_at:string;updated_at:string}
