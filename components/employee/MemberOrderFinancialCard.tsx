@@ -46,7 +46,7 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
     </div>
 
     <div className="mt-4 space-y-3">
-      <section className="rounded-xl border bg-white p-4">
+      {financial.grossMemberFood>0&&<section className="rounded-xl border bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <span className="font-semibold text-gray-700">Member Food</span>
           <span className="text-lg font-bold text-gray-900">₹{money(financial.grossMemberFood)}</span>
@@ -57,9 +57,7 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
         <div className="mt-3 flex items-center justify-between gap-3 border-t pt-2 text-sm font-bold text-gray-800">
           <span>Member Food Total</span><span>₹{money(financial.grossMemberFood)}</span>
         </div>
-      </section>
-
-      <section className="rounded-xl border bg-white p-4">
+      </section>}      {financial.grossGuestFood>0&&      <section className="rounded-xl border bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <span className="font-semibold text-gray-700">Guest Food</span>
           <span className="text-lg font-bold text-gray-900">₹{money(financial.grossGuestFood)}</span>
@@ -70,9 +68,9 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
         <div className="mt-3 flex items-center justify-between gap-3 border-t pt-2 text-sm font-bold text-gray-800">
           <span>Guest Food Total</span><span>₹{money(financial.grossGuestFood)}</span>
         </div>
-      </section>
+      </section>}
 
-      <section className="rounded-xl border bg-white p-4">
+      {adminAddedTotal>0&&      <section className="rounded-xl border bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <span className="font-semibold text-gray-700">Admin Added</span>
           <span className="text-lg font-bold text-gray-900">₹{money(adminAddedTotal)}</span>
@@ -80,14 +78,14 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
         {adjustmentPresentation.length>0&&<div className="mt-2 space-y-2 text-sm text-gray-600">
           {adjustmentPresentation.map(row=><div key={row.id} className="flex items-start justify-between gap-3"><span className="min-w-0 break-words">{row.description?.trim()||'Added Amount'}</span><span className="shrink-0 font-semibold">₹{money(row.adminAddedAmount)}</span></div>)}
         </div>}
-      </section>
+      </section>}
 
-      <section className="rounded-xl border bg-white p-4">
+      {companyContribution>0&&      <section className="rounded-xl border bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <span className="font-semibold text-gray-700">Company Contribution</span>
           <span className="text-lg font-bold text-gray-900">-₹{money(companyContribution)}</span>
         </div>
-      </section>
+      </section>}
 
       <section className="flex items-center justify-between gap-3 rounded-xl border bg-primary-50 p-4">
         <span className="font-semibold text-gray-800">Member Total</span>
