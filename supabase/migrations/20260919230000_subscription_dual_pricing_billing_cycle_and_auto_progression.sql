@@ -367,7 +367,7 @@ begin
 end;
 $function$;
 
-grant execute on function public.super_admin_set_subscription(uuid,text,uuid,integer,numeric,text,text,text) to authenticated;
+revoke execute on function public.super_admin_set_subscription(uuid,text,uuid,integer,numeric,text,text,text) from public, anon;\ngrant execute on function public.super_admin_set_subscription(uuid,text,uuid,integer,numeric,text,text,text) to authenticated;
 
 -- Replace the payment submission RPC with cycle-aware validation.
 drop function if exists public.canteen_submit_subscription_payment(uuid,numeric,text,date,text);
@@ -451,7 +451,7 @@ begin
 end;
 $function$;
 
-grant execute on function public.canteen_submit_subscription_payment(uuid,numeric,text,date,text) to authenticated;
+revoke execute on function public.canteen_submit_subscription_payment(uuid,numeric,text,date,text) from public, anon;\ngrant execute on function public.canteen_submit_subscription_payment(uuid,numeric,text,date,text) to authenticated;
 
 -- Replace the existing payment-review RPC. The same RPC now records the
 -- verified cycle and activates the subscription in that cycle.
@@ -560,7 +560,7 @@ begin
 end;
 $function$;
 
-grant execute on function public.super_admin_review_subscription_payment(uuid,text,text) to authenticated;
+revoke execute on function public.super_admin_review_subscription_payment(uuid,text,text) from public, anon;\ngrant execute on function public.super_admin_review_subscription_payment(uuid,text,text) to authenticated;
 
 -- Status synchronization keeps the current paid period intact. Automatic
 -- MEMBER_RANGE progression happens only when the old period has ended (or the
@@ -622,6 +622,6 @@ begin
 end;
 $function$;
 
-grant execute on function public.sync_subscription_statuses(uuid) to authenticated;
+revoke execute on function public.sync_subscription_statuses(uuid) from public, anon;\ngrant execute on function public.sync_subscription_statuses(uuid) to authenticated;
 
 commit;
