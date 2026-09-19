@@ -570,10 +570,26 @@ export async function loadAIPaymentBehaviour(): Promise<AIPaymentBehaviour> {
 
   memberMap.forEach(row=>{
     const v=memberTimingValues.get(row.employeeId)||{sub:[],comp:[],recentSub:[],earlierSub:[],recentComp:[],earlierComp:[]};
-    row.currentAverageDelayHours=average(v.sub.filter((_,i)=>true).filter((_,i)=>true).length?[]:[]);
     const currentSub:number[]=[];const previousSub:number[]=[];
     bills.filter(b=>b.employee_id===row.employeeId).forEach(b=>{const k=monthKey(Number(b.bill_year),Number(b.bill_month));(paymentsByBill.get(b.id)||[]).forEach(p=>{const s=submissionDelay(b,p);if(s!==null&&(k===currentMonth))currentSub.push(s);if(s!==null&&(k===previousMonth))previousSub.push(s);});});
     row.currentAverageDelayHours=average(currentSub);row.previousAverageDelayHours=average(previousSub);
+    const monthlyGroups=new Map<string,{bills:number;sub:number[];comp:number[]}>();
+    bills.filter(b=>b.employee_id===row.employeeId).forEach(b=>{
+      const k=monthKey(Number(b.bill_year),Number(b.bill_month));
+      const g=monthlyGroups.get(k)||{bills:0,sub:[],comp:[]};
+      g.bills++;
+      (paymentsByBill.get(b.id)||[]).forEach(p=>{
+        const s=submissionDelay(b,p);const c=completionDelay(b,p);
+        if(s!==null)g.sub.push(s);if(c!==null)g.comp.push(c);
+      });
+      monthlyGroups.set(k,g);
+    });
+    row.monthlyHistory=[...monthlyGroups.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([month,g])=>({
+      month,bills:g.bills,submissionCount:g.sub.length,averageSubmissionDelayHours:average(g.sub),
+      within24Submission:g.sub.filter(h=>h<=24).length,after24Submission:g.sub.filter(h=>h>24).length,
+      completionCount:g.comp.length,averageCompletionDelayHours:average(g.comp),
+      within24Completion:g.comp.filter(h=>h<=24).length,after24Completion:g.comp.filter(h=>h>24).length
+    }));
     row.historicalAverageDelayHours=average(v.sub);row.historicalAverageCompletionDelayHours=average(v.comp);
     row.fastestSubmissionHours=v.sub.length?Math.min(...v.sub):null;row.slowestSubmissionHours=v.sub.length?Math.max(...v.sub):null;
     row.fastestCompletionHours=v.comp.length?Math.min(...v.comp):null;row.slowestCompletionHours=v.comp.length?Math.max(...v.comp):null;
