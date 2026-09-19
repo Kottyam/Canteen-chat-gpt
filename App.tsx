@@ -34,5 +34,5 @@ const SubscriptionAccessBoundary:React.FC<{children:React.ReactNode}>=({children
 
 const AppContent:React.FC=()=>{const{user,loading}=useAuth();if(loading)return <SplashScreen/>;if(!user)return <Login/>;if(user.role==='admin'&&user.adminRole==='super_admin')return <SuperAdminDashboard/>;if(user.role==='admin'&&user.needsCanteenSetup)return <CanteenOnboarding/>;if(user.role==='employee'&&user.isFirstLogin)return <InitialPasswordChange/>;if(user.role==='employee')return <EmployeeDashboard/>;if(user.role==='admin')return <AdminDashboard/>;return <Login/>};
 
-const App:React.FC=()=>{const[splash,setSplash]=useState(true);useEffect(()=>{const timer=window.setTimeout(()=>setSplash(false),1000);return()=>window.clearTimeout(timer)},[]);return <AuthProvider><DataProvider>{splash?<SplashScreen/>:<AppContent/>}</DataProvider></AuthProvider>};
+const App:React.FC=()=>{const[splash,setSplash]=useState(true);useEffect(()=>{const timer=window.setTimeout(()=>setSplash(false),1000);return()=>window.clearTimeout(timer)},[]);return <AuthProvider><DataProvider>{splash?<SplashScreen/>:<SubscriptionAccessBoundary><AppContent/></SubscriptionAccessBoundary>}</DataProvider></AuthProvider>};
 export default App;
