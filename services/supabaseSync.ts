@@ -1,6 +1,6 @@
 import { supabase, supabaseEnabled } from '../supabase';
 import { User, Order, Prices, OrderItems, MenuItem, DailyMenuItem } from '../types';
-import { formatDate } from '../utils/helpers';
+import { formatDate, getBusinessWeekday } from '../utils/helpers';
 const defaultNames:Record<string,string>={morningTea:'Morning Tea',lunchMeals:'Lunch: Meals',lunchEgg:'Lunch: Egg (add-on)',lunchFishMeat:'Lunch: Fish/Meat (add-on)',eveningTea:'Evening Tea'};
 const isoDate=(date=new Date())=>formatDate(date);
 export async function loadSupabaseData(){
@@ -28,8 +28,7 @@ export async function deactivateMenuItem(itemCode:string){if(!supabaseEnabled||!
 export async function activateMenuItem(itemCode:string){if(!supabaseEnabled||!supabase)return;const{error}=await supabase.from('menu_prices').update({active:true,archived:false}).eq('item_code',itemCode);if(error)throw error}
 export async function deleteMenuItem(itemCode:string):Promise<'deleted'|'deactivated'>{if(!supabaseEnabled||!supabase)return'deactivated';const{error}=await supabase.from('menu_prices').update({active:false,archived:true}).eq('item_code',itemCode);if(error)throw error;return'deactivated'}
 export async function getWeeklyMenu(weekday:number):Promise<MenuItem[]>{if(!supabaseEnabled||!supabase)return[];const{data,error}=await supabase.from('weekly_menu').select('item_code,item_name,unit_price,active').eq('weekday',weekday).eq('active',true).order('item_code');if(error)throw error;return(data||[]).map((r:any)=>({itemCode:r.item_code,itemName:r.item_name||defaultNames[r.item_code]||r.item_code,unitPrice:Number(r.unit_price),active:Boolean(r.active),archived:false}))}
-const weekdayFromDate=(date:string)=>{const [y,m,d]=date.split('-').map(Number);return new Date(Date.UTC(y,m-1,d)).getUTCDay()};
-export async function getWeeklyMenuForDate(date:string):Promise<MenuItem[]>{return getWeeklyMenu(weekdayFromDate(date))}
+export async function getWeeklyMenuForDate(date:string):Promise<MenuItem[]>{return getWeeklyMenu(getBusinessWeekday(date))}
 export async function saveWeeklyMenu(weekday:number,items:MenuItem[]){if(!supabaseEnabled||!supabase)return;const{error:del}=await supabase.from('weekly_menu').delete().eq('weekday',weekday);if(del)throw del;if(items.length){const rows=items.map(i=>({weekday,item_code:i.itemCode,item_name:i.itemName.trim(),unit_price:Number(i.unitPrice),active:true,updated_at:new Date().toISOString()}));const{error}=await supabase.from('weekly_menu').insert(rows);if(error)throw error}}
 export async function upsertDailyMenu(menuDate:string,items:MenuItem[]){if(!supabaseEnabled||!supabase)return;const rows=items.map(i=>({menu_date:menuDate,item_code:i.itemCode,item_name:i.itemName.trim(),unit_price:Number(i.unitPrice),active:Boolean(i.active),updated_at:new Date().toISOString()}));if(!rows.length)return;const{error}=await supabase.from('daily_menu').upsert(rows,{onConflict:'canteen_id,menu_date,item_code'});if(error)throw error}
 export async function deleteDailyMenu(menuDate:string){if(!supabaseEnabled||!supabase)return;const{error}=await supabase.from('daily_menu').delete().eq('menu_date',menuDate);if(error)throw error}
