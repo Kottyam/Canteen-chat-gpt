@@ -41,48 +41,75 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
 
     try {
       if (supabaseEnabled && supabase) {
-        // Reuse the exact credential identity used by the existing Member login flow.
-        // Mobile-mode Members authenticate with their normalized mobile number;
-        // legacy Members authenticate with their employee/SR number.
-        const credentialId = user.memberLoginMode === 'mobile' ? user.mobile : user.id;
-        const normalizedCredentialId = credentialId?.trim();
-        if (!normalizedCredentialId) {
-          throw new Error('Member login identity could not be resolved. Please log in again.');
-        }
+        if (user.role === 'admin' && user.adminRole === 'super_admin') {
+          // The Super Admin uses the real Supabase Auth identity represented by
+          // the current session. Do not persist or mutate the password in profiles.
+          const { data: sessionData } = await supabase.auth.getSession();
+          const currentAuthUser = sessionData.session?.user;
+          if (!currentAuthUser?.id || currentAuthUser.id !== user.identityId) {
+            throw new Error('Super Admin authentication identity could not be verified. Please log in again.');
+          }
 
-        const credentialEmail = internalEmailForLogin(normalizedCredentialId);
-        const { data: authData, error: verifyError } = await supabase.auth.signInWithPassword({
-          email: credentialEmail,
-          password: currentPassword
-        });
+          const credentialId = currentAuthUser.email || (user.id === '229132' ? '229132' : null);
+          if (!credentialId) {
+            throw new Error('Super Admin login identity could not be resolved. Please log in again.');
+          }
+          const credentialEmail = currentAuthUser.email || internalEmailForLogin(credentialId);
+          const { data: authData, error: verifyError } = await supabase.auth.signInWithPassword({
+            email: credentialEmail,
+            password: currentPassword
+          });
+          if (verifyError || authData.user?.id !== currentAuthUser.id) {
+            throw new Error('Incorrect current password.');
+          }
 
-        if (verifyError) {
-          throw new Error('Incorrect current password.');
-        }
-        if (!authData.user?.id) {
-          throw new Error('Member authentication identity could not be verified. Please log in again.');
-        }
-        if (authData.user.id !== user.identityId) {
-          // Never continue if the credential resolved to a different Auth identity.
-          await supabase.auth.signOut();
-          throw new Error('Member authentication identity does not match the current profile. Please log in again.');
-        }
+          const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+          if (updateError) throw updateError;
 
-        const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
-        if (updateError) throw updateError;
+          // Keep the authenticated session and refresh only the in-memory profile.
+          updateUser({ ...user, password: '', isFirstLogin: false });
+        } else {
+          // Existing Member password flow.
+          const credentialId = user.memberLoginMode === 'mobile' ? user.mobile : user.id;
+          const normalizedCredentialId = credentialId?.trim();
+          if (!normalizedCredentialId) {
+            throw new Error('Member login identity could not be resolved. Please log in again.');
+          }
 
-        const { data: stateData, error: stateError } = await supabase.rpc('complete_member_password_change');
-        if (stateError) throw stateError;
-        if (stateData !== true) {
-          throw new Error('Member password state could not be completed. Please try again.');
+          const credentialEmail = internalEmailForLogin(normalizedCredentialId);
+          const { data: authData, error: verifyError } = await supabase.auth.signInWithPassword({
+            email: credentialEmail,
+            password: currentPassword
+          });
+
+          if (verifyError) {
+            throw new Error('Incorrect current password.');
+          }
+          if (!authData.user?.id) {
+            throw new Error('Member authentication identity could not be verified. Please log in again.');
+          }
+          if (authData.user.id !== user.identityId) {
+            await supabase.auth.signOut();
+            throw new Error('Member authentication identity does not match the current profile. Please log in again.');
+          }
+
+          const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+          if (updateError) throw updateError;
+
+          const { data: stateData, error: stateError } = await supabase.rpc('complete_member_password_change');
+          if (stateError) throw stateError;
+          if (stateData !== true) {
+            throw new Error('Member password state could not be completed. Please try again.');
+          }
+
+          // Do not persist the new password in the client-side User object.
+          const updatedCurrentUser = { ...user, password: '', isFirstLogin: false };
+          setUsers(prev => prev.map(u => u.id === user.id ? updatedCurrentUser : u));
+          updateUser(updatedCurrentUser);
         }
-
-        const updatedCurrentUser = { ...user, password: newPassword, isFirstLogin: false };
-        setUsers(prev => prev.map(u => u.id === user.id ? updatedCurrentUser : u));
-        updateUser(updatedCurrentUser);
       } else {
         if (user.password !== currentPassword) throw new Error('Incorrect current password.');
-        const updatedCurrentUser = { ...user, password: newPassword, isFirstLogin: false };
+        const updatedCurrentUser = { ...user, password: '', isFirstLogin: false };
         setUsers(prev => prev.map(u => u.id === user.id ? updatedCurrentUser : u));
         updateUser(updatedCurrentUser);
       }
