@@ -49,8 +49,7 @@ create policy subscription_payment_settings_select
 on public.subscription_payment_settings for select to authenticated
 using ((select public.is_super_admin()) or (select public.is_active_canteen_admin()));
 
-revoke all on public.subscription_payment_settings from anon;
-revoke insert, update, delete on public.subscription_payment_settings from authenticated;
+revoke all on public.subscription_payment_settings from public, anon, authenticated;
 grant select on public.subscription_payment_settings to authenticated;
 
 create or replace function public.super_admin_update_subscription_payment_settings(
