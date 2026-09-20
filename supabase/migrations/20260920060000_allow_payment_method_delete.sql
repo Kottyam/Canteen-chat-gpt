@@ -19,6 +19,7 @@ as $$
 declare
  m public.subscription_payment_methods;
  v_default_id uuid;
+ active_count integer;
 begin
  if not public.is_super_admin() then raise exception 'Super Admin authorization required'; end if;
 
@@ -46,6 +47,8 @@ begin
 
    return m;
  elsif p_action='deactivate' then
+   select count(*) into active_count from public.subscription_payment_methods where active and id<>p_method_id;
+   if active_count=0 then raise exception 'At least one active payment method must remain configured'; end if;
    update public.subscription_payment_methods
    set active=false,is_default=false,updated_at=now()
    where id=p_method_id
