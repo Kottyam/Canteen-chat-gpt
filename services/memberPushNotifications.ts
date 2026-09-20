@@ -90,6 +90,22 @@ const registerToken = async (token: Token) => {
   }
 };
 
+const ensureMemberNotificationChannel = async () => {
+  if (!isAndroid()) return;
+
+  try {
+    await PushNotifications.createChannel({
+      id: 'gocanteen-member',
+      name: 'GoCanteen Member Notifications',
+      description: 'Notifications for your GoCanteen member account.',
+      importance: 3,
+      visibility: 0,
+    });
+  } catch (error) {
+    pushDiagError('N member notification channel creation failed', error);
+  }
+};
+
 const ensureListeners = async () => {
   if (listenersReady || !isAndroid()) return;
   listenersReady = true;
@@ -142,6 +158,7 @@ export const syncMemberPushForUser = async (user: MemberPushUser) => {
   activeMemberContext = { profileId: user.identityId, generation };
   pushDiag('member context active', { profileId: user.identityId, canteenId: user.canteenId || null, role: user.role, installationId: getInstallationId(), bindingGeneration: generation });
   await ensureListeners();
+  await ensureMemberNotificationChannel();
 
   try {
     let permission = await PushNotifications.checkPermissions();
