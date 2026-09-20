@@ -38,7 +38,7 @@ export interface SubscriptionPayment{
 export interface SubscriptionPaymentSettings{
  id:boolean; payment_provider:PaymentProvider; manual_payment_enabled:boolean; razorpay_enabled:boolean;
  upi_id:string|null; payment_display_name:string|null; payment_instructions:string|null;
- bank_payment_details:string|null; created_at:string; updated_at:string;
+ bank_payment_details:string|null; vendor_contact_email:string|null; created_at:string; updated_at:string;
 }
 export interface SubscriptionBillingQuote{required:boolean;plan_id?:string;plan_name?:string;pricing_model?:PricingModel;billing_cycle?:BillingCycle;amount?:number;currency?:string;member_count?:number;min_members?:number;max_members?:number;max_exceeded?:boolean;contact_email?:string;message?:string|null;}
 
@@ -111,6 +111,7 @@ export async function updatePlan(id:string,input:PlanUpsertInput){const{data,err
 export async function setDefaultPlan(id:string){const{data,error}=await requireClient().rpc('super_admin_set_plan_default',{p_plan_id:id});if(error)throw error;return data as SubscriptionPlan}
 export async function deletePlan(id:string){const{error}=await requireClient().rpc('super_admin_delete_plan',{p_plan_id:id});if(error)throw error}
 export async function loadPaymentSettings(){const{data,error}=await requireClient().from('subscription_payment_settings').select('*').eq('id',true).maybeSingle();if(error)throw error;return data as SubscriptionPaymentSettings|null}
+export async function setVendorContactEmail(email:string){const{data,error}=await requireClient().rpc('super_admin_set_vendor_contact_email',{p_email:email});if(error)throw error;return data as SubscriptionPaymentSettings}
 export async function updatePaymentSettings(input:{manual_payment_enabled:boolean;upi_id:string;payment_display_name:string;payment_instructions:string;bank_payment_details:string}){const{data,error}=await requireClient().rpc('super_admin_update_subscription_payment_settings',{p_payment_provider:'manual',p_manual_payment_enabled:input.manual_payment_enabled,p_upi_id:input.upi_id||null,p_payment_display_name:input.payment_display_name||null,p_payment_instructions:input.payment_instructions||null,p_bank_payment_details:input.bank_payment_details||null,p_razorpay_enabled:false});if(error)throw error;return data as SubscriptionPaymentSettings}
 export async function savePaymentMethod(input:{id?:string;provider?:PaymentProvider;methodType:'upi'|'bank'|'razorpay';displayName:string;upiId?:string;active:boolean;isDefault:boolean}){const{data,error}=await requireClient().rpc('super_admin_set_payment_method',{p_method_id:input.id||null,p_provider:input.provider||'manual',p_method_type:input.methodType,p_display_name:input.displayName,p_upi_id:input.upiId||null,p_active:input.active,p_is_default:input.isDefault,p_action:'upsert'});if(error)throw error;return data as PaymentMethod}
 export async function deactivatePaymentMethod(id:string){const{data,error}=await requireClient().rpc('super_admin_set_payment_method',{p_method_id:id,p_action:'deactivate'});if(error)throw error;return data as PaymentMethod}
