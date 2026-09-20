@@ -194,5 +194,4 @@ where sp.subscription_id=s.id
 
 revoke execute on function public.get_canteen_subscription_state(uuid) from public,anon;
 grant execute on function public.get_canteen_subscription_state(uuid) to authenticated;
-revoke execute on function public.resolve_subscription_billing_period(uuid,text) from public,anon;
-grant execute on function public.resolve_subscription_billing_period(uuid,text) to authenticated;
+revoke execute on function public.resolve_subscription_billing_period(uuid,text) from public,anon,authenticated;
