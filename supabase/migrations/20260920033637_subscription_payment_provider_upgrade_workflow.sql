@@ -177,4 +177,25 @@ revoke execute on function public.canteen_submit_plan_upgrade_payment(uuid,date,
 revoke execute on function public.super_admin_review_subscription_payment(uuid,text,text) from public,anon; grant execute on function public.super_admin_review_subscription_payment(uuid,text,text) to authenticated;
 revoke execute on function public.super_admin_set_payment_method(uuid,text,text,text,text,boolean,boolean,text) from public,anon; grant execute on function public.super_admin_set_payment_method(uuid,text,text,text,text,boolean,boolean,text) to authenticated;
 
+
+
+create or replace function public.super_admin_update_subscription_payment_settings(p_payment_provider text default 'manual',p_manual_payment_enabled boolean default true,p_upi_id text default null,p_payment_display_name text default null,p_payment_instructions text default null,p_bank_payment_details text default null,p_razorpay_enabled boolean default false)
+returns public.subscription_payment_settings language plpgsql security definer set search_path=''
+as $
+declare v_settings public.subscription_payment_settings; v_method public.subscription_payment_methods;
+begin
+ if not public.is_super_admin() then raise exception 'Super Admin authorization required'; end if;
+ if p_payment_provider<>'manual' or coalesce(p_razorpay_enabled,false) then raise exception 'Razorpay is not configured in this phase'; end if;
+ update public.subscription_payment_settings set payment_provider='manual',manual_payment_enabled=coalesce(p_manual_payment_enabled,true),razorpay_enabled=false,upi_id=nullif(trim(coalesce(p_upi_id,'')),''),payment_display_name=nullif(trim(coalesce(p_payment_display_name,'')),''),
+ payment_instructions=nullif(trim(coalesce(p_payment_instructions,'')),''),bank_payment_details=nullif(trim(coalesce(p_bank_payment_details,'')),''),updated_at=now() where id=true returning * into v_settings;
+ if coalesce(p_manual_payment_enabled,true) and nullif(trim(coalesce(p_upi_id,'')),'') is not null then
+  select * into v_method from public.subscription_payment_methods where is_default=true limit 1;
+  if found then update public.subscription_payment_methods set provider='manual',method_type='upi',display_name=coalesce(nullif(trim(p_payment_display_name),''),'GoCanteen'),upi_id=nullif(trim(p_upi_id),''),active=true,is_default=true,updated_at=now() where id=v_method.id;
+  else insert into public.subscription_payment_methods(provider,method_type,display_name,upi_id,active,is_default) values('manual','upi',coalesce(nullif(trim(p_payment_display_name),''),'GoCanteen'),nullif(trim(p_upi_id),''),true,true);
+  end if;
+ end if;
+ return v_settings;
+end $;
+revoke execute on function public.super_admin_update_subscription_payment_settings(text,boolean,text,text,text,text,boolean) from public,anon;
+grant execute on function public.super_admin_update_subscription_payment_settings(text,boolean,text,text,text,text,boolean) to authenticated;
 commit;
