@@ -198,4 +198,38 @@ begin
 end $;
 revoke execute on function public.super_admin_update_subscription_payment_settings(text,boolean,text,text,text,text,boolean) from public,anon;
 grant execute on function public.super_admin_update_subscription_payment_settings(text,boolean,text,text,text,text,boolean) to authenticated;
+
+
+-- Keep at least one active payment method so customer payment cannot dead-end.
+create or replace function public.super_admin_set_payment_method(p_method_id uuid default null,p_provider text default 'manual',p_method_type text default 'upi',p_display_name text default null,p_upi_id text default null,p_active boolean default true,p_is_default boolean default false,p_action text default 'upsert')
+returns public.subscription_payment_methods language plpgsql security definer set search_path=''
+as $
+declare m public.subscription_payment_methods; active_count int;
+begin
+ if not public.is_super_admin() then raise exception 'Super Admin authorization required'; end if;
+ if p_action='delete' then
+  select * into m from public.subscription_payment_methods where id=p_method_id; if not found then raise exception 'Payment method not found'; end if;
+  select count(*) into active_count from public.subscription_payment_methods where active and id<>p_method_id;
+  if m.active and active_count=0 then raise exception 'At least one active payment method must remain configured'; end if;
+  if exists(select 1 from public.subscription_payments where payment_method_id=p_method_id) then raise exception 'Payment method is referenced by payment history; deactivate it instead'; end if;
+  delete from public.subscription_payment_methods where id=p_method_id returning * into m; return m;
+ elsif p_action='deactivate' then
+  select count(*) into active_count from public.subscription_payment_methods where active and id<>p_method_id;
+  if active_count=0 then raise exception 'At least one active payment method must remain configured'; end if;
+  update public.subscription_payment_methods set active=false,is_default=false,updated_at=now() where id=p_method_id returning * into m; if not found then raise exception 'Payment method not found'; end if; return m;
+ elsif p_action='upsert' then
+  if p_provider<>'manual' then raise exception 'Razorpay is not configured in this phase'; end if;
+  if nullif(trim(coalesce(p_display_name,'')),'') is null then raise exception 'Display name is required'; end if;
+  if p_method_type='upi' and nullif(trim(coalesce(p_upi_id,'')),'') is null then raise exception 'UPI ID is required'; end if;
+  if p_is_default then update public.subscription_payment_methods set is_default=false,updated_at=now() where id<>coalesce(p_method_id,'00000000-0000-0000-0000-000000000000'::uuid); end if;
+  if p_method_id is null then
+   insert into public.subscription_payment_methods(provider,method_type,display_name,upi_id,active,is_default) values('manual',p_method_type,trim(p_display_name),nullif(trim(p_upi_id),''),p_active,p_is_default) returning * into m;
+  else
+   update public.subscription_payment_methods set provider='manual',method_type=p_method_type,display_name=trim(p_display_name),upi_id=nullif(trim(p_upi_id),''),active=p_active,is_default=p_is_default,updated_at=now() where id=p_method_id returning * into m; if not found then raise exception 'Payment method not found'; end if;
+  end if; return m;
+ end if;
+ raise exception 'Unsupported payment method action';
+end $;
+revoke execute on function public.super_admin_set_payment_method(uuid,text,text,text,text,boolean,boolean,text) from public,anon;
+grant execute on function public.super_admin_set_payment_method(uuid,text,text,text,text,boolean,boolean,text) to authenticated;
 commit;
