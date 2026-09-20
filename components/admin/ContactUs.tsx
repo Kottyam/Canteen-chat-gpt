@@ -1,6 +1,6 @@
 import React,{useEffect,useMemo,useState}from'react';
 import{useAuth}from'../../context/AuthContext';
-import{loadOwnSubscription,submitSubscriptionPayment,submitPlanUpgradePayment,SubscriptionPlan,CanteenSubscription,SubscriptionPayment,SubscriptionPaymentSettings,PaymentMethod,UpgradeQuote}from'../../services/subscriptionPlatform';
+import{loadOwnSubscription,submitSubscriptionPayment,submitPlanUpgradePayment,SubscriptionPlan,CanteenSubscription,SubscriptionPayment,SubscriptionPaymentSettings,PaymentMethod,UpgradeQuote,CanteenAccessState}from'../../services/subscriptionPlatform';
 const money=(n:number,c='INR')=>new Intl.NumberFormat('en-IN',{style:'currency',currency:c,maximumFractionDigits:2}).format(n||0);
 const date=(v:string|null)=>v?new Date(v).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
 const statusLabel=(s:string)=>s.replace('_',' ').toUpperCase();
@@ -9,7 +9,7 @@ const friendlyError=(e:any)=>{const m=String(e?.message||'');if(/network|fetch|t
 
 const ContactUs:React.FC=()=>{
  const{user}=useAuth();
- const[data,setData]=useState<{subscription:CanteenSubscription|null;payments:SubscriptionPayment[];plans:SubscriptionPlan[];settings:SubscriptionPaymentSettings|null;paymentMethods:PaymentMethod[];memberCount:number;upgradeQuote:UpgradeQuote|null}|null>(null);
+ const[data,setData]=useState<{access:CanteenAccessState;subscription:CanteenSubscription|null;payments:SubscriptionPayment[];plans:SubscriptionPlan[];settings:SubscriptionPaymentSettings|null;paymentMethods:PaymentMethod[];memberCount:number;upgradeQuote:UpgradeQuote|null}|null>(null);
  const[error,setError]=useState('');const[message,setMessage]=useState('');const[reference,setReference]=useState('');const[note,setNote]=useState('');const[paymentDate,setPaymentDate]=useState(new Date().toISOString().slice(0,10));const[saving,setSaving]=useState(false);const[cycle,setCycle]=useState<'monthly'|'annual'>('monthly');
  const[showPaidForm,setShowPaidForm]=useState(false);const[upgradeReference,setUpgradeReference]=useState('');const[upgradeNote,setUpgradeNote]=useState('');const[upgradeDate,setUpgradeDate]=useState(new Date().toISOString().slice(0,10));const[upgradeSaving,setUpgradeSaving]=useState(false);
  const load=async()=>{if(!user?.canteenId)return;try{setError('');const next=await loadOwnSubscription(user.canteenId);setData(next);if(next.subscription)setCycle(next.subscription.billing_cycle)}catch(e:any){setError(friendlyError(e))}};
