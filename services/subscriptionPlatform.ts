@@ -49,16 +49,20 @@ export interface UpgradeQuote{
 const requireClient=()=>{if(!supabase)throw new Error('Supabase is not enabled.');return supabase};
 const planPrice=(plan:SubscriptionPlan,cycle:BillingCycle)=>cycle==='annual'?plan.annual_price:plan.monthly_price;
 
-export interface CanteenAccessState{allowed:boolean;status:SubscriptionStatus|null;subscription:CanteenSubscription|null;reason:'trial'|'active'|'payment_pending'|'expired'|'suspended'|'unassigned'|'verification_error'}
+export interface CanteenAccessState{allowed:boolean;status:SubscriptionStatus|null;subscription:CanteenSubscription|null;paymentStatus:PaymentStatus|null;reason:'trial'|'active'|'payment_pending'|'expired'|'suspended'|'unassigned'|'verification_error'}
 export async function loadCanteenAccessState(canteenId:string):Promise<CanteenAccessState>{
- const c=requireClient(); await syncSubscriptionStatuses(canteenId);
- const {data:allowed,error:accessError}=await c.rpc('can_canteen_operate',{p_canteen_id:canteenId}); if(accessError)throw accessError;
- const {data:subscription,error}=await c.from('canteen_subscriptions').select('*').eq('canteen_id',canteenId).maybeSingle(); if(error)throw error;
- if(!subscription)return{allowed:Boolean(allowed),status:null,subscription:null,reason:allowed?'payment_pending':'verification_error'};
- const sub=subscription as CanteenSubscription; const now=Date.now();
- const dateValid=(sub.status==='trial'&&!!sub.trial_end&&new Date(sub.trial_end).getTime()>now)||(sub.status==='active'&&!!sub.subscription_end&&new Date(sub.subscription_end).getTime()>now);
- const effectiveAllowed=dateValid||(sub.status==='payment_pending'&&((sub.trial_end&&new Date(sub.trial_end).getTime()>now)||(sub.subscription_end&&new Date(sub.subscription_end).getTime()>now)));
- return{allowed:Boolean(allowed)&&effectiveAllowed,status:sub.status,subscription:sub,reason:sub.status};
+ const c=requireClient();
+ await syncSubscriptionStatuses(canteenId);
+ const {data:state,error:stateError}=await c.rpc('get_canteen_subscription_state',{p_canteen_id:canteenId});
+ if(stateError)throw stateError;
+ const subscription=(state?.subscription||null) as CanteenSubscription|null;
+ return{
+  allowed:Boolean(state?.allowed),
+  status:(state?.status||null) as SubscriptionStatus|null,
+  subscription,
+  paymentStatus:(state?.payment_status||subscription?.payment_status||null) as PaymentStatus|null,
+  reason:(state?.reason||'verification_error') as CanteenAccessState['reason']
+ };
 }
 export async function syncSubscriptionStatuses(canteenId?:string){const{error}=await requireClient().rpc('sync_subscription_statuses',{p_canteen_id:canteenId||null});if(error)throw error}
 export async function getPlatformStats(){const{data,error}=await requireClient().rpc('super_admin_platform_stats');if(error)throw error;return data as Record<string,number>}
@@ -68,7 +72,7 @@ export async function submitPlanUpgradePayment(newPlanId:string,paymentDate:stri
 export async function getSubscriptionUpgradeQuote(canteenId:string,newPlanId?:string){const{data,error}=await requireClient().rpc('get_subscription_upgrade_quote',{p_canteen_id:canteenId,p_new_plan_id:newPlanId||null});if(error)throw error;return data as UpgradeQuote}
 export async function reviewSubscriptionPayment(paymentId:string,status:'paid'|'failed',billingCycle?:BillingCycle){const{data,error}=await requireClient().rpc('super_admin_review_subscription_payment',{p_payment_id:paymentId,p_status:status,p_billing_cycle:billingCycle||null});if(error)throw error;return data as SubscriptionPayment}
 export async function loadOwnSubscription(canteenId:string){
- await syncSubscriptionStatuses(canteenId); const c=requireClient();
+ const access=await loadCanteenAccessState(canteenId); const c=requireClient();
  const [{data:subscription,error},{data:payments,paymentError},{data:plans,planError},{data:settings,settingsError},{data:methods,methodsError},{count:memberCount,error:memberError}]=await Promise.all([
   c.from('canteen_subscriptions').select('*').eq('canteen_id',canteenId).maybeSingle(),
   c.from('subscription_payments').select('*').eq('canteen_id',canteenId).order('created_at',{ascending:false}),
@@ -80,7 +84,7 @@ export async function loadOwnSubscription(canteenId:string){
  if(error)throw error;if(paymentError)throw paymentError;if(planError)throw planError;if(settingsError)throw settingsError;if(methodsError)throw methodsError;if(memberError)throw memberError;
  let upgradeQuote:UpgradeQuote|null=null;
  if(subscription?.status==='active'&&subscription.billing_cycle==='annual'){try{upgradeQuote=await getSubscriptionUpgradeQuote(canteenId)}catch{upgradeQuote=null}}
- return{subscription:subscription as CanteenSubscription|null,payments:(payments||[]) as SubscriptionPayment[],plans:(plans||[]) as SubscriptionPlan[],settings:settings as SubscriptionPaymentSettings|null,paymentMethods:(methods||[]) as PaymentMethod[],memberCount:memberCount||0,upgradeQuote};
+ return{access,subscription:(access.subscription||subscription||null) as CanteenSubscription|null,payments:(payments||[]) as SubscriptionPayment[],plans:(plans||[]) as SubscriptionPlan[],settings:settings as SubscriptionPaymentSettings|null,paymentMethods:(methods||[]) as PaymentMethod[],memberCount:memberCount||0,upgradeQuote};
 }
 export async function loadPlatformData(){
  await syncSubscriptionStatuses(); const c=requireClient();
