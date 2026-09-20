@@ -1,84 +1,52 @@
-import React,{useEffect,useState}from'react';
+import React,{useEffect,useMemo,useState}from'react';
 import{useAuth}from'../../context/AuthContext';
-import{loadOwnSubscription,submitSubscriptionPayment,SubscriptionPlan,CanteenSubscription,SubscriptionPayment,SubscriptionPaymentSettings}from'../../services/subscriptionPlatform';
-
+import{loadOwnSubscription,submitSubscriptionPayment,submitPlanUpgradePayment,SubscriptionPlan,CanteenSubscription,SubscriptionPayment,SubscriptionPaymentSettings,PaymentMethod,UpgradeQuote}from'../../services/subscriptionPlatform';
 const money=(n:number,c='INR')=>new Intl.NumberFormat('en-IN',{style:'currency',currency:c,maximumFractionDigits:2}).format(n||0);
 const date=(v:string|null)=>v?new Date(v).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}):'—';
 const statusLabel=(s:string)=>s.replace('_',' ').toUpperCase();
 const cycleLabel=(c:string)=>c==='annual'?'Annual':'Monthly';
+const friendlyError=(e:any)=>{const m=String(e?.message||'');if(/network|fetch|timeout|failed to fetch/i.test(m))return'We could not reach the subscription service. Please try again.';if(/pending review|already pending/i.test(m))return'A payment is already waiting for Super Admin verification.';return'We could not complete this payment request. Please check the details and try again.'};
 
 const ContactUs:React.FC=()=>{
  const{user}=useAuth();
- const[data,setData]=useState<{subscription:CanteenSubscription|null;payments:SubscriptionPayment[];plans:SubscriptionPlan[];settings:SubscriptionPaymentSettings|null;memberCount:number}|null>(null);
- const[error,setError]=useState('');const[message,setMessage]=useState('');const[amount,setAmount]=useState('');const[reference,setReference]=useState('');const[note,setNote]=useState('');const[paymentDate,setPaymentDate]=useState(new Date().toISOString().slice(0,10));const[saving,setSaving]=useState(false);
- const load=async()=>{if(!user?.canteenId)return;try{setError('');setData(await loadOwnSubscription(user.canteenId))}catch(e:any){setError(e?.message||'Could not load Billing & Subscription information.')}};
+ const[data,setData]=useState<{subscription:CanteenSubscription|null;payments:SubscriptionPayment[];plans:SubscriptionPlan[];settings:SubscriptionPaymentSettings|null;paymentMethods:PaymentMethod[];memberCount:number;upgradeQuote:UpgradeQuote|null}|null>(null);
+ const[error,setError]=useState('');const[message,setMessage]=useState('');const[reference,setReference]=useState('');const[note,setNote]=useState('');const[paymentDate,setPaymentDate]=useState(new Date().toISOString().slice(0,10));const[saving,setSaving]=useState(false);const[cycle,setCycle]=useState<'monthly'|'annual'>('monthly');
+ const[showPaidForm,setShowPaidForm]=useState(false);const[upgradeReference,setUpgradeReference]=useState('');const[upgradeNote,setUpgradeNote]=useState('');const[upgradeDate,setUpgradeDate]=useState(new Date().toISOString().slice(0,10));const[upgradeSaving,setUpgradeSaving]=useState(false);
+ const load=async()=>{if(!user?.canteenId)return;try{setError('');const next=await loadOwnSubscription(user.canteenId);setData(next);if(next.subscription)setCycle(next.subscription.billing_cycle)}catch(e:any){setError(friendlyError(e))}};
  useEffect(()=>{void load()},[user?.canteenId]);
- useEffect(()=>{if(data?.subscription)setAmount(String(data.subscription.amount||''))},[data?.subscription?.id,data?.subscription?.amount]);
- const subscription=data?.subscription||null;
- const plan=subscription?data?.plans.find(p=>p.id===subscription.plan_id):null;
- const paymentSettings=data?.settings||null;
- const daysRemaining=subscription?.status==='trial'&&subscription.trial_end?Math.max(0,Math.ceil((new Date(subscription.trial_end).getTime()-Date.now())/86400000)):null;
- const canSubmit=Boolean(subscription&&['payment_pending','expired','suspended'].includes(subscription.status));
- const submit=async()=>{
-  if(!subscription||!user?.canteenId||saving)return;
-  const numeric=Number(amount);
-  if(!Number.isFinite(numeric)||numeric<=0){setError('Enter a valid payment amount.');return}
-  if(!reference.trim()){setError('Enter the payment reference / transaction ID.');return}
-  if(!paymentDate){setError('Select the payment date.');return}
-  setSaving(true);setError('');setMessage('');
-  try{await submitSubscriptionPayment(subscription.id,numeric,reference.trim(),paymentDate,note.trim());setMessage('Payment submitted successfully. It is pending Super Admin verification.');setReference('');setNote('');await load()}
-  catch(e:any){setError(e?.message||'Could not submit payment.')}
-  finally{setSaving(false)}
- };
+ const subscription=data?.subscription||null;const plan=subscription?data?.plans.find(p=>p.id===subscription.plan_id):null;const paymentMethods=data?.paymentMethods||[];const paymentMethod=paymentMethods.find(m=>m.is_default)||paymentMethods[0]||null;
+ const daysRemaining=subscription?(subscription.status==='trial'&&subscription.trial_end?Math.max(0,Math.ceil((new Date(subscription.trial_end).getTime()-Date.now())/86400000)):subscription.status==='active'&&subscription.subscription_end?Math.max(0,Math.ceil((new Date(subscription.subscription_end).getTime()-Date.now())/86400000)):0):null;
+ const paymentRequired=Boolean(subscription&&['trial','expired','suspended','payment_pending'].includes(subscription.status));
+ const payablePlan=useMemo(()=>{if(!data||!subscription)return null;if(subscription.plan_selection_mode!=='auto_range')return plan;return data.plans.find(p=>p.pricing_model==='MEMBER_RANGE'&&p.min_members!==null&&p.max_members!==null&&data.memberCount>=p.min_members&&data.memberCount<=p.max_members)||plan},[data,subscription,plan]);
+ const payableAmount=payablePlan?(cycle==='annual'?payablePlan.annual_price:payablePlan.monthly_price):0;const upi=paymentMethod?.upi_id||data?.settings?.upi_id||null;const payee=paymentMethod?.display_name||data?.settings?.payment_display_name||'GoCanteen';const canPay=Boolean(paymentRequired&&payablePlan&&payableAmount>0);
+ const launchUpi=()=>{if(!upi||!canPay)return;const params=new URLSearchParams({pa:upi,pn:payee,am:payableAmount.toFixed(2),cu:payablePlan?.currency||'INR',tn:'GoCanteen '+cycleLabel(cycle)+' Subscription'});window.location.href='upi://pay?'+params.toString()};
+ const copyUpi=async()=>{if(!upi)return;try{await navigator.clipboard?.writeText(upi);setMessage('UPI ID copied.')}catch{setMessage('UPI ID: '+upi)}};
+ const submit=async()=>{if(!subscription||saving||!reference.trim())return;setSaving(true);setError('');setMessage('');try{await submitSubscriptionPayment(subscription.id,cycle,reference.trim(),paymentDate,note.trim(),paymentMethod?.id);setMessage('Payment submitted. It is now pending Super Admin verification.');setReference('');setNote('');setShowPaidForm(false);await load()}catch(e:any){setError(friendlyError(e))}finally{setSaving(false)}};
+ const submitUpgrade=async()=>{const q=data?.upgradeQuote;if(!q?.required||!q.new_plan_id||upgradeSaving||!upgradeReference.trim())return;setUpgradeSaving(true);setError('');setMessage('');try{await submitPlanUpgradePayment(q.new_plan_id,upgradeDate,upgradeReference.trim(),upgradeNote.trim(),paymentMethod?.id);setMessage('Upgrade payment submitted. The current annual subscription remains unchanged until Super Admin verification.');setUpgradeReference('');setUpgradeNote('');await load()}catch(e:any){setError(friendlyError(e))}finally{setUpgradeSaving(false)}};
  if(!user?.canteenId)return null;
- return <div className="w-full min-w-0 space-y-4">
-  <div className="mb-5"><h3 className="text-xl font-bold text-gray-800 sm:text-2xl">Billing & Subscription</h3><p className="mt-1 text-sm text-gray-500">Customer-facing subscription, billing and payment information.</p></div>
-  {error&&<div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
-  {message&&<div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700">{message}</div>}
-  {!data&&!error&&<div className="rounded-xl border bg-white p-5 text-sm text-gray-500">Loading subscription information…</div>}
-  {data&&subscription===null&&<div className="rounded-xl border border-blue-100 bg-blue-50 p-5"><p className="font-bold text-blue-900">Subscription not activated yet.</p><p className="mt-1 text-sm text-blue-800">You can continue using GoCanteen normally. Your commercial plan, trial and billing lifecycle will begin only after Super Admin activation.</p></div>}
+ return <div className='w-full min-w-0 space-y-4'>
+  <div className='mb-5'><h3 className='text-xl font-bold text-gray-800 sm:text-2xl'>Billing & Subscription</h3><p className='mt-1 text-sm text-gray-500'>Subscription status, payment options and payment history.</p></div>
+  {error&&<div className='rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700'>{error}</div>}{message&&<div className='rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700'>{message}</div>}
+  {!data&&!error&&<div className='rounded-xl border bg-white p-5 text-sm text-gray-500'>Loading subscription information…</div>}
+  {data&&subscription===null&&<div className='rounded-xl border border-blue-100 bg-blue-50 p-5'><p className='font-bold text-blue-900'>Subscription not activated yet.</p><p className='mt-1 text-sm text-blue-800'>You can continue using GoCanteen normally. Billing begins only after Super Admin activation.</p></div>}
   {data&&subscription&&<>
-   <section className="rounded-xl border bg-white p-4 shadow-sm sm:p-5">
-    <h4 className="font-extrabold text-gray-800">Current Subscription</h4>
-    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-     <div><p className="text-xs font-bold text-gray-500">Plan</p><p className="mt-1 font-extrabold">{plan?.name||'—'}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Billing</p><p className="mt-1 font-extrabold">{cycleLabel(subscription.billing_cycle)}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Amount</p><p className="mt-1 font-extrabold">{money(subscription.amount,subscription.currency)} / {subscription.billing_cycle==='annual'?'year':'month'}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Status</p><p className="mt-1 font-extrabold">{statusLabel(subscription.status)}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Payment Status</p><p className="mt-1 font-extrabold">{statusLabel(subscription.payment_status)}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Trial Start</p><p className="mt-1">{date(subscription.trial_start)}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Trial End</p><p className="mt-1">{date(subscription.trial_end)}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Days Remaining</p><p className="mt-1 font-extrabold">{daysRemaining===null?'—':daysRemaining}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Valid From</p><p className="mt-1">{date(subscription.subscription_start)}</p></div>
-     <div><p className="text-xs font-bold text-gray-500">Valid Until</p><p className="mt-1 font-extrabold">{date(subscription.subscription_end||subscription.trial_end)}</p></div>
-    </div>
-   </section>
-   <section className="rounded-xl border bg-white p-4 shadow-sm sm:p-5">
-    <h4 className="font-extrabold text-gray-800">Payment Instructions</h4>
-    {paymentSettings?.manual_payment_enabled&&<div className="mt-3 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm">
-      <p><span className="font-bold">Payment Display Name:</span> {paymentSettings.payment_display_name||'GoCanteen'}</p>
-      <p><span className="font-bold">UPI ID:</span> {paymentSettings.upi_id||'Not configured'}</p>
-      {paymentSettings.payment_instructions&&<p className="whitespace-pre-wrap"><span className="font-bold">Instructions:</span> {paymentSettings.payment_instructions}</p>}
-      {paymentSettings.bank_payment_details&&<p className="whitespace-pre-wrap"><span className="font-bold">Bank / Payment Details:</span> {paymentSettings.bank_payment_details}</p>}
-    </div>}
-    <h4 className="mt-5 font-extrabold text-gray-800">Payment</h4>
-    {canSubmit?<div className="mt-4 space-y-3">
-      <p className="text-sm text-gray-600">Submit the configured {cycleLabel(subscription.billing_cycle).toLowerCase()} subscription amount for Super Admin verification.</p>
-      <div className="grid gap-3 sm:grid-cols-3">
-       <label className="text-sm font-semibold text-gray-700">Amount<input type="number" min="0.01" step="0.01" readOnly value={amount} className="mt-1 w-full rounded-lg border bg-gray-50 px-3 py-2.5 font-normal"/></label>
-       <label className="text-sm font-semibold text-gray-700">Payment Date<input type="date" value={paymentDate} onChange={e=>setPaymentDate(e.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2.5 font-normal"/></label>
-       <label className="text-sm font-semibold text-gray-700">Payment Reference / Transaction ID<input value={reference} onChange={e=>setReference(e.target.value)} placeholder="Enter reference" className="mt-1 w-full rounded-lg border px-3 py-2.5 font-normal"/></label>
-      </div>
-      <label className="block text-sm font-semibold text-gray-700">Note (optional)<textarea value={note} onChange={e=>setNote(e.target.value)} rows={2} className="mt-1 w-full rounded-lg border px-3 py-2.5 font-normal" placeholder="Optional payment note"/></label>
-      <button type="button" disabled={saving} onClick={()=>void submit()} className="rounded-lg bg-primary-600 px-4 py-2.5 font-bold text-white disabled:opacity-50">{saving?'Submitting…':'Submit Payment'}</button>
-    </div>:<p className="mt-2 text-sm text-gray-600">{subscription.status==='active'?'No payment is currently required.':subscription.status==='trial'?'Your trial is currently active.':'Please contact GoCanteen support for payment instructions.'}</p>}
-   </section>
-   <section className="rounded-xl border bg-white p-4 shadow-sm sm:p-5">
-    <h4 className="font-extrabold text-gray-800">Payment History</h4>
-    <div className="mt-3 space-y-2">
-     {data.payments.length?data.payments.map(p=><div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"><div><p className="font-semibold">{money(p.amount,p.currency)} · {p.billing_cycle?cycleLabel(p.billing_cycle):'Subscription Payment'} · {p.transaction_reference||'No reference'}</p><p className="text-xs text-gray-500">Payment date: {date(p.payment_date)}{p.billing_period_start&&p.billing_period_end?' · Billing period: '+date(p.billing_period_start)+' – '+date(p.billing_period_end):''}</p></div><span className="font-bold">{statusLabel(p.payment_status)}</span></div>):<p className="text-sm text-gray-500">No subscription payments yet.</p>}
-    </div>
-   </section>
+   <section className='rounded-xl border bg-white p-4 shadow-sm sm:p-5'><h4 className='font-extrabold text-gray-800'>Current Subscription</h4><div className='mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+    <div><p className='text-xs font-bold text-gray-500'>Current Plan</p><p className='mt-1 font-extrabold'>{plan?.name||'—'}</p></div><div><p className='text-xs font-bold text-gray-500'>Billing Cycle</p><p className='mt-1 font-extrabold'>{cycleLabel(subscription.billing_cycle)}</p></div><div><p className='text-xs font-bold text-gray-500'>Amount</p><p className='mt-1 font-extrabold'>{money(subscription.amount,subscription.currency)} / {subscription.billing_cycle==='annual'?'year':'month'}</p></div><div><p className='text-xs font-bold text-gray-500'>Subscription Status</p><p className='mt-1 font-extrabold'>{statusLabel(subscription.status)}</p></div>
+    <div><p className='text-xs font-bold text-gray-500'>Payment Status</p><p className='mt-1 font-extrabold'>{statusLabel(subscription.payment_status)}</p></div>{subscription.status==='trial'&&<div><p className='text-xs font-bold text-gray-500'>Trial Remaining</p><p className='mt-1 font-extrabold'>{daysRemaining} days</p></div>}<div><p className='text-xs font-bold text-gray-500'>Valid Until</p><p className='mt-1 font-extrabold'>{date(subscription.subscription_end||subscription.trial_end)}</p></div>{subscription.status==='trial'&&<div><p className='text-xs font-bold text-gray-500'>Trial Ends</p><p className='mt-1'>{date(subscription.trial_end)}</p></div>}
+   </div></section>
+   {subscription.status==='trial'&&subscription.payment_status==='pending'&&<div className='rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900'>Your trial is active. Payment status is shown separately and does not remove your trial access.</div>}
+   {data.upgradeQuote?.required&&<section className='rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm sm:p-5'><h4 className='font-extrabold text-amber-900'>Plan Upgrade Required</h4><div className='mt-3 grid gap-3 sm:grid-cols-2'>
+    <div><p className='text-xs font-bold text-amber-800'>Current Plan</p><p className='font-extrabold'>{data.upgradeQuote.current_plan_name} · {money(data.upgradeQuote.current_monthly_equivalent||0,data.upgradeQuote.currency)}/month equivalent</p></div><div><p className='text-xs font-bold text-amber-800'>New Plan</p><p className='font-extrabold'>{data.upgradeQuote.new_plan_name} · {money(data.upgradeQuote.new_monthly_equivalent||0,data.upgradeQuote.currency)}/month equivalent</p></div><div><p className='text-xs font-bold text-amber-800'>Difference</p><p className='font-extrabold'>{money(data.upgradeQuote.monthly_difference||0,data.upgradeQuote.currency)}/month</p></div><div><p className='text-xs font-bold text-amber-800'>Remaining Full Months</p><p className='font-extrabold'>{data.upgradeQuote.remaining_full_months}</p></div><div className='sm:col-span-2'><p className='text-xs font-bold text-amber-800'>Additional Amount</p><p className='text-2xl font-extrabold text-amber-950'>{money(data.upgradeQuote.additional_amount||0,data.upgradeQuote.currency)}</p></div></div>
+    {upi&&<div className='mt-4 flex flex-col gap-2 sm:flex-row'><button type='button' onClick={()=>{const params=new URLSearchParams({pa:upi,pn:payee,am:(data.upgradeQuote?.additional_amount||0).toFixed(2),cu:data.upgradeQuote?.currency||'INR',tn:'GoCanteen Plan Upgrade'});window.location.href='upi://pay?'+params.toString()}} className='min-h-11 flex-1 rounded-lg bg-primary-600 px-4 py-2.5 font-bold text-white'>Pay Upgrade</button><button type='button' onClick={()=>void copyUpi()} className='min-h-11 rounded-lg border bg-white px-4 py-2.5 font-bold text-gray-700'>Copy UPI ID</button></div>}
+    <div className='mt-4 space-y-3'><label className='block text-sm font-semibold'>UTR / Transaction Reference<input value={upgradeReference} onChange={e=>setUpgradeReference(e.target.value)} className='mt-1 w-full rounded-lg border p-3 font-normal' placeholder='Enter after payment'/></label><label className='block text-sm font-semibold'>Payment Date<input type='date' value={upgradeDate} onChange={e=>setUpgradeDate(e.target.value)} className='mt-1 w-full rounded-lg border p-3 font-normal'/></label><textarea value={upgradeNote} onChange={e=>setUpgradeNote(e.target.value)} rows={2} className='w-full rounded-lg border p-3' placeholder='Optional note'/><button type='button' disabled={upgradeSaving||!upgradeReference.trim()} onClick={()=>void submitUpgrade()} className='min-h-11 w-full rounded-lg bg-gray-900 px-4 py-2.5 font-bold text-white disabled:opacity-50'>{upgradeSaving?'Submitting…':'I Have Paid — Submit Upgrade'}</button></div>
+   </section>}
+   {paymentRequired&&<section className='rounded-xl border bg-white p-4 shadow-sm sm:p-5'><h4 className='font-extrabold text-gray-800'>Payment</h4><div className='mt-3 grid gap-3 sm:grid-cols-2'><label className='text-sm font-semibold'>Billing Cycle<select value={cycle} onChange={e=>setCycle(e.target.value as 'monthly'|'annual')} className='mt-1 w-full rounded-lg border p-3'><option value='monthly'>Monthly</option><option value='annual'>Annual</option></select></label><div><p className='text-sm font-semibold'>Amount</p><p className='mt-1 rounded-lg border bg-gray-50 p-3 text-lg font-extrabold'>{money(payableAmount,payablePlan?.currency||subscription.currency)}</p></div></div>
+    <div className='mt-4 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm'><p><span className='font-bold'>Payment Method:</span> {payee}</p><p className='mt-1'><span className='font-bold'>UPI ID:</span> {upi||'Not configured'}</p></div>
+    {subscription.status==='payment_pending'&&subscription.payment_status==='pending'&&<p className='mt-3 text-sm font-semibold text-amber-700'>A payment is pending Super Admin review. Access remains based on the authoritative subscription status.</p>}
+    {canPay&&<div className='mt-4 grid gap-2 sm:grid-cols-2'><button type='button' onClick={launchUpi} className='min-h-11 w-full rounded-lg bg-primary-600 px-4 py-2.5 font-bold text-white'>Pay Now</button><button type='button' onClick={()=>void copyUpi()} disabled={!upi} className='min-h-11 w-full rounded-lg border px-4 py-2.5 font-bold text-gray-700 disabled:opacity-50'>Copy UPI ID</button></div>}
+    {paymentRequired&&<div className='mt-4'><button type='button' onClick={()=>setShowPaidForm(v=>!v)} className='min-h-11 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 font-bold text-gray-800'>{showPaidForm?'Hide Payment Form':'I Have Paid'}</button>{showPaidForm&&<div className='mt-3 space-y-3 rounded-lg border bg-gray-50 p-4'><label className='block text-sm font-semibold'>UTR / Transaction Reference<input value={reference} onChange={e=>setReference(e.target.value)} className='mt-1 w-full rounded-lg border p-3 font-normal' placeholder='Enter UTR / transaction ID'/></label><label className='block text-sm font-semibold'>Payment Date<input type='date' value={paymentDate} onChange={e=>setPaymentDate(e.target.value)} className='mt-1 w-full rounded-lg border p-3 font-normal'/></label><textarea value={note} onChange={e=>setNote(e.target.value)} rows={2} className='w-full rounded-lg border p-3' placeholder='Optional note'/><button type='button' disabled={saving||!reference.trim()} onClick={()=>void submit()} className='min-h-11 w-full rounded-lg bg-gray-900 px-4 py-2.5 font-bold text-white disabled:opacity-50'>{saving?'Submitting…':'Submit Payment'}</button></div>}</div>}
+   </section>}
+   <section className='rounded-xl border bg-white p-4 shadow-sm sm:p-5'><h4 className='font-extrabold text-gray-800'>Payment History</h4><div className='mt-3 space-y-2'>{data.payments.length?data.payments.map(p=><div key={p.id} className='rounded-lg border p-3 text-sm'><div className='flex flex-wrap items-center justify-between gap-2'><p className='font-semibold'>{money(p.amount,p.currency)} · {p.payment_type==='plan_upgrade'?'Plan Upgrade':p.payment_type==='renewal'?'Renewal':'Subscription'} · {p.billing_cycle?cycleLabel(p.billing_cycle):'—'}</p><span className='font-bold'>{statusLabel(p.payment_status)}</span></div><p className='mt-1 text-xs text-gray-500'>Payment date: {date(p.payment_date)} · Reference: {p.transaction_reference||'—'}</p>{p.billing_period_start&&p.billing_period_end&&<p className='text-xs text-gray-500'>Billing period: {date(p.billing_period_start)} – {date(p.billing_period_end)}</p>}<p className='text-xs text-gray-500'>Payment method: {String(p.payment_method_snapshot?.display_name||p.payment_provider||'—')}</p></div>):<p className='text-sm text-gray-500'>No subscription payments yet.</p>}</div></section>
   </>}
  </div>;
 };
