@@ -14,6 +14,7 @@ declare
   v_order_label text;
   v_weekday smallint;
   v_holiday boolean;
+  v_member record;
 begin
   if v_now::time>=time '18:00' then
     for r in
