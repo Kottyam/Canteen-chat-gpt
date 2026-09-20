@@ -91,7 +91,7 @@ export async function loadOwnSubscription(canteenId:string){
  if(subscription?.status==='active'&&subscription.billing_cycle==='annual'){try{upgradeQuote=await getSubscriptionUpgradeQuote(canteenId)}catch{upgradeQuote=null}}
  return{access,subscription:(access.subscription||subscription||null) as CanteenSubscription|null,payments:(payments||[]) as SubscriptionPayment[],plans:(plans||[]) as SubscriptionPlan[],settings:settings as SubscriptionPaymentSettings|null,paymentMethods:(methods||[]) as PaymentMethod[],memberCount:memberCount||0,billingQuote:(billingQuote||null) as SubscriptionBillingQuote|null,upgradeQuote};
 }
-export async function loadPlatformData(){
+export async function loadSuperAdminUsageAudit(startDate:string,endDate:string,canteenId?:string){const{data,error}=await requireClient().rpc('get_super_admin_usage_audit',{p_start_date:startDate,p_end_date:endDate,p_canteen_id:canteenId||null});if(error)throw error;return data as any}\nexport async function loadPlatformData(){
  await syncSubscriptionStatuses(); const c=requireClient();
  const [stats,can,profiles,plans,planRanges,subs,payments,settings,methods]=await Promise.all([
   getPlatformStats(),c.from('canteens').select('id,name,owner_id,created_at,updated_at,archived').order('name'),
