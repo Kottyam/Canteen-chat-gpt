@@ -104,6 +104,7 @@ begin
  if auth.uid() is null or not public.is_active_canteen_admin() then raise exception 'Canteen Admin authorization required'; end if;
  q:=public.get_subscription_upgrade_quote(cid,p_new_plan_id);
  if coalesce((q->>'required')::boolean,false)=false then raise exception 'No plan upgrade payment is required'; end if;
+ if exists(select 1 from public.subscription_payments p join public.canteen_subscriptions s2 on s2.id=p.subscription_id where s2.canteen_id=cid and p.payment_status='pending' and p.payment_type='plan_upgrade') then raise exception 'A plan upgrade payment is already pending review'; end if;
  select * into s from public.canteen_subscriptions where canteen_id=cid for update;
  select * into p from public.subscription_plans where id=p_new_plan_id and active;
  select * into m from public.subscription_payment_methods where id=coalesce(p_payment_method_id,(select id from public.subscription_payment_methods where active and is_default limit 1)) and active;
