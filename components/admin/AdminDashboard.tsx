@@ -14,6 +14,7 @@ const openAdminPush=(payload:Record<string,unknown>)=>{
     const orderFor=typeof payload?.order_for==='string'?payload.order_for:'today';
     setShowNotifications(false);setPushMenuWeekday(null);if(date)setPushOrderContext({date,orderFor});setActiveTab('orders');return;
   }
+  if(screen==='billing_subscription'){setShowNotifications(false);setPushOrderContext(null);setPushMenuWeekday(null);setActiveTab('contacts');return;}
   if(screen==='menu'){
     const weekday=Number(payload?.weekday);setShowNotifications(false);setPushOrderContext(null);if(Number.isInteger(weekday)&&weekday>=0&&weekday<=6)setPushMenuWeekday(weekday);setActiveTab('menu');return;
   }
