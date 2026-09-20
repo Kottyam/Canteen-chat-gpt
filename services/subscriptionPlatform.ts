@@ -9,9 +9,10 @@ export type PricingModel='MEMBER_RANGE'|'FIXED_AMOUNT';
 export type PlanSelectionMode='auto_range'|'manual';
 export type PaymentType='subscription'|'renewal'|'plan_upgrade';
 
+export interface SubscriptionPlanRange{id:string;plan_id:string;min_members:number;max_members:number;monthly_price:number;annual_price:number;created_at:string;updated_at:string;}
 export interface SubscriptionPlan{
  id:string; name:string; description:string|null; pricing_model:PricingModel;
- monthly_price:number; annual_price:number; price:number; billing_period:BillingPeriod;
+ monthly_price:number; annual_price:number; price:number; billing_period:BillingPeriod; billing_cycle:BillingCycle;
  currency:string; trial_days:number; active:boolean; is_default:boolean;
  min_members:number|null; max_members:number|null; created_at:string; updated_at:string;
 }
@@ -39,6 +40,8 @@ export interface SubscriptionPaymentSettings{
  upi_id:string|null; payment_display_name:string|null; payment_instructions:string|null;
  bank_payment_details:string|null; created_at:string; updated_at:string;
 }
+export interface SubscriptionBillingQuote{required:boolean;plan_id?:string;plan_name?:string;pricing_model?:PricingModel;billing_cycle?:BillingCycle;amount?:number;currency?:string;member_count?:number;min_members?:number;max_members?:number;max_exceeded?:boolean;contact_email?:string;message?:string|null;}
+
 export interface UpgradeQuote{
  required:boolean; active_members?:number; current_plan_id?:string; current_plan_name?:string;
  current_monthly_equivalent?:number; new_plan_id?:string; new_plan_name?:string;
@@ -66,41 +69,45 @@ export async function loadCanteenAccessState(canteenId:string):Promise<CanteenAc
 }
 export async function syncSubscriptionStatuses(canteenId?:string){const{error}=await requireClient().rpc('sync_subscription_statuses',{p_canteen_id:canteenId||null});if(error)throw error}
 export async function getPlatformStats(){const{data,error}=await requireClient().rpc('super_admin_platform_stats');if(error)throw error;return data as Record<string,number>}
-export async function setSubscription(canteenId:string,action:string,planId?:string,trialDays?:number,billingCycle:BillingCycle='monthly',planSelectionMode?:PlanSelectionMode){const{data,error}=await requireClient().rpc('super_admin_set_subscription',{p_canteen_id:canteenId,p_action:action,p_plan_id:planId||null,p_trial_days:trialDays??null,p_amount:null,p_currency:null,p_billing_cycle:billingCycle,p_plan_selection_mode:planSelectionMode||null});if(error)throw error;return data as CanteenSubscription}
+export async function setSubscription(canteenId:string,action:string,planId?:string,trialDays?:number,billingCycle:BillingCycle='monthly',planSelectionMode?:PlanSelectionMode,amount?:number){const{data,error}=await requireClient().rpc('super_admin_set_subscription',{p_canteen_id:canteenId,p_action:action,p_plan_id:planId||null,p_trial_days:trialDays??null,p_amount:amount??null,p_currency:null,p_billing_cycle:billingCycle,p_plan_selection_mode:planSelectionMode||null});if(error)throw error;return data as CanteenSubscription}
 export async function submitSubscriptionPayment(subscriptionId:string,billingCycle:BillingCycle,reference:string,paymentDate:string,note?:string,paymentMethodId?:string){const{data,error}=await requireClient().rpc('canteen_create_subscription_payment',{p_subscription_id:subscriptionId,p_billing_cycle:billingCycle,p_payment_date:paymentDate,p_reference:reference,p_note:note||null,p_payment_method_id:paymentMethodId||null});if(error)throw error;return data as SubscriptionPayment}
 export async function submitPlanUpgradePayment(newPlanId:string,paymentDate:string,reference:string,note?:string,paymentMethodId?:string){const{data,error}=await requireClient().rpc('canteen_submit_plan_upgrade_payment',{p_new_plan_id:newPlanId,p_payment_date:paymentDate,p_reference:reference,p_note:note||null,p_payment_method_id:paymentMethodId||null});if(error)throw error;return data as SubscriptionPayment}
 export async function getSubscriptionUpgradeQuote(canteenId:string,newPlanId?:string){const{data,error}=await requireClient().rpc('get_subscription_upgrade_quote',{p_canteen_id:canteenId,p_new_plan_id:newPlanId||null});if(error)throw error;return data as UpgradeQuote}
 export async function reviewSubscriptionPayment(paymentId:string,status:'paid'|'failed',billingCycle?:BillingCycle){const{data,error}=await requireClient().rpc('super_admin_review_subscription_payment',{p_payment_id:paymentId,p_status:status,p_billing_cycle:billingCycle||null});if(error)throw error;return data as SubscriptionPayment}
+export async function getSubscriptionBillingQuote(canteenId:string){const{data,error}=await requireClient().rpc('get_subscription_billing_quote',{p_canteen_id:canteenId});if(error)throw error;return data as SubscriptionBillingQuote}
 export async function loadOwnSubscription(canteenId:string){
  const access=await loadCanteenAccessState(canteenId); const c=requireClient();
- const [{data:subscription,error},{data:payments,paymentError},{data:plans,planError},{data:settings,settingsError},{data:methods,methodsError},{count:memberCount,error:memberError}]=await Promise.all([
+ const [{data:subscription,error},{data:payments,paymentError},{data:plans,planError},{data:settings,settingsError},{data:methods,methodsError},{count:memberCount,error:memberError},{data:billingQuote,billingQuoteError}]=await Promise.all([
   c.from('canteen_subscriptions').select('*').eq('canteen_id',canteenId).maybeSingle(),
   c.from('subscription_payments').select('*').eq('canteen_id',canteenId).order('created_at',{ascending:false}),
   c.from('subscription_plans').select('*').eq('active',true).order('monthly_price'),
   c.from('subscription_payment_settings').select('*').eq('id',true).maybeSingle(),
   c.from('subscription_payment_methods').select('*').eq('active',true).order('is_default',{ascending:false}).order('created_at',{ascending:true}),
-  c.from('profiles').select('id',{count:'exact',head:true}).eq('canteen_id',canteenId).eq('role','employee').eq('status','active')
+  c.from('profiles').select('id',{count:'exact',head:true}).eq('canteen_id',canteenId).eq('role','employee').eq('status','active'),
+  c.rpc('get_subscription_billing_quote',{p_canteen_id:canteenId})
  ]);
- if(error)throw error;if(paymentError)throw paymentError;if(planError)throw planError;if(settingsError)throw settingsError;if(methodsError)throw methodsError;if(memberError)throw memberError;
+ if(error)throw error;if(paymentError)throw paymentError;if(planError)throw planError;if(settingsError)throw settingsError;if(methodsError)throw methodsError;if(memberError)throw memberError;if(billingQuoteError)throw billingQuoteError;
  let upgradeQuote:UpgradeQuote|null=null;
  if(subscription?.status==='active'&&subscription.billing_cycle==='annual'){try{upgradeQuote=await getSubscriptionUpgradeQuote(canteenId)}catch{upgradeQuote=null}}
- return{access,subscription:(access.subscription||subscription||null) as CanteenSubscription|null,payments:(payments||[]) as SubscriptionPayment[],plans:(plans||[]) as SubscriptionPlan[],settings:settings as SubscriptionPaymentSettings|null,paymentMethods:(methods||[]) as PaymentMethod[],memberCount:memberCount||0,upgradeQuote};
+ return{access,subscription:(access.subscription||subscription||null) as CanteenSubscription|null,payments:(payments||[]) as SubscriptionPayment[],plans:(plans||[]) as SubscriptionPlan[],settings:settings as SubscriptionPaymentSettings|null,paymentMethods:(methods||[]) as PaymentMethod[],memberCount:memberCount||0,billingQuote:(billingQuote||null) as SubscriptionBillingQuote|null,upgradeQuote};
 }
 export async function loadPlatformData(){
  await syncSubscriptionStatuses(); const c=requireClient();
- const [stats,can,profiles,plans,subs,payments,settings,methods]=await Promise.all([
+ const [stats,can,profiles,plans,planRanges,subs,payments,settings,methods]=await Promise.all([
   getPlatformStats(),c.from('canteens').select('id,name,owner_id,created_at,updated_at,archived').order('name'),
   c.from('profiles').select('id,employee_code,sr_number,full_name,role,admin_role,status,canteen_id').order('full_name'),
-  c.from('subscription_plans').select('*').order('created_at',{ascending:false}),c.from('canteen_subscriptions').select('*'),
+  c.from('subscription_plans').select('*').order('created_at',{ascending:false}),c.from('subscription_plan_ranges').select('*').order('min_members'),c.from('canteen_subscriptions').select('*'),
   c.from('subscription_payments').select('*').order('created_at',{ascending:false}),
   c.from('subscription_payment_settings').select('*').eq('id',true).maybeSingle(),
   c.from('subscription_payment_methods').select('*').order('created_at',{ascending:false})
  ]);
- for(const x of [can,profiles,plans,subs,payments,settings,methods])if(x.error)throw x.error;
- return{stats,canteens:can.data||[],profiles:profiles.data||[],plans:(plans.data||[]) as SubscriptionPlan[],subscriptions:(subs.data||[]) as CanteenSubscription[],payments:(payments.data||[]) as SubscriptionPayment[],settings:settings.data as SubscriptionPaymentSettings|null,paymentMethods:(methods.data||[]) as PaymentMethod[]};
+ for(const x of [can,profiles,plans,planRanges,subs,payments,settings,methods])if(x.error)throw x.error;
+ return{stats,canteens:can.data||[],profiles:profiles.data||[],plans:(plans.data||[]) as SubscriptionPlan[],planRanges:(planRanges.data||[]) as SubscriptionPlanRange[],subscriptions:(subs.data||[]) as CanteenSubscription[],payments:(payments.data||[]) as SubscriptionPayment[],settings:settings.data as SubscriptionPaymentSettings|null,paymentMethods:(methods.data||[]) as PaymentMethod[]};
 }
-export async function createPlan(input:Pick<SubscriptionPlan,'name'|'description'|'pricing_model'|'min_members'|'max_members'|'monthly_price'|'annual_price'|'currency'|'trial_days'|'active'|'is_default'>){const{data,error}=await requireClient().from('subscription_plans').insert({...input,price:input.monthly_price,billing_period:'monthly'}).select('*').single();if(error)throw error;return data as SubscriptionPlan}
-export async function updatePlan(id:string,input:Partial<Pick<SubscriptionPlan,'name'|'description'|'pricing_model'|'min_members'|'max_members'|'monthly_price'|'annual_price'|'currency'|'trial_days'|'active'|'is_default'>>){const patch={...input,...(input.monthly_price!==undefined?{price:input.monthly_price,billing_period:'monthly'}:{}),updated_at:new Date().toISOString()};const{data,error}=await requireClient().from('subscription_plans').update(patch).eq('id',id).select('*').single();if(error)throw error;return data as SubscriptionPlan}
+export type PlanRangeInput={min_members:number;max_members:number;monthly_price:number;annual_price:number};
+export type PlanUpsertInput={name:string;description:string|null;pricing_model:PricingModel;billing_cycle:BillingCycle;currency:string;monthly_price?:number|null;annual_price?:number|null;ranges:PlanRangeInput[];active:boolean;is_default:boolean};
+export async function createPlan(input:PlanUpsertInput){const{data,error}=await requireClient().rpc('super_admin_upsert_subscription_plan',{p_plan_id:null,p_name:input.name,p_description:input.description,p_pricing_model:input.pricing_model,p_billing_cycle:input.billing_cycle,p_currency:input.currency,p_monthly_price:input.monthly_price??null,p_annual_price:input.annual_price??null,p_ranges:input.ranges,p_active:input.active,p_is_default:input.is_default});if(error)throw error;return data as SubscriptionPlan}
+export async function updatePlan(id:string,input:PlanUpsertInput){const{data,error}=await requireClient().rpc('super_admin_upsert_subscription_plan',{p_plan_id:id,p_name:input.name,p_description:input.description,p_pricing_model:input.pricing_model,p_billing_cycle:input.billing_cycle,p_currency:input.currency,p_monthly_price:input.monthly_price??null,p_annual_price:input.annual_price??null,p_ranges:input.ranges,p_active:input.active,p_is_default:input.is_default});if(error)throw error;return data as SubscriptionPlan}
 export async function setDefaultPlan(id:string){const{data,error}=await requireClient().rpc('super_admin_set_plan_default',{p_plan_id:id});if(error)throw error;return data as SubscriptionPlan}
 export async function deletePlan(id:string){const{error}=await requireClient().rpc('super_admin_delete_plan',{p_plan_id:id});if(error)throw error}
 export async function loadPaymentSettings(){const{data,error}=await requireClient().from('subscription_payment_settings').select('*').eq('id',true).maybeSingle();if(error)throw error;return data as SubscriptionPaymentSettings|null}
