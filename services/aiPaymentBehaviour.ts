@@ -428,8 +428,6 @@ export async function loadAIPaymentBehaviour(): Promise<AIPaymentBehaviour> {
   };
   if (!bills.length) return emptyBehaviour();
 
-  const payments = (paymentSource.bills || []).flatMap(bill => bill.payments || []) as PaymentRow[];
-  const reminders = (paymentSource.bills || []).flatMap(bill => bill.reminders || []) as ReminderRow[];
   const paymentsByBill = new Map<string, PaymentRow[]>();
   payments.forEach(payment => {
     const rows = paymentsByBill.get(payment.bill_id) || [];
