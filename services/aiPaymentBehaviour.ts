@@ -221,6 +221,16 @@ const safeHours = (from: string | null | undefined, to: string | null | undefine
   return Number.isFinite(hours) && hours >= 0 ? hours : null;
 };
 
+const logAIPaymentBehaviourError = (stage: string, error: unknown) => {
+  const value = error as { code?: string; message?: string; details?: string; hint?: string };
+  console.error(`[AI Payment Behaviour] ${stage}`, {
+    code: value?.code ?? null,
+    message: value?.message ?? String(error),
+    details: value?.details ?? null,
+    hint: value?.hint ?? null,
+  });
+};
+
 const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 const median = (values: number[]) => {
   if (!values.length) return null;
@@ -358,25 +368,40 @@ const period = (
 export async function loadAIPaymentBehaviour(): Promise<AIPaymentBehaviour> {
   if (!supabaseEnabled || !supabase) throw new Error('Supabase is not enabled.');
 
-  const { data: businessDate, error: businessDateError } = await supabase.rpc('gocanteen_business_timestamp');
-  if (businessDateError) throw businessDateError;
-  const dateText = String(businessDate || '').slice(0, 10);
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateText)) throw new Error('Could not determine the application business date.');
+  let paymentSource: {
+    business_date: string;
+    bills: Array<BillRow & { payments: PaymentRow[]; reminders: ReminderRow[] }>;
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_ai_payment_behaviour_data');
+    if (error) {
+      logAIPaymentBehaviourError('secure read RPC failed', error);
+      throw error;
+    }
+    if (!data || typeof data !== 'object') {
+      throw new Error('AI payment behaviour read returned an empty response.');
+    }
+    paymentSource = data as typeof paymentSource;
+  } catch (error) {
+    if (!(error && typeof error === 'object' && 'code' in error)) {
+      logAIPaymentBehaviourError('secure read RPC failed', error);
+    }
+    throw error;
+  }
+
+  const dateText = String(paymentSource.business_date || '').slice(0, 10);
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateText)) {
+    throw new Error('Could not determine the application business date.');
+  }
 
   const business = new Date(`${dateText}T00:00:00`);
   const currentMonth = monthKey(business.getFullYear(), business.getMonth() + 1);
   const previousMonth = monthOffset(currentMonth, -1);
 
-  const { data: billsData, error: billsError } = await supabase
-    .from('monthly_bills')
-    .select('id,employee_id,bill_month,bill_year,total,published,published_at,member_name_snapshot')
-    .eq('published', true)
-    .not('published_at', 'is', null)
-    .order('bill_year', { ascending: true })
-    .order('bill_month', { ascending: true });
-  if (billsError) throw billsError;
-
-  const bills = (billsData || []) as BillRow[];
+  const bills = (paymentSource.bills || []).map(({ payments: _payments, reminders: _reminders, ...bill }) => bill as BillRow);
+  const payments = (paymentSource.bills || []).flatMap(bill => bill.payments || []) as PaymentRow[];
+  const reminders = (paymentSource.bills || []).flatMap(bill => bill.reminders || []) as ReminderRow[];
   const availableMonths = [...new Set(bills.map(b => monthKey(Number(b.bill_year), Number(b.bill_month))))].sort();
   const historicalFromMonth = availableMonths[0] || currentMonth;
   const historicalToMonth = availableMonths[availableMonths.length - 1] || currentMonth;
@@ -403,16 +428,8 @@ export async function loadAIPaymentBehaviour(): Promise<AIPaymentBehaviour> {
   };
   if (!bills.length) return emptyBehaviour();
 
-  const billIds = bills.map(b => b.id);
-  const [{ data: paymentsData, error: paymentsError }, { data: remindersData, error: remindersError }] = await Promise.all([
-    supabase.from('bill_payments').select('id,bill_id,employee_id,amount,status,confirmed_at,approved_at,created_at,updated_at,request_sequence').in('bill_id', billIds).order('created_at',{ascending:true}),
-    supabase.from('payment_reminders').select('id,bill_id,payment_id,employee_id,sent_at').in('bill_id', billIds).order('sent_at',{ascending:true})
-  ]);
-  if (paymentsError) throw paymentsError;
-  if (remindersError) throw remindersError;
-
-  const payments = (paymentsData || []) as PaymentRow[];
-  const reminders = (remindersData || []) as ReminderRow[];
+  const payments = (paymentSource.bills || []).flatMap(bill => bill.payments || []) as PaymentRow[];
+  const reminders = (paymentSource.bills || []).flatMap(bill => bill.reminders || []) as ReminderRow[];
   const paymentsByBill = new Map<string, PaymentRow[]>();
   payments.forEach(payment => {
     const rows = paymentsByBill.get(payment.bill_id) || [];
