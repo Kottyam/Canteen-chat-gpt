@@ -197,15 +197,16 @@ jobs:
               anchor = "    buildTypes {"
               if anchor not in text:
                   raise SystemExit("Could not find buildTypes block in android/app/build.gradle")
-              signing = """    signingConfigs {
-                  release {
-                      storeFile file("gocanteen-upload-key.jks")
-                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
-                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
-                  }
-              }
-"""
+              signing = (
+                  "    signingConfigs {\n"
+                  "        release {\n"
+                  "            storeFile file(\\\"gocanteen-upload-key.jks\\\")\n"
+                  "            storePassword System.getenv(\\\"ANDROID_KEYSTORE_PASSWORD\\\")\n"
+                  "            keyAlias System.getenv(\\\"ANDROID_KEY_ALIAS\\\")\n"
+                  "            keyPassword System.getenv(\\\"ANDROID_KEY_PASSWORD\\\")\n"
+                  "        }\n"
+                  "    }\n"
+              )
               text = text.replace(anchor, signing + anchor, 1)
           build_anchor = "    buildTypes {"
           build_pos = text.find(build_anchor)
