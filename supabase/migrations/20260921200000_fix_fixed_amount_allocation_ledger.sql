@@ -9,6 +9,32 @@ create index if not exists employee_food_fixed_allocations_lookup_idx
  on private.employee_food_fixed_allocations(employee_id,canteen_id,calendar_month,effective_at);
 revoke all on table private.employee_food_fixed_allocations from public,anon,authenticated;
 
+insert into private.employee_food_fixed_allocations(
+ employee_id,canteen_id,calendar_month,allocation_amount,effective_at,source,source_setting_id
+)
+select
+ p.id,p.canteen_id,date_trunc('month',current_date)::date,
+ greatest(0,coalesce(s.fixed_monthly_amount,g.fixed_monthly_amount,0)),
+ greatest(
+   make_timestamptz(extract(year from date_trunc('month',current_date))::int,extract(month from date_trunc('month',current_date))::int,1,0,0,0,'Asia/Kolkata'),
+   coalesce(s.updated_at,g.updated_at,now())
+ ),
+ 'legacy_current_setting',coalesce(s.id,g.id)
+from public.profiles p
+left join public.employee_food_arrangement_settings s
+ on s.canteen_id=p.canteen_id and s.employee_id=p.id
+left join public.employee_food_arrangement_settings g
+ on g.canteen_id=p.canteen_id and g.employee_id is null
+where p.role='employee' and p.status='active' and p.canteen_id is not null
+  and coalesce(s.contribution_mode,g.contribution_mode,'percentage')='fixed_amount'
+  and greatest(0,coalesce(s.fixed_monthly_amount,g.fixed_monthly_amount,0))>0
+  and not exists(
+    select 1 from private.employee_food_fixed_allocations a
+    where a.employee_id=p.id
+      and a.canteen_id=p.canteen_id
+      and a.calendar_month=date_trunc('month',current_date)::date
+  );
+
 create or replace function private.fixed_allocation_total(p_employee_id uuid,p_canteen_id uuid,p_month_start date,p_as_of timestamptz)
 returns table(total_allocated numeric,first_allocation_at timestamptz,has_allocation boolean)
 language plpgsql security definer set search_path='' as $$
