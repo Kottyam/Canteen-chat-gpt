@@ -162,12 +162,79 @@ jobs:
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
       - name: Sync Capacitor
         run: npx cap sync android
+      - name: Configure Android release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          raw = os.environ["ANDROID_KEYSTORE_BASE64"]
+          lines = [line.strip() for line in raw.splitlines()
+                   if "BEGIN CERTIFICATE" not in line and "END CERTIFICATE" not in line]
+          data = base64.b64decode("".join(lines))
+          if len(data) < 1000:
+              raise SystemExit("Decoded Android keystore is unexpectedly small.")
+          Path("android/app/gocanteen-upload-key.jks").write_bytes(data)
+          print(f"Android signing keystore decoded: {len(data)} bytes")
+          PY
+          chmod 600 android/app/gocanteen-upload-key.jks
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+          if "signingConfigs {\\n        release {" not in text:
+              anchor = "    buildTypes {"
+              if anchor not in text:
+                  raise SystemExit("Could not find buildTypes block in android/app/build.gradle")
+              signing = """    signingConfigs {
+                  release {
+                      storeFile file("gocanteen-upload-key.jks")
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                  }
+              }
+"""
+              text = text.replace(anchor, signing + anchor, 1)
+          build_anchor = "    buildTypes {"
+          build_pos = text.find(build_anchor)
+          release_pos = text.find("        release {", build_pos)
+          if release_pos < 0:
+              raise SystemExit("Could not find release build type in android/app/build.gradle")
+          release_body_pos = release_pos + len("        release {")
+          if "signingConfig signingConfigs.release" not in text[release_pos:text.find("        }", release_body_pos)]:
+              text = text[:release_body_pos] + "\n            signingConfig signingConfigs.release" + text[release_body_pos:]
+          path.write_text(text)
+          PY
       - name: Make Gradle executable
         run: chmod +x android/gradlew
-      - name: Build Debug APK
-        run: cd android && ./gradlew assembleDebug
-      - name: Upload APK
+      - name: Build signed Release APK and AAB
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: cd android && ./gradlew assembleRelease bundleRelease
+      - name: Verify signed Release APK
+        run: |
+          set -e
+          test -f android/app/build/outputs/apk/release/app-release.apk
+          test -f android/app/build/outputs/bundle/release/app-release.aab
+          keytool -printcert -jarfile android/app/build/outputs/apk/release/app-release.apk
+      - name: Upload signed Android artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: GoCanteen-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: GoCanteen-signed-release
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/bundle/release/app-release.aab
