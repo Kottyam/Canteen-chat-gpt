@@ -44,6 +44,13 @@ jobs:
           fi
       - name: Add Android platform
         run: npx cap add android
+      - name: Add Android Developer Verification registration
+        run: |
+          set -euo pipefail
+          mkdir -p android/app/src/main/assets
+          printf '%s\\n' 'CWX2YMMN6EMN6AAAAAAAAAAAAA' > android/app/src/main/assets/adi-registration.properties
+          test -f android/app/src/main/assets/adi-registration.properties
+          grep -Fx 'CWX2YMMN6EMN6AAAAAAAAAAAAA' android/app/src/main/assets/adi-registration.properties
       - name: Configure Firebase Android client
         env:
           FIREBASE_ANDROID_GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_ANDROID_GOOGLE_SERVICES_JSON }}
