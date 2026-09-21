@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p android/app/src/main/assets
-          printf '%s\\n' 'CWX2YMMN6EMN6AAAAAAAAAAAAA' > android/app/src/main/assets/adi-registration.properties
+          printf '%s\n' 'CWX2YMMN6EMN6AAAAAAAAAAAAA' > android/app/src/main/assets/adi-registration.properties
           test -f android/app/src/main/assets/adi-registration.properties
           grep -Fx 'CWX2YMMN6EMN6AAAAAAAAAAAAA' android/app/src/main/assets/adi-registration.properties
       - name: Configure Firebase Android client
