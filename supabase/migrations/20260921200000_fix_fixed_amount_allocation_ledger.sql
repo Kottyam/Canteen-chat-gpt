@@ -17,7 +17,7 @@ begin
  select count(*),coalesce(sum(allocation_amount),0),min(effective_at) into v_count,v_total,v_first
  from private.employee_food_fixed_allocations
  where employee_id=p_employee_id and canteen_id=p_canteen_id and calendar_month=p_month_start and effective_at<=p_as_of;
- if p_month_start=date_trunc('month',v_current_month)::date and v_count=0 then
+ if p_month_start>=date_trunc('month',v_current_month)::date and v_count=0 then
    select coalesce(s.contribution_mode,g.contribution_mode,'percentage'),coalesce(s.fixed_monthly_amount,g.fixed_monthly_amount,0),coalesce(s.updated_at,g.updated_at)
    into v_mode,v_fixed,v_updated_at
    from public.profiles p
