@@ -10,11 +10,12 @@ interface Props{
   orderDate:string;
   adjustments:EmployeeAdjustment[];
   onViewOrder:()=>void;
+  canCancel?:boolean;
 }
 
 const money=(value:number)=>value.toFixed(2);
 
-const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjustments,onViewOrder})=>{
+const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjustments,onViewOrder,canCancel=true})=>{
   const{menuItems}=useData();
   const financial=useMemo(()=>orderFinancialPresentation(order),[order]);
   const memberItems=useMemo(()=>Object.keys(order.items||{}).filter(code=>order.items?.[code]).map(code=>({
@@ -34,7 +35,7 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
   const adjustmentCompanyContribution=useMemo(()=>adjustmentPresentation.reduce((sum,row)=>sum+row.companyContribution,0),[adjustmentPresentation]);
   const companyContribution=financial.companyContribution+adjustmentCompanyContribution;
   const memberTotal=financial.grossMemberFood+financial.grossGuestFood+adminAddedTotal-companyContribution;
-  const title=orderFor==='tomorrow'?'Tomorrow’s Member Order':'Today’s Member Order';
+  const hasMemberItems=Object.keys(order.items||{}).some(code=>Boolean(order.items?.[code]));const title=hasMemberItems?(orderFor==='tomorrow'?'Tomorrow’s Member Order':'Today’s Member Order'):(orderFor==='tomorrow'?'Tomorrow’s Activity':'Today’s Activity');
 
   return <div className="mt-5 rounded-xl border bg-gray-50 p-4 sm:p-5">
     <div className="flex flex-col gap-1 border-b pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
@@ -93,7 +94,7 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
       </section>
     </div>
 
-    <button type="button" onClick={onViewOrder} className="mt-4 w-full rounded-lg bg-red-600 px-4 py-3 font-semibold text-white">View / Cancel Order</button>
+    {canCancel&&<button type="button" onClick={onViewOrder} className="mt-4 w-full rounded-lg bg-red-600 px-4 py-3 font-semibold text-white">View / Cancel Order</button>}
   </div>;
 };
 
