@@ -60,6 +60,20 @@ jobs:
           PY
           grep -F 'compileSdkVersion = 36' android/variables.gradle
           grep -F 'targetSdkVersion = 36' android/variables.gradle
+      - name: Set Play Store version code 355
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/build.gradle')
+          text = path.read_text()
+          if 'versionCode 1' not in text:
+              raise SystemExit('Expected generated Android versionCode 1 was not found in android/app/build.gradle')
+          text = text.replace('versionCode 1', 'versionCode 355', 1)
+          path.write_text(text)
+          print('Android versionCode set to 355')
+          PY
+          grep -F 'versionCode 355' android/app/build.gradle
       - name: Add Android Developer Verification registration
         run: |
           set -euo pipefail
