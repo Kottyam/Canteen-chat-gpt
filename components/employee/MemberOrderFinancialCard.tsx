@@ -31,10 +31,10 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
     total:Number(order.guestItemPrices?.[code]??menuItems.find(i=>i.itemCode===code)?.unitPrice??0)*Math.max(1,Number(order.guestItemQuantities?.[code]||1))
   })),[order,menuItems]);
   const adjustmentPresentation=useMemo(()=>adjustments.map(adjustment=>({...adjustment,...adjustmentFinancialPresentation(adjustment)})),[adjustments]);
-  const adminAddedTotal=useMemo(()=>adjustmentPresentation.reduce((sum,row)=>sum+row.adminAddedAmount,0),[adjustmentPresentation]);
+  const adminAddedTotal=useMemo(()=>adjustments.reduce((sum,row)=>sum+Number(row.amount||0),0),[adjustments]);
   const adjustmentCompanyContribution=useMemo(()=>adjustmentPresentation.reduce((sum,row)=>sum+row.companyContribution,0),[adjustmentPresentation]);
   const companyContribution=financial.companyContribution+adjustmentCompanyContribution;
-  const memberTotal=financial.grossMemberFood+financial.grossGuestFood+adminAddedTotal-companyContribution;
+  const memberTotal=financial.memberPayable+financial.grossGuestFood+adminAddedTotal-adjustmentCompanyContribution;
   const hasMemberItems=Object.keys(order.items||{}).some(code=>Boolean(order.items?.[code]));const title=hasMemberItems?(orderFor==='tomorrow'?'Tomorrow’s Member Order':'Today’s Member Order'):(orderFor==='tomorrow'?'Tomorrow’s Activity':'Today’s Activity');
 
   return <div className="mt-5 rounded-xl border bg-gray-50 p-4 sm:p-5">
@@ -77,7 +77,7 @@ const MemberOrderFinancialCard:React.FC<Props>=({order,orderFor,orderDate,adjust
           <span className="text-lg font-bold text-gray-900">₹{money(adminAddedTotal)}</span>
         </div>
         {adjustmentPresentation.length>0&&<div className="mt-2 space-y-2 text-sm text-gray-600">
-          {adjustmentPresentation.map(row=><div key={row.id} className="flex items-start justify-between gap-3"><span className="min-w-0 break-words">{row.description?.trim()||'Added Amount'}</span><span className="shrink-0 font-semibold">₹{money(row.adminAddedAmount)}</span></div>)}
+          {adjustmentPresentation.map(row=><div key={row.id} className="flex items-start justify-between gap-3"><span className="min-w-0 break-words">{row.description?.trim()||'Added Amount'}</span><span className="shrink-0 font-semibold">₹{money(Number(row.amount||0))}</span></div>)}
         </div>}
       </section>}
 
