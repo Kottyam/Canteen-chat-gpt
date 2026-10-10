@@ -53,14 +53,18 @@ jobs:
           text = path.read_text()
           if 'compileSdkVersion = 35' not in text or 'targetSdkVersion = 35' not in text:
               raise SystemExit('Expected Capacitor Android API 35 defaults were not found in android/variables.gradle')
+          if 'minSdkVersion = 23' not in text:
+              raise SystemExit('Expected Capacitor minSdkVersion = 23 default was not found in android/variables.gradle')
           text = text.replace('compileSdkVersion = 35', 'compileSdkVersion = 36', 1)
           text = text.replace('targetSdkVersion = 35', 'targetSdkVersion = 36', 1)
+          text = text.replace('minSdkVersion = 23', 'minSdkVersion = 24', 1)
           path.write_text(text)
-          print('Android compileSdkVersion and targetSdkVersion set to 36')
+          print('Android compileSdkVersion/targetSdkVersion set to 36 and minSdkVersion set to 24')
           PY
           grep -F 'compileSdkVersion = 36' android/variables.gradle
           grep -F 'targetSdkVersion = 36' android/variables.gradle
-      - name: Set Play Store version code 356
+          grep -F 'minSdkVersion = 24' android/variables.gradle
+      - name: Set Play Store version code 357
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -69,11 +73,11 @@ jobs:
           text = path.read_text()
           if 'versionCode 1' not in text:
               raise SystemExit('Expected generated Android versionCode 1 was not found in android/app/build.gradle')
-          text = text.replace('versionCode 1', 'versionCode 356', 1)
+          text = text.replace('versionCode 1', 'versionCode 357', 1)
           path.write_text(text)
-          print('Android versionCode set to 356')
+          print('Android versionCode set to 357')
           PY
-          grep -F 'versionCode 356' android/app/build.gradle
+          grep -F 'versionCode 357' android/app/build.gradle
       - name: Add Android Developer Verification registration
         run: |
           set -euo pipefail
