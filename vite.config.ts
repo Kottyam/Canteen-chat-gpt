@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
         VitePWA({
           registerType: 'autoUpdate',
           injectRegister: null,
-          includeAssets: ['apple-touch-icon.png', 'gocanteen-icon.png'],
+          includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'gocanteen-icon.png'],
           manifest: {
             id: '/',
             name: 'Go Canteen',
