@@ -13,24 +13,25 @@
     "android:build": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
+    "@capacitor/app": "^7.1.0",
+    "@capacitor/app-launcher": "^7.0.0",
+    "@capacitor/browser": "^7.0.0",
+    "@capacitor/core": "^7.4.0",
+    "@capacitor/filesystem": "^7.1.0",
+    "@capacitor/push-notifications": "7.0.7",
+    "@capacitor/share": "^7.0.0",
+    "@supabase/supabase-js": "^2.57.0",
+    "jspdf": "^3.0.3",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "@capacitor/core": "^7.4.0",
-    "@capacitor/app": "^7.1.0",
-    "@capacitor/browser": "^7.0.0",
-    "@capacitor/filesystem": "^7.1.0",
-    "@capacitor/share": "^7.0.0",
-    "@capacitor/app-launcher": "^7.0.0",
-    "@capacitor/push-notifications": "7.0.7",
-    "jspdf": "^3.0.3",
-    "@supabase/supabase-js": "^2.57.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.4.0",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "@capacitor/cli": "^7.4.0"
+    "vite-plugin-pwa": "^2.0.0"
   }
 }
