@@ -27,9 +27,17 @@ export default defineConfig(({ mode }) => {
             orientation: 'portrait',
             theme_color: '#059669',
             background_color: '#ffffff',
+            prefer_related_applications: false,
+            related_applications: [
+              {
+                platform: 'play',
+                id: 'com.gocanteen.app',
+                url: 'https://play.google.com/store/apps/details?id=com.gocanteen.app'
+              }
+            ],
             icons: [
-              { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-              { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+              { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+              { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
               { src: '/maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
             ]
           },
