@@ -2,25 +2,30 @@ import { useEffect, useState } from 'react';
 import { CanteenBillingSettings, DEFAULT_BILLING_SETTINGS } from '../supabase/functions/_shared/poolingBilling';
 import { loadBillingSettings } from '../services/billingSettings';
 
-let cache: CanteenBillingSettings | null = null;
-let inflight: Promise<CanteenBillingSettings> | null = null;
-const listeners = new Set<(s: CanteenBillingSettings) => void>();
+interface State { settings: CanteenBillingSettings; loaded: boolean; error: string | null }
+let cache: State | null = null;
+let inflight: Promise<State> | null = null;
+const listeners = new Set<(s: State) => void>();
 
-export function publishBillingSettings(s: CanteenBillingSettings) { cache = s; listeners.forEach(l => l(s)); }
+const emit = (s: State) => { cache = s; listeners.forEach(l => l(s)); };
+export function publishBillingSettings(settings: CanteenBillingSettings) { emit({ settings, loaded: true, error: null }); }
 export function refreshBillingSettings() {
-  inflight = inflight || loadBillingSettings().then(s => { inflight = null; publishBillingSettings(s); return s; });
+  inflight = inflight || loadBillingSettings().then(r => {
+    inflight = null;
+    // On a transient error keep the last successfully loaded settings (never flip pooling -> standard).
+    const s: State = r.error && cache?.loaded && !cache.error ? { ...cache, error: r.error } : { settings: r.settings, loaded: true, error: r.error };
+    emit(s); return s;
+  });
   return inflight;
 }
 
-/** Per-canteen billing settings; standard/manual until loaded or when absent. */
+/** Per-canteen billing settings; standard/manual when no settings exist. */
 export function useBillingSettings() {
-  const [settings, setSettings] = useState<CanteenBillingSettings>(cache || DEFAULT_BILLING_SETTINGS);
-  const [loaded, setLoaded] = useState(Boolean(cache));
+  const [state, setState] = useState<State>(cache || { settings: DEFAULT_BILLING_SETTINGS, loaded: false, error: null });
   useEffect(() => {
-    const l = (s: CanteenBillingSettings) => { setSettings(s); setLoaded(true); };
-    listeners.add(l);
+    listeners.add(setState);
     void refreshBillingSettings();
-    return () => { listeners.delete(l); };
+    return () => { listeners.delete(setState); };
   }, []);
-  return { settings, loaded, pooling: settings.billingModel === 'pooling' };
+  return { settings: state.settings, loaded: state.loaded, error: state.error, pooling: state.settings.billingModel === 'pooling' };
 }

@@ -88,6 +88,10 @@ drop policy if exists bill_auto_send_attempts_admin_select on public.bill_auto_s
 create policy bill_auto_send_attempts_admin_select on public.bill_auto_send_attempts for select to authenticated
   using (canteen_id = public.current_canteen_id() and public.is_admin_user());
 revoke insert, update, delete on public.bill_auto_send_attempts from anon, authenticated;
+-- explicit grants (do not rely on platform default privileges); RLS restricts rows
+grant select on public.canteen_billing_settings, public.pooling_bill_runs, public.pooling_bill_lines, public.bill_auto_send_attempts to authenticated;
+revoke all on public.canteen_billing_settings, public.pooling_bill_runs, public.pooling_bill_lines, public.bill_auto_send_attempts from anon;
+grant all on public.canteen_billing_settings, public.pooling_bill_runs, public.pooling_bill_lines, public.bill_auto_send_attempts to service_role;
 
 -- Private schema (not exposed through the Data API) for internal helpers.
 create schema if not exists gocanteen_private;
@@ -134,9 +138,10 @@ declare v_run public.pooling_bill_runs%rowtype; v_line public.pooling_bill_lines
   v_bill public.monthly_bills%rowtype; v_now timestamptz := clock_timestamp(); v_id uuid := gen_random_uuid(); v_start date; v_end date;
 begin
   select * into v_run from public.pooling_bill_runs where id=p_run; if not found then raise exception 'Run not found'; end if;
-  select * into v_line from public.pooling_bill_lines where run_id=p_run and employee_id=p_employee; if not found then raise exception 'Line not found'; end if;
-  if v_line.monthly_bill_id is not null then select * into v_bill from public.monthly_bills where id=v_line.monthly_bill_id; return v_bill; end if;
+  -- same lock key as publish_employee_bill, taken BEFORE reading the line so concurrent callers serialize
   perform pg_advisory_xact_lock(hashtext(format('gocanteen-bill-publish:%s:%s:%s:%s',v_run.canteen_id,p_employee,v_run.bill_month,v_run.bill_year)));
+  select * into v_line from public.pooling_bill_lines where run_id=p_run and employee_id=p_employee for update; if not found then raise exception 'Line not found'; end if;
+  if v_line.monthly_bill_id is not null then select * into v_bill from public.monthly_bills where id=v_line.monthly_bill_id; return v_bill; end if;
   if exists(select 1 from public.monthly_bills where employee_id=p_employee and bill_month=v_run.bill_month and bill_year=v_run.bill_year) then
     raise exception 'A bill already exists for this member and month; not overwriting'; end if;
   if v_line.total_paise <= 0 then raise exception 'No payable amount available'; end if;

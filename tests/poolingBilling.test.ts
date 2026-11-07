@@ -44,20 +44,33 @@ test('above threshold excludes all absent days', () => {
 });
 
 test('cancelled and guest-only orders are not attendance; duplicate orders same date count once', () => {
+  const others = range(3, 30);
   const r = computePoolingBills(base({ messCutMinDays: 2, expenses: [{ date: d(1), amountPaise: 1000 }, { date: d(2), amountPaise: 1000 }],
-    orders: [...orders('A', [1, 2]), ...orders('A', [1]), ...orders('B', [1], { status: 'cancelled' }), ...orders('B', [2], { guestOnly: true })] }));
-  assert.equal(line(r, 'A').attendedDays, 2);
-  assert.equal(line(r, 'B').absentDays, 2); assert.equal(line(r, 'B').sharePaise, 0);
-  assert.equal(line(r, 'A').sharePaise, 2000);
+    orders: [...orders('A', [1, 2, ...others]), ...orders('A', [1]), ...orders('B', others), ...orders('B', [1], { status: 'cancelled' }), ...orders('B', [2], { guestOnly: true })] }));
+  assert.equal(line(r, 'A').attendedDays, 30);
+  assert.equal(line(r, 'B').absentDays, 2); assert.equal(line(r, 'B').messCutApplied, true);
+  assert.equal(line(r, 'A').sharePaise, 2000); assert.equal(line(r, 'B').sharePaise, 0);
 });
 
-test('closed days / holidays never create absences; non-operating expense = overhead by member-days', () => {
-  const r = computePoolingBills(base({ messCutMinDays: 1, holidayDates: [d(3)], expenses: [{ date: d(3), amountPaise: 900 }, { date: d(4), amountPaise: 0 }],
-    orders: [...orders('A', [1, 2]), ...orders('B', [1, 2, 3])] }));
-  assert.deepEqual(r.operatingDays, [d(1), d(2)]);
-  assert.equal(line(r, 'A').absentDays, 0);
+test('closure is NOT inferred from no orders: a day nobody ordered is a no-order day for everyone', () => {
+  const r = computePoolingBills(base({ messCutMinDays: 1, expenses: [{ date: d(15), amountPaise: 600 }],
+    orders: [...orders('A', range(1, 30).filter(n => n !== 15)), ...orders('B', range(1, 30).filter(n => n !== 15))] }));
+  assert.equal(r.operatingDays.length, 30);
+  assert.equal(line(r, 'A').absentDays, 1); assert.equal(line(r, 'A').messCutApplied, true);
+  // nobody chargeable on d15 -> its expense becomes monthly overhead shared by chargeable days (29 each)
+  assert.equal(line(r, 'A').sharePaise + line(r, 'B').sharePaise, 600);
+  assert.ok(r.warnings.some(w => w.includes('2026-09-15')));
+});
+
+test('declared holidays / weekly offs are not no-order days; holiday expense = overhead by member-days', () => {
+  const sundays = [6, 13, 20, 27];
+  const work = range(1, 30).filter(n => n !== 3 && !sundays.includes(n));
+  const r = computePoolingBills(base({ messCutMinDays: 1, holidayDates: [d(3)], recurringWeekdays: [0], expenses: [{ date: d(3), amountPaise: 900 }],
+    orders: [...orders('A', work), ...orders('B', work)] }));
+  assert.equal(r.operatingDays.length, 25);
+  assert.equal(line(r, 'A').absentDays, 0); assert.equal(line(r, 'A').messCutApplied, false);
   assert.equal(r.overheadExpensePaise, 900);
-  assert.equal(line(r, 'A').sharePaise + line(r, 'B').sharePaise, 900);
+  assert.equal(line(r, 'A').sharePaise, 450); assert.equal(line(r, 'B').sharePaise, 450);
 });
 
 test('no-order month: nobody charged, expense surfaced as unallocated', () => {
@@ -70,11 +83,18 @@ test('zero expense -> zero shares', () => {
   assert.equal(r.expenseTotalPaise, 0); assert.equal(sum(r), 0);
 });
 
-test('all members cut / no eligible chargeable days -> unallocated, cut members not charged', () => {
-  const r = computePoolingBills(base({ messCutMinDays: 1, expenses: [{ date: d(10), amountPaise: 500 }], orders: [...orders('A', [1]), ...orders('B', [2])] }));
-  // d10 is not operating -> overhead split over chargeable days (A:1, B:1)
-  assert.equal(sum(r) + r.unallocatedPaise, 500);
-  assert.equal(line(r, 'A').chargeableDays, 1);
+test('all members cut with zero chargeable days -> whole expense unallocated, nobody charged', () => {
+  const r = computePoolingBills(base({ messCutMinDays: 6, expenses: [{ date: d(10), amountPaise: 500 }], orders: [] }));
+  assert.equal(line(r, 'A').messCutApplied, true); assert.equal(line(r, 'A').chargeableDays, 0);
+  assert.equal(sum(r), 0); assert.equal(r.unallocatedPaise, 500);
+});
+
+test('threshold is inclusive: default 6 no-order days triggers, 5 does not', () => {
+  const mk = (absent: number) => computePoolingBills(base({ members: [{ memberId: 'A' }], expenses: daily, orders: orders('A', range(1, 30 - absent)) }));
+  assert.equal(line(mk(5), 'A').messCutApplied, false); assert.equal(line(mk(5), 'A').sharePaise, 90000);
+  assert.equal(line(mk(6), 'A').messCutApplied, true);
+  // single member cut: their absent days have nobody chargeable -> overhead back onto their chargeable days (sole member)
+  assert.equal(line(mk(6), 'A').sharePaise, 90000);
 });
 
 test('rounding: total distributed exactly with stable largest remainder', () => {

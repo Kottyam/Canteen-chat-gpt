@@ -4,10 +4,9 @@
 // All money is integer paise. Dates are India business dates (YYYY-MM-DD).
 //
 // Accounting model (documented in docs/POOLING_BILLING.md):
-//  * Operating day = a day of the month that is not a declared holiday / recurring
-//    weekly off AND on which at least one member placed a consumed (active,
-//    non-guest-only) order. Days nobody ate are treated as closed, so they can
-//    never create spurious mess-cut absences.
+//  * Operating day = every day of the month that is NOT an admin-declared holiday
+//    or recurring weekly off (Holiday Management). Closure is never inferred from
+//    "nobody ordered": a day without orders is a no-order day for every member.
 //  * A member's window = operating days between activeFrom and activeTo (inclusive).
 //  * absentDays = window operating days without any consumed order of that member
 //    (cumulative, need not be consecutive). Many orders on one date = 1 day.
@@ -15,9 +14,9 @@
 //              absentDays <  threshold  -> no exclusion; all window days chargeable.
 //  * Each dated expense on an operating day is split equally among members
 //    chargeable on that date (so a cut member's day is pooled by the others).
-//  * Expenses dated on a non-operating day (bulk purchases, closed days) and
-//    dated expenses on an operating day where nobody is chargeable are monthly
-//    overhead, apportioned by chargeable member-days for the whole month.
+//  * Expenses dated on a holiday / weekly off (e.g. bulk purchases) and dated
+//    expenses on a day where nobody is chargeable are monthly overhead,
+//    apportioned by chargeable member-days for the whole month.
 //  * If there are no chargeable member-days at all, nothing is charged and the
 //    whole amount is reported as `unallocatedPaise` (never divided by zero and
 //    never charged to cut members).
@@ -179,9 +178,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
   for (let d = 1; d <= daysInMonth(year, month); d++) {
     const date = `${year}-${pad(month)}-${pad(d)}`;
     if (holidays.has(date) || weekly.has(weekdayOf(date))) continue;
-    let anyone = false;
-    for (const m of members) if (attended.get(m.memberId)?.has(date)) { anyone = true; break; }
-    if (anyone) operating.push(date);
+    operating.push(date);
   }
   const opSet = new Set(operating);
   // per-member chargeable dates
@@ -235,7 +232,8 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     l.overheadSharePaise = l.sharePaise - l.dailySharePaise;
     l.totalPaise = l.sharePaise + l.adminAddedPaise;
   }
-  if (!operating.length && total > 0) warnings.push('No operating days (no consumed orders) in this month.');
+  if (!operating.length && total > 0) warnings.push('Every day of this month is marked as a holiday.');
+  for (const date of operating) if (!members.some(m => attended.get(m.memberId)?.has(date))) { warnings.push(`No member ordered on ${date}; it is still counted as a no-order day for everyone (mark it as a holiday if the mess was closed).`); }
   return {
     year, month, periodStart: start, periodEnd: end, messCutMinDays: threshold, operatingDays: operating,
     expenseTotalPaise: total, dailyExpensePaise: daily, overheadExpensePaise: overhead,
