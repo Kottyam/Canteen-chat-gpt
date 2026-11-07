@@ -257,85 +257,153 @@ test('db integration', { skip }, async (t) => {
     assert.equal((await as(A).from('pooling_member_periods').select('employee_id')).data.length, 0);
     assert.ok((await as(O1).from('pooling_member_periods').select('employee_id')).data.length >= 1);
   });
-  await t.test('special priced items (Pooling): server snapshot, tamper ignored, qty keeps price, cancel excluded, guest -> orderer, publish adds specials', async () => {
-    if (root(`select to_regclass('public.canteen_guest_order_settings') is not null`) !== 't') return;
+  await t.test('special priced items (Pooling): weekly opt-in via RPC, daily TRUE/FALSE/NULL precedence, server snapshot, tamper/id-swap/GUC ignored, reschedule re-prices', async () => {
+    if (root(`select to_regclass('public.pooling_special_items') is not null`) !== 't') return;
     const asAdm = (sub: string, q: string) => root(`select set_config('request.jwt.claims','{"role":"authenticated","sub":"${sub}"}',false); ${q}`);
-    root(`insert into public.menu_prices(canteen_id,item_code,item_name,unit_price,active) values
-        ('${C1}','sp1','Fish fry',0,true),('${C1}','reg','Meals',0,true),('${C1}','sp2','Chicken',0,true),('${C2}','sp1','Fish fry',0,true),('${C3}','sp1','Fish fry',60,true)
-        on conflict do nothing;
-      update public.menu_prices set pooling_special=true,pooling_special_price_paise=2550 where canteen_id='${C1}' and item_code='sp1';
-      update public.menu_prices set pooling_special=true,pooling_special_price_paise=9999 where item_code='sp1' and canteen_id in ('${C2}','${C3}');
-      set session_replication_role=replica; insert into public.daily_menu(canteen_id,menu_date,item_code,item_name,unit_price,active,pooling_special,pooling_special_price_paise) values('${C1}','2026-06-03','sp1','Fish fry',0,true,true,3000); set session_replication_role=origin;
-      insert into public.expenses(canteen_id,expense_date,amount,description) values('${C1}','2026-06-10',290.00,'Rice')`);
-    const OA = 'ab000000-0000-0000-0000-000000000001', OB = 'ab000000-0000-0000-0000-000000000002', OX = 'ab000000-0000-0000-0000-000000000003', OS = 'ab000000-0000-0000-0000-000000000004';
-    asAdm(O1, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('${OA}','${A}','2026-06-02','active','admin','${C1}'),('${OB}','${B}','2026-06-03','active','admin','${C1}'),('${OX}','${B}','2026-06-04','active','admin','${C1}');
+    // June 2026: 02 Tue(2) 03 Wed(3) 04 Thu(4) 05 Fri(5)
+    for (const [C, O] of [[C1, O1], [C2, O2], [C3, O3]] as const)
+      asAdm(O, `insert into public.weekly_menu(canteen_id,weekday,item_code,item_name,unit_price,active) select '${C}',w,c,c,0,true from generate_series(0,6) w, unnest(array['sp1','reg','sp2']) c on conflict do nothing`);
+    // RPC: payments admin sets prices for its own canteen only; members/anon refused
+    for (const w of [2, 3, 4, 5]) assert.equal((await as(O1).rpc('set_pooling_special_item', { p_weekday: w, p_item_code: 'sp1', p_price_paise: 2550 })).error, null);
+    assert.equal((await as(O1).rpc('set_pooling_special_item', { p_weekday: 2, p_item_code: 'ghost', p_price_paise: 777 })).error, null); // not on the weekly menu
+    assert.match((await as(A).rpc('set_pooling_special_item', { p_weekday: 2, p_item_code: 'reg', p_price_paise: 1 })).error.message, /permission required/);
+    assert.match((await makeClient(URL!, { role: 'anon' }).rpc('set_pooling_special_item', { p_weekday: 2, p_item_code: 'reg', p_price_paise: 1 })).error.message, /permission denied/);
+    assert.match((await as(O1).rpc('set_pooling_special_item', { p_weekday: 2, p_item_code: 'reg', p_price_paise: -1 })).error.message, /0 or more/);
+    for (const w of [2, 3, 4, 5]) assert.equal((await as(O2).rpc('set_pooling_special_item', { p_weekday: w, p_item_code: 'sp1', p_price_paise: 9999 })).error, null);
+    assert.equal(cnt(`select count(*) from public.pooling_special_items where canteen_id='${C1}'`), 5);
+    assert.equal(cnt(`select count(*) from public.pooling_special_items where canteen_id='${C2}'`), 4); // RPC scoped to caller's canteen
+    assert.equal((await as(O2).from('pooling_special_items').select('item_code')).data.length, 4); // RLS: C2 sees only its rows
+    assert.equal((await as(A).from('pooling_special_items').select('item_code')).data.length, 5); // members read own canteen (menu display)
+    assert.match(sql(URL!, { role: 'authenticated', sub: O1 }, `insert into public.pooling_special_items(canteen_id,weekday,item_code,price_paise) values('${C1}',1,'x',1)`).error.message, /permission denied/); // RPC only
+    // daily overrides (server-only): 03 TRUE 30.00; 05 explicit FALSE (must NOT fall back to weekly TRUE); 02 NULL inherits
+    root(`set session_replication_role=replica;
+      insert into public.daily_menu(canteen_id,menu_date,item_code,item_name,unit_price,active,pooling_special,pooling_special_price_paise) values
+        ('${C1}','2026-06-03','sp1','sp1',0,true,true,3000),('${C1}','2026-06-05','sp1','sp1',0,true,false,null),('${C1}','2026-06-02','sp1','sp1',0,true,null,null);
+      set session_replication_role=origin;`);
+    assert.throws(() => root(`set session_replication_role=replica; update public.daily_menu set pooling_special_price_paise=null where canteen_id='${C1}' and menu_date='2026-06-03'`), /check/i); // TRUE requires a price
+    const todayIst = root(`select (now() at time zone 'Asia/Kolkata')::date`);
+    root(`insert into public.daily_menu(canteen_id,menu_date,item_code,item_name,unit_price,active) values('${C1}','${todayIst}','reg','reg',0,true) on conflict do nothing`);
+    assert.throws(() => asAdm(A, `update public.daily_menu set pooling_special=true, pooling_special_price_paise=1 where canteen_id='${C1}' and menu_date='${todayIst}'`), /permission required/); // members can't set daily prices
+    assert.throws(() => asAdm(S1, `update public.daily_menu set pooling_special=false where canteen_id='${C1}' and menu_date='${todayIst}'`), /permission required/); // nor admins without payments
+    asAdm(O1, `update public.daily_menu set pooling_special=null, item_name='Meals' where canteen_id='${C1}' and menu_date='${todayIst}'`); // ordinary daily edit unaffected
+    root(`insert into public.expenses(canteen_id,expense_date,amount,description) values('${C1}','2026-06-10',290.00,'Rice')`);
+    const OA = 'ab000000-0000-0000-0000-000000000001', OB = 'ab000000-0000-0000-0000-000000000002', OX = 'ab000000-0000-0000-0000-000000000003', OF = 'ab000000-0000-0000-0000-000000000005', OS = 'ab000000-0000-0000-0000-000000000004';
+    asAdm(O1, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('${OA}','${A}','2026-06-02','active','admin','${C1}'),('${OB}','${B}','2026-06-03','active','admin','${C1}'),('${OX}','${B}','2026-06-04','active','admin','${C1}'),('${OF}','${B}','2026-06-05','active','admin','${C1}');
       insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id,pooling_special,pooling_special_unit_paise) values
         ('${OA}','sp1','Fish fry',2,0.01,'employee','${C1}',false,1),
         ('${OA}','reg','Meals',1,0,'employee','${C1}',true,999999),
         ('${OA}','sp1','Fish fry',1,0,'guest','${C1}',false,null),
+        ('${OA}','ghost','Ghost',1,0,'employee','${C1}',false,null),
         ('${OB}','sp1','Fish fry',1,0,'employee','${C1}',false,null),
         ('${OX}','sp1','Fish fry',5,0,'employee','${C1}',false,null),
+        ('${OF}','sp1','Fish fry',1,0,'employee','${C1}',true,5000),
         ('${OA}','sp2','Chicken',1,0,'employee','${C1}',false,null);`);
     const snap = (o: string, code: string, src = 'employee') => root(`select pooling_special||'|'||coalesce(pooling_special_unit_paise::text,'-') from public.order_items where order_id='${o}' and item_code='${code}' and item_source='${src}'`);
-    assert.equal(snap(OA, 'sp1'), 'true|2550'); // client false/1 ignored
-    assert.equal(snap(OA, 'reg'), 'false|-'); // client true/999999 ignored; regular item has no price
+    assert.equal(snap(OA, 'sp1'), 'true|2550'); // client false/1 ignored; daily NULL inherits weekly
+    assert.equal(snap(OA, 'reg'), 'false|-'); // client true/999999 ignored
     assert.equal(snap(OA, 'sp1', 'guest'), 'true|2550');
-    assert.equal(snap(OB, 'sp1'), 'true|3000'); // flagged daily menu price wins for that date
+    assert.equal(snap(OA, 'ghost'), 'false|-'); // price row without a weekly menu item is not applied
+    assert.equal(snap(OB, 'sp1'), 'true|3000'); // daily TRUE override price
+    assert.equal(snap(OF, 'sp1'), 'false|-'); // daily explicit FALSE beats weekly TRUE (and client true/5000)
     assert.equal(snap(OA, 'sp2'), 'false|-'); // ordered before it was flagged
-    root(`update public.menu_prices set pooling_special=true,pooling_special_price_paise=5000 where canteen_id='${C1}' and item_code='sp2'; update public.menu_prices set pooling_special_price_paise=4000 where canteen_id='${C1}' and item_code='sp1'`);
-    asAdm(O1, `update public.order_items set quantity=3, pooling_special_unit_paise=1 where order_id='${OA}' and item_code='sp1' and item_source='employee'; update public.order_items set quantity=2 where order_id='${OA}' and item_code='sp2'`);
-    assert.equal(snap(OA, 'sp1'), 'true|2550'); // quantity edit + tamper keep the snapshot despite menu price change
-    assert.equal(snap(OA, 'sp2'), 'false|-'); // old order stays unpriced
-    asAdm(O1, `update public.order_items set item_code='reg' where order_id='${OB}' and item_code='sp1'`);
-    assert.equal(snap(OB, 'reg'), 'false|-'); // item change re-validates
-    asAdm(O1, `update public.order_items set item_code='sp1' where order_id='${OB}' and item_code='reg'`);
-    assert.equal(snap(OB, 'sp1'), 'true|3000');
-    asAdm(O1, `update public.orders set status='cancelled', cancelled_at=now() where id='${OX}'`);
+    for (const w of [2, 3, 4, 5]) await as(O1).rpc('set_pooling_special_item', { p_weekday: w, p_item_code: 'sp2', p_price_paise: 5000 });
+    for (const w of [2, 3, 4, 5]) await as(O1).rpc('set_pooling_special_item', { p_weekday: w, p_item_code: 'sp1', p_price_paise: 4000 });
+    // UPDATE tamper: qty edit + direct flag/price writes keep the snapshot despite the menu price change
+    asAdm(O1, `update public.order_items set quantity=3, pooling_special_unit_paise=1 where order_id='${OA}' and item_code='sp1' and item_source='employee';
+      update public.order_items set quantity=2, pooling_special=true, pooling_special_unit_paise=1 where order_id='${OA}' and item_code='sp2'`);
+    assert.equal(snap(OA, 'sp1'), 'true|2550'); assert.equal(snap(OA, 'sp2'), 'false|-');
+    // client cannot use the internal re-price bypass (GUC is honoured only inside the orders trigger)
+    asAdm(O1, `select set_config('gocanteen.pooling_resnapshot','on',false); update public.order_items set pooling_special=true, pooling_special_unit_paise=1 where order_id='${OA}' and item_code='reg'`);
+    assert.equal(snap(OA, 'reg'), 'false|-');
+    // id swap: moving an item to another order re-validates from the server (06-03 daily TRUE 30.00); client price ignored
+    const ZO = 'ab000000-0000-0000-0000-000000000006', ZT = 'ab000000-0000-0000-0000-000000000008';
+    asAdm(O1, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('${ZO}','${CH}','2026-06-09','active','admin','${C1}'),('${ZT}','${CH}','2026-06-03','active','admin','${C1}'); insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('${ZO}','reg','Meals',1,0,'employee','${C1}')`);
+    asAdm(O1, `update public.order_items set order_id='${ZT}', item_code='sp1', pooling_special=false, pooling_special_unit_paise=1 where order_id='${ZO}'`);
+    assert.equal(snap(ZT, 'sp1'), 'true|3000');
+    asAdm(O1, `update public.orders set status='cancelled', cancelled_at=now() where id in ('${ZO}','${ZT}')`); // keep June totals simple
+    // item change re-validates
+    asAdm(O1, `update public.order_items set item_code='reg' where order_id='${OB}' and item_code='sp1'`); assert.equal(snap(OB, 'reg'), 'false|-');
+    asAdm(O1, `update public.order_items set item_code='sp1' where order_id='${OB}' and item_code='reg'`); assert.equal(snap(OB, 'sp1'), 'true|3000');
+    // rescheduling an order re-prices from the server for the new date (then back)
+    asAdm(O1, `update public.orders set ordered_for='2026-06-02' where id='${OB}'`); assert.equal(snap(OB, 'sp1'), 'true|4000'); // 02: daily NULL -> current weekly price
+    asAdm(O1, `update public.orders set ordered_for='2026-06-03' where id='${OB}'`); assert.equal(snap(OB, 'sp1'), 'true|3000');
+    asAdm(O1, `update public.orders set status='cancelled', cancelled_at=now() where id='${OX}'`); // cancelled -> excluded
+    // cross-canteen: item canteen must equal its order's canteen (insert and update); other tenant cannot touch C1 items
     assert.throws(() => root(`insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,canteen_id) values('${OA}','sp1','x',1,0,'${C2}')`), /canteen does not match/);
-    // Standard canteen (C3) never snapshots even if a flag exists (mode switch safety)
-    const OS3 = OS; asAdm(O3, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('${OS3}','${D1}','2026-06-02','active','admin','${C3}'); insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('${OS3}','sp1','Fish fry',1,60,'employee','${C3}')`);
-    assert.equal(snap(OS3, 'sp1'), 'false|-');
-    assert.equal(root(`select string_agg(employee_id||':'||member_paise||':'||guest_paise, ',' order by employee_id) from gocanteen_private.pooling_special_totals('${C1}',2026,6)`), `${A}:7650:2550,${B}:3000:0`);
+    assert.throws(() => root(`update public.order_items set canteen_id='${C2}' where order_id='${OA}' and item_code='reg'`), /canteen does not match/);
+    if (process.env.PGTEST_REAL_SCHEMA === '1') { // tenant RLS on order_items exists only in the real-schema copy, not the simplified stub
+      sql(URL!, { role: 'authenticated', sub: O2 }, `update public.order_items set quantity=99 where order_id='${OA}'`);
+      assert.equal(cnt(`select count(*) from public.order_items where order_id='${OA}' and quantity=99`), 0);
+    }
+    // Standard canteen (C3) never snapshots even with a weekly price row (mode switch safety)
+    root(`insert into public.pooling_special_items(canteen_id,weekday,item_code,price_paise) values('${C3}',2,'sp1',9999)`);
+    asAdm(O3, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('${OS}','${D1}','2026-06-02','active','admin','${C3}'); insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('${OS}','sp1','Fish fry',1,60,'employee','${C3}')`);
+    assert.equal(snap(OS, 'sp1'), 'false|-');
+    // soft-deleted member keeps their June specials on the bill (membership period covers June)
+    const P2 = '11111111-0000-0000-0000-0000000000c8', OP = 'ab000000-0000-0000-0000-000000000007';
+    root(`insert into auth.users(id,email) values('${P2}','p2@test'); insert into public.profiles(id,role,status,full_name,employee_code,admin_role,canteen_id,created_at) values('${P2}','employee','active','Soft Deleted','sd','owner','${C1}','2026-05-20 06:00:00+00')`);
+    asAdm(O1, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('${OP}','${P2}','2026-06-02','active','admin','${C1}'); insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('${OP}','sp1','Fish fry',1,0,'employee','${C1}')`);
+    asAdm(O1, `update public.profiles set status='deleted' where id='${P2}'`);
+    assert.equal(root(`select string_agg(employee_id||':'||member_paise||':'||guest_paise, ',' order by employee_id) from gocanteen_private.pooling_special_totals('${C1}',2026,6)`), `${A}:7650:2550,${B}:3000:0,${P2}:4000:0`);
     // engine/loader read the server snapshot; pool share formula unchanged
     const input = await loadPoolingInput(as(O1), { canteenId: C1, year: 2026, month: 6, messCutMinDays: 6 });
     assert.deepEqual(input.specials?.[A], { memberPaise: 7650, guestPaise: 2550 });
     assert.deepEqual(input.specials?.[B], { memberPaise: 3000, guestPaise: 0 });
+    assert.deepEqual(input.specials?.[P2], { memberPaise: 4000, guestPaise: 0 });
     const res = computePoolingBills(input);
     const without = computePoolingBills({ ...input, specials: {} });
     assert.deepEqual(res.lines.map((l: any) => l.sharePaise), without.lines.map((l: any) => l.sharePaise)); // never deducted from pool
-    assert.equal(res.expenseTotalPaise, 29000);
-    const la = res.lines.find((l: any) => l.memberId === A);
-    assert.ok(la, 'A in June cohort');
+    assert.equal(res.lines.reduce((t: number, l: any) => t + l.sharePaise, 0) + res.unallocatedPaise, 29000);
+    const la = res.lines.find((l: any) => l.memberId === A), lp = res.lines.find((l: any) => l.memberId === P2);
+    assert.ok(la && lp, 'A and soft-deleted P2 are in the June cohort');
     assert.equal(la.totalPaise, la.sharePaise + la.adminAddedPaise + 10200);
+    assert.equal(lp.specialMemberPaise, 4000);
     const payload = poolingPayload(res);
     const bump = (f: string, d: number) => ({ ...payload, lines: payload.lines.map((l: any) => l.memberId === A ? { ...l, [f]: (l[f] || 0) + d, totalPaise: l.totalPaise + d } : l) });
     assert.match((await as(O1).rpc('save_pooling_bill_run', { p_month: 6, p_year: 2026, p_payload: bump('specialMemberPaise', -2550) })).error.message, /Special item charges changed/);
     assert.match((await as(O1).rpc('save_pooling_bill_run', { p_month: 6, p_year: 2026, p_payload: bump('specialGuestPaise', 1) })).error.message, /Special item charges changed/);
+    const dropped = { ...payload, lines: payload.lines.map((l: any) => l.memberId === P2 ? { ...l, specialMemberPaise: 0, totalPaise: l.totalPaise - 4000 } : l) };
+    assert.match((await as(O1).rpc('save_pooling_bill_run', { p_month: 6, p_year: 2026, p_payload: dropped })).error.message, /Special item charges changed/);
     const badTotal = { ...payload, lines: payload.lines.map((l: any) => l.memberId === A ? { ...l, totalPaise: l.totalPaise + 1 } : l) };
     assert.match((await as(O1).rpc('save_pooling_bill_run', { p_month: 6, p_year: 2026, p_payload: badTotal })).error.message, /do not add up/);
     const ok = await as(O1).rpc('save_pooling_bill_run', { p_month: 6, p_year: 2026, p_payload: payload });
     assert.equal(ok.error, null, ok.error?.message);
-    // parallel publish of different members, then repeat publish of A is idempotent
-    const [p1, p2] = await Promise.all([as(O1).rpc('publish_pooling_bill', { p_run_id: ok.data.id, p_employee_id: A }), as(O1).rpc('publish_pooling_bill', { p_run_id: ok.data.id, p_employee_id: B })]);
-    assert.equal(p1.error, null, p1.error?.message); assert.equal(p2.error, null, p2.error?.message);
-    const rep = await as(O1).rpc('publish_pooling_bill', { p_run_id: ok.data.id, p_employee_id: A });
-    assert.equal(rep.error, null, rep.error?.message);
+    // parallel publish of different members (two real sessions), then repeat publish of A is idempotent
+    const pub = (e: string) => new Promise<string>(res2 => { const p = spawn('psql', [URL!, '-X', '-tA', '-c', `begin; set local role authenticated; select set_config('request.jwt.claims','{"role":"authenticated","sub":"${O1}"}',true); select (public.publish_pooling_bill('${ok.data.id}','${e}')).id; select pg_sleep(0.2); commit;`]); let o = ''; p.stdout.on('data', d => o += d); p.stderr.on('data', d => o += d); p.on('close', () => res2(o)); });
+    const outs = await Promise.all([pub(A), pub(A), pub(B), pub(P2)]);
+    assert.ok(outs.every(o => /[0-9a-f-]{36}/.test(o)), outs.join(' | '));
     assert.equal(cnt(`select count(*) from public.monthly_bills where canteen_id='${C1}' and bill_month=6 and employee_id='${A}'`), 1);
-    const bill = root(`select round(total*100)::bigint||'|'||round(special_items_total*100)::bigint from public.monthly_bills where canteen_id='${C1}' and bill_month=6 and employee_id='${A}'`);
-    assert.equal(bill, `${la.totalPaise}|10200`);
+    const bill = (e: string) => root(`select round(total*100)::bigint||'|'||round(special_items_total*100)::bigint from public.monthly_bills where canteen_id='${C1}' and bill_month=6 and bill_year=2026 and employee_id='${e}'`);
+    assert.equal(bill(A), `${la.totalPaise}|10200`);
+    assert.equal(bill(P2), `${lp.totalPaise}|4000`);
     assert.equal(root(`select special_member_paise||'|'||special_guest_paise from public.pooling_bill_lines l join public.pooling_bill_runs r on r.id=l.run_id where r.canteen_id='${C1}' and r.bill_month=6 and l.employee_id='${A}'`), '7650|2550');
-    // Standard bills: column default 0, Standard publish untouched
+    // lock: a later special order does not change the published bill, and re-saving the month is refused
+    asAdm(O1, `insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('${OA}','sp2','Chicken',1,0,'guest','${C1}')`);
+    assert.equal(snap(OA, 'sp2', 'guest'), 'true|5000');
+    assert.equal(bill(A), `${la.totalPaise}|10200`);
+    assert.match((await as(O1).rpc('save_pooling_bill_run', { p_month: 6, p_year: 2026, p_payload: payload })).error.message, /already published/);
+    // Standard bills untouched (special_items_total stays 0)
     assert.equal(cnt(`select count(*) from public.monthly_bills where canteen_id='${C3}' and coalesce(special_items_total,0)<>0`), 0);
-    // members cannot flag/price menu items
-    const mem = sql(URL!, { role: 'authenticated', sub: A }, `update public.menu_prices set pooling_special_price_paise=1 where item_code='sp1'`);
-    void mem; // blocked by RLS (0 rows) or by the price guard
-    assert.throws(() => root(`select set_config('request.jwt.claims','{"role":"authenticated","sub":"${A}"}',false); update public.menu_prices set pooling_special_price_paise=1 where canteen_id='${C1}' and item_code='sp1'`), /permission required/); // even bypassing RLS
-    assert.equal(root(`select pooling_special_price_paise from public.menu_prices where canteen_id='${C1}' and item_code='sp1'`), '4000');
-    const adm = sql(URL!, { role: 'authenticated', sub: O1 }, `update public.menu_prices set pooling_special=true, pooling_special_price_paise=4100 where canteen_id='${C1}' and item_code='sp1'`);
-    assert.equal(adm.error, null, adm.error?.message); // payments admin path used by the menu editor
-    assert.equal(root(`select pooling_special_price_paise from public.menu_prices where canteen_id='${C1}' and item_code='sp1'`), '4100');
-    assert.equal(root(`select pooling_special_price_paise from public.menu_prices where canteen_id='${C2}' and item_code='sp1'`), '9999'); // other tenants untouched
-    assert.throws(() => root(`update public.menu_prices set pooling_special_price_paise=-1 where canteen_id='${C1}' and item_code='sp1'`), /check/i);
+  });
+
+  await t.test('grants/RLS for the new objects: no TRUNCATE/TRIGGER/REFERENCES/writes for app roles; RPCs not for anon; private SD functions service-only', async () => {
+    if (root(`select to_regclass('public.pooling_special_items') is not null`) !== 't') return;
+    for (const tbl of ['public.pooling_special_items', 'public.canteen_guest_order_settings']) {
+      for (const role of ['anon', 'authenticated']) for (const priv of ['TRUNCATE', 'TRIGGER', 'REFERENCES', 'INSERT', 'UPDATE', 'DELETE'])
+        assert.equal(root(`select has_table_privilege('${role}','${tbl}','${priv}')`), 'f', `${role} ${priv} on ${tbl}`);
+      assert.equal(root(`select has_table_privilege('authenticated','${tbl}','SELECT')`), 't');
+      assert.equal(root(`select has_table_privilege('anon','${tbl}','SELECT')`), 'f');
+      assert.equal(root(`select relrowsecurity from pg_class where oid='${tbl}'::regclass`), 't');
+    }
+    for (const fn of ['public.set_pooling_special_item(integer,text,integer)', 'public.set_guest_orders_enabled(boolean)']) {
+      assert.equal(root(`select has_function_privilege('anon','${fn}','EXECUTE')`), 'f', fn);
+      assert.equal(root(`select has_function_privilege('authenticated','${fn}','EXECUTE')`), 't', fn);
+      assert.equal(root(`select prosecdef from pg_proc where oid='${fn}'::regprocedure`), 't');
+    }
+    for (const fn of ['effective_pooling_special(uuid,date,text)', 'guest_orders_enabled(uuid)', 'pooling_special_totals(uuid,integer,integer)', 'snapshot_pooling_special()', 'resnapshot_order_items()', 'guard_guest_orders()', 'guard_pooling_special_daily()'])
+      for (const role of ['anon', 'authenticated']) assert.equal(root(`select has_function_privilege('${role}','gocanteen_private.${fn}','EXECUTE')`), 'f', `${role} ${fn}`);
+    assert.equal(root(`select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='gocanteen_private' and p.proname in ('effective_pooling_special','snapshot_pooling_special','resnapshot_order_items','guard_guest_orders','guard_pooling_special_daily','pooling_special_totals','guest_orders_enabled') and (not p.prosecdef or not exists(select 1 from unnest(p.proconfig) c where c like 'search_path=%'))`), '0');
+    assert.match(sql(URL!, { role: 'authenticated', sub: O1 }, `truncate public.pooling_special_items`).error.message, /permission denied/);
   });
 
   await t.test('guest orders On/Off: default On, payments admin only, OFF blocks new guest orders/items/increases in ALL modes; cancel/decrease/history OK', async () => {
@@ -350,6 +418,11 @@ test('db integration', { skip }, async (t) => {
       const off = await as(O).rpc('set_guest_orders_enabled', { p_enabled: false });
       assert.equal(off.error, null, off.error?.message);
       assert.equal((await as(M).from('canteen_guest_order_settings').select('guest_orders_enabled')).data[0].guest_orders_enabled, false); // members can read it (UI hides guest option)
+      // legacy member app (real authenticated JWT + RLS path) sending a guest order is rejected by the server
+      { const today = root(`select (now() at time zone 'Asia/Kolkata')::date`);
+        const r = sql(URL!, { role: 'authenticated', sub: M }, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id,guest_name) values('${id(5)}','${M}','${today}','active','guest','${C}','G')`);
+        assert.ok(r.error, 'member guest insert must fail'); assert.equal(cnt(`select count(*) from public.orders where id='${id(5)}'`), 0);
+        assert.match(r.error.message, /Guest orders are turned off/); }
       // legacy client still sending guest orders/items is rejected by the server
       assert.throws(() => asAdm(O, `insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('${id(2)}','${M}','2026-06-16','active','guest','${C}')`), /Guest orders are turned off/);
       assert.throws(() => asAdm(O, `insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('${id(1)}','meal','Meals',1,50,'guest','${C}')`), /Guest orders are turned off/);

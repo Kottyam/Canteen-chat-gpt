@@ -75,14 +75,29 @@ Missing table/row (migration not applied) => standard, silently (exact current b
 - Still undecided: monthly allocation method (option A vs B), mid-month publishing / credits, admin running draft.
 
 ## Special priced items (owner t56u/t57u/t57s265) — implemented in PR47
-- Menu editor (Pooling only): edit an item → "Add price?" → price field. Only payments admins can set/clear it (DB trigger).
-- Server snapshots `order_items.pooling_special` / `pooling_special_unit_paise` at order time from the order's canteen
-  (flagged daily_menu row for that date, else menu_prices). Client values are ignored. Quantity edits keep the snapshot;
-  changing the item re-validates; items ordered before the flag stay unpriced; Standard-mode orders never snapshot.
-- Bill = pool share (formula unchanged, never reduced) + admin added + member specials + guest specials (guest specials are
-  charged to the member who ordered). Cancelled orders are excluded. `monthly_bills.special_items_total` shows the specials.
-- save_pooling_run verifies specials per member against the server and that every line total adds up.
-- Order screens show a price only for flagged items ("₹x extra", from the current menu price; the bill uses the snapshot).
+- Where: the weekly menu editor (the menu the order screens actually use). In Pooling, both **Add Menu Item** and
+  **Edit** have an optional "Add price?" checkbox; the price field appears only when ticked and is validated (0 or more,
+  stored in paise). Item + price are kept with the normal **Save** — no second step.
+- Who: only admins with payments permission. Menu admins without it see no price controls, just a short note, and can
+  still add/edit ordinary items. The server enforces this (`set_pooling_special_item` RPC; table is read-only for apps).
+- Storage: `pooling_special_items(canteen_id, weekday, item_code, price_paise)` — separate from `weekly_menu`, so the
+  existing weekly delete+insert save never drops or re-checks prices. Removing an item from a day clears its price.
+- Effective price for an order (server, `gocanteen_private.effective_pooling_special`):
+  1. `daily_menu` row for that date+item with `pooling_special` **TRUE** → daily price; **FALSE** → NOT special
+     (explicit; never falls back to the weekly price); **NULL**/no row → inherit
+  2. weekly price for that weekday, only if the item is on that day's active weekly menu
+  3. otherwise not special. Day-specific overrides have **no UI** (server/data only; not requested).
+- Snapshot: `order_items.pooling_special/pooling_special_unit_paise` are set by a trigger at order time (Pooling canteens
+  only); client values are ignored on INSERT and UPDATE. Quantity edits keep the snapshot; changing the item or moving it
+  to another order re-validates; rescheduling an order re-prices from the server; items ordered before an item was
+  flagged stay unpriced; an item's canteen must match its order's canteen.
+- Display: menu lists for NEW orders show the current price ("₹x extra"). Already placed orders (today, guest summary,
+  admin order view, history calendar) show the server-RECORDED snapshot × quantity — never the current menu price; old
+  normal pool orders never show a price, and no ₹0 is shown.
+- Bill = pool share (formula unchanged, never reduced) + admin added + member specials + guest specials (guest specials
+  charged to the member who ordered). Cancelled orders excluded. `monthly_bills.special_items_total` shows the specials.
+  save_pooling_run verifies specials per member against the server and that every line total adds up; published months
+  stay locked.
 
 ## Guest orders On/Off (owner t58u/t59u) — implemented in PR47
 - One per-canteen setting, in Employee Food Arrangement, applies to ALL modes. Default On (no row).

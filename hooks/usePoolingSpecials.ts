@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { loadGuestOrdersEnabled, loadPoolingSpecialPrices } from '../services/poolingSpecials';
+import { useEffect, useMemo, useState } from 'react';
+import { CurrentSpecials, loadCurrentSpecials, loadGuestOrdersEnabled, loadOrderSpecialSnapshots, OrderSpecialSnapshots, specialsForDate } from '../services/poolingSpecials';
 
 type L<T> = (v: T) => void;
 function shared<T>(initial: T, loader: () => Promise<T>) {
@@ -13,11 +13,29 @@ function shared<T>(initial: T, loader: () => Promise<T>) {
   };
   return { refresh, set, use };
 }
-const specials = shared<Record<string, number>>({}, loadPoolingSpecialPrices);
+const current = shared<CurrentSpecials>({ weekly: {}, daily: {} }, loadCurrentSpecials);
 const guest = shared<boolean>(true, loadGuestOrdersEnabled);
-/** itemCode -> special price (paise). Only these items show a price in Pooling. */
-export const usePoolingSpecialPrices = specials.use;
-export const refreshPoolingSpecialPrices = specials.refresh;
+
+/** CURRENT menu specials. Use only for choosing NEW items (menu lists), never for already placed orders. */
+export const useCurrentSpecials = current.use;
+export const refreshCurrentSpecials = current.refresh;
+export function useMenuSpecialsForDate(date: string | null | undefined): Record<string, number> {
+  const s = current.use();
+  return useMemo(() => (date ? specialsForDate(s, date) : {}), [s, date]);
+}
+
+/** Server-RECORDED special prices for placed orders (history/calendar/today). */
+export function useOrderSpecialSnapshots(orderIds: string[], refreshKey: unknown = null): OrderSpecialSnapshots {
+  const key = [...new Set(orderIds.filter(Boolean))].sort().join(',');
+  const [snap, setSnap] = useState<OrderSpecialSnapshots>({});
+  useEffect(() => {
+    let alive = true;
+    loadOrderSpecialSnapshots(key ? key.split(',') : []).then(v => { if (alive) setSnap(v); }, () => { if (alive) setSnap({}); });
+    return () => { alive = false; };
+  }, [key, refreshKey]);
+  return snap;
+}
+
 /** Guest orders On/Off for this canteen; defaults to On. */
 export const useGuestOrdersEnabled = guest.use;
 export const publishGuestOrdersEnabled = guest.set;
