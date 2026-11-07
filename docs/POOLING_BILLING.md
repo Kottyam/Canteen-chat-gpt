@@ -73,3 +73,23 @@ Missing table/row (migration not applied) => standard, silently (exact current b
   The special amount is NEVER deducted from pool Expenses; the common pool share calculation (including
   mess cut) is unchanged.
 - Still undecided: monthly allocation method (option A vs B), mid-month publishing / credits, admin running draft.
+
+## Special priced items (owner t56u/t57u/t57s265) — implemented in PR47
+- Menu editor (Pooling only): edit an item → "Add price?" → price field. Only payments admins can set/clear it (DB trigger).
+- Server snapshots `order_items.pooling_special` / `pooling_special_unit_paise` at order time from the order's canteen
+  (flagged daily_menu row for that date, else menu_prices). Client values are ignored. Quantity edits keep the snapshot;
+  changing the item re-validates; items ordered before the flag stay unpriced; Standard-mode orders never snapshot.
+- Bill = pool share (formula unchanged, never reduced) + admin added + member specials + guest specials (guest specials are
+  charged to the member who ordered). Cancelled orders are excluded. `monthly_bills.special_items_total` shows the specials.
+- save_pooling_run verifies specials per member against the server and that every line total adds up.
+- Order screens show a price only for flagged items ("₹x extra", from the current menu price; the bill uses the snapshot).
+
+## Guest orders On/Off (owner t58u/t59u) — implemented in PR47
+- One per-canteen setting, in Employee Food Arrangement, applies to ALL modes. Default On (no row).
+- Off: guest option hidden for members; the server rejects new guest orders/items, switching items/orders to guest,
+  guest quantity increases and reactivating a cancelled guest order. Cancel, decrease and history still work; existing
+  guest items remain billed. Only payments admins can change it (RPC `set_guest_orders_enabled`).
+
+## NOT implemented (not approved)
+- Monthly allocation option A vs B; admin running draft; mid-month publishing/credits.
+- Standard mode still trusts client unit prices (pre-existing).

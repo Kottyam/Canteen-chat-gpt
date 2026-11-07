@@ -4,6 +4,8 @@ import{getWeeklyMenu,saveWeeklyMenu}from'../../services/supabaseSync';
 import{useData}from'../../context/DataContext';
 import AsyncActionButton from'../common/AsyncActionButton';
 import{useBillingSettings}from'../../hooks/useBillingSettings';
+import{usePoolingSpecialPrices,refreshPoolingSpecialPrices,rupees}from'../../hooks/usePoolingSpecials';
+import{savePoolingSpecialPrice}from'../../services/poolingSpecials';
 
 const DAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 
@@ -21,6 +23,9 @@ const MenuManagement:React.FC<MenuManagementProps>=({initialWeekday})=>{
   const[editPrice,setEditPrice]=useState('');
   const[newName,setNewName]=useState('');
   const[newPrice,setNewPrice]=useState('');
+  const special=usePoolingSpecialPrices();
+  const[editSpecial,setEditSpecial]=useState(false);
+  const[editSpecialPrice,setEditSpecialPrice]=useState('');
   const dayLabel=selectedDay==null?'':DAYS[selectedDay];
 
   const loadDay=async(day:number)=>{
@@ -62,13 +67,24 @@ const MenuManagement:React.FC<MenuManagementProps>=({initialWeekday})=>{
 
   const startEdit=(item:MenuItem)=>{
     setEditingCode(item.itemCode);setEditName(item.itemName);setEditPrice(String(item.unitPrice));setMessage('');
+    setEditSpecial(special[item.itemCode]!=null);setEditSpecialPrice(special[item.itemCode]!=null?String(special[item.itemCode]/100):'');
   };
   const cancelEdit=()=>{setEditingCode(null);setEditName('');setEditPrice('')};
 
   const saveEdit=()=>{
     if(!editingCode)return;
     const name=editName.trim();
-    if(pooling){if(!name){setMessage('Please enter an item name.');return}patch(editingCode,{itemName:name});cancelEdit();return}
+    if(pooling){
+      if(!name){setMessage('Please enter an item name.');return}
+      const code=editingCode;const was=special[code]!=null;
+      const priceChanged=editSpecial&&(!was||Math.round(Number(editSpecialPrice)*100)!==special[code]);
+      if(editSpecial&&(editSpecialPrice.trim()===''||!Number.isFinite(Number(editSpecialPrice))||Number(editSpecialPrice)<0)){setMessage('Enter a valid price (0 or more).');return}
+      patch(code,{itemName:name});cancelEdit();
+      if(editSpecial!==was||priceChanged){
+        if(!menuItems.some(i=>i.itemCode===code)){setMessage('Save the menu first, then set the price for this item.');return}
+        void savePoolingSpecialPrice(code,editSpecial,editSpecialPrice).then(()=>refreshPoolingSpecialPrices()).then(()=>setMessage(editSpecial?'Price saved. It is added to the bill of whoever orders this item.':'Price removed. This item is covered by the pool again.')).catch(e=>setMessage(e?.message||'Unable to save price.'));
+      }
+      return}
     const priceText=editPrice.trim();
     if(!name&&!priceText){setMessage('Please enter item name and price.');return}
     if(!name){setMessage('Please enter an item name.');return}
@@ -109,6 +125,8 @@ const MenuManagement:React.FC<MenuManagementProps>=({initialWeekday})=>{
           <div key={item.itemCode} className="rounded-2xl border bg-white p-3 shadow-sm">
             <div className="space-y-2">
               <input value={editName} disabled={saving} onChange={e=>setEditName(e.target.value)} aria-label="Item name" className="min-h-11 w-full rounded-lg border px-3 text-sm outline-none focus:border-primary-500"/>
+              {pooling&&<label className="flex min-h-11 items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={editSpecial} disabled={saving} onChange={e=>setEditSpecial(e.target.checked)} className="h-5 w-5"/>Add price?</label>}
+              {pooling&&editSpecial&&<div><div className="flex"><span className="flex min-h-11 items-center rounded-l-lg border border-r-0 bg-gray-50 px-3 text-gray-600">₹</span><input type="text" inputMode="decimal" value={editSpecialPrice} disabled={saving} onChange={e=>setEditSpecialPrice(e.target.value)} aria-label="Special price" className="min-h-11 w-full rounded-r-lg border px-3 text-right text-sm outline-none focus:border-primary-500"/></div><p className="mt-1 text-xs text-gray-500">Charged to whoever orders it (guest items go to the member who ordered). Not taken from the pool.</p></div>}
               {!pooling&&<div className="flex"><span className="flex min-h-11 items-center rounded-l-lg border border-r-0 bg-gray-50 px-3 text-gray-600">₹</span><input type="text" inputMode="decimal" value={editPrice} disabled={saving} onChange={e=>setEditPrice(e.target.value)} aria-label="Price" className="min-h-11 w-full rounded-r-lg border px-3 text-right text-sm outline-none focus:border-primary-500"/></div>}
               <div className="flex gap-2"><button type="button" disabled={saving} onClick={saveEdit} className="min-h-11 flex-1 rounded-lg bg-primary-600 px-4 font-semibold text-white shadow-sm">Save Edit</button><button type="button" disabled={saving} onClick={cancelEdit} className="min-h-11 flex-1 rounded-lg border px-4 font-semibold text-gray-700">Cancel</button></div>
             </div>
@@ -116,7 +134,7 @@ const MenuManagement:React.FC<MenuManagementProps>=({initialWeekday})=>{
         :
           <div key={item.itemCode} className="rounded-2xl border bg-white p-3 shadow-sm">
             <div className="flex items-center gap-2">
-              <div className="min-w-0 flex-1"><div className="break-words text-sm font-medium text-gray-800">{item.itemName}</div>{!pooling&&<div className="mt-1 text-sm font-semibold text-gray-700">₹{item.unitPrice}</div>}</div>
+              <div className="min-w-0 flex-1"><div className="break-words text-sm font-medium text-gray-800">{item.itemName}</div>{!pooling?<div className="mt-1 text-sm font-semibold text-gray-700">₹{item.unitPrice}</div>:special[item.itemCode]!=null&&<div className="mt-1 text-sm font-semibold text-amber-700">{rupees(special[item.itemCode])} extra</div>}</div>
               <button type="button" disabled={saving} title="Edit" aria-label={'Edit '+item.itemName} onClick={()=>startEdit(item)} className="min-h-11 min-w-11 rounded-lg border text-primary-700 hover:bg-primary-50">✎</button>
               <button type="button" disabled={saving} title="Delete" aria-label={'Delete '+item.itemName} onClick={()=>remove(item.itemCode)} className="min-h-11 min-w-11 rounded-lg border text-red-600 hover:bg-red-50">🗑</button>
             </div>

@@ -15,7 +15,7 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
   const start = monthStart(src.year, src.month), end = monthEnd(src.year, src.month);
   const [expenses, orders, profiles, holidays, holidaySettings, adjustments] = await Promise.all([
     q(db.from('expenses').select('id,expense_date,amount').eq('canteen_id', src.canteenId).gte('expense_date', start).lte('expense_date', end)),
-    q(db.from('orders').select('id,employee_id,ordered_for,status,order_items(item_source)').eq('canteen_id', src.canteenId).gte('ordered_for', start).lte('ordered_for', end)),
+    q(db.from('orders').select('id,employee_id,ordered_for,status,order_items(item_source,quantity,pooling_special,pooling_special_unit_paise)').eq('canteen_id', src.canteenId).gte('ordered_for', start).lte('ordered_for', end)),
     q(db.from('profiles').select('id,full_name,role,status,created_at').eq('canteen_id', src.canteenId).eq('role', 'employee')),
     q(db.from('holiday_dates').select('holiday_date').eq('canteen_id', src.canteenId).gte('holiday_date', start).lte('holiday_date', end)),
     q(db.from('holiday_settings').select('recurring_weekdays').eq('canteen_id', src.canteenId)),
@@ -26,6 +26,17 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
   { const { data, error } = await db.from('pooling_member_periods').select('employee_id,joined_on,left_on').eq('canteen_id', src.canteenId).lte('joined_on', end);
     if (error) { if (!/pooling_member_periods|42P01|does not exist|schema cache/i.test(String(error.message || error.code || ''))) throw error; }
     else periods = data || []; }
+  // Special priced items: only server snapshots (pooling_special) on ACTIVE orders count.
+  const specials: Record<string, { memberPaise: number; guestPaise: number }> = {};
+  for (const o of orders as any[]) {
+    if ((o.status || 'active') !== 'active') continue;
+    for (const i of (Array.isArray(o.order_items) ? o.order_items : [])) {
+      if (!i.pooling_special || !(Number(i.quantity) > 0) || i.pooling_special_unit_paise == null) continue;
+      const amt = Math.round(Number(i.quantity)) * Math.round(Number(i.pooling_special_unit_paise));
+      const s0 = specials[o.employee_id] || (specials[o.employee_id] = { memberPaise: 0, guestPaise: 0 });
+      if (i.item_source === 'guest') s0.guestPaise += amt; else s0.memberPaise += amt;
+    }
+  }
   const adminAdded = new Map<string, number>();
   for (const a of adjustments as any[]) adminAdded.set(a.employee_id, (adminAdded.get(a.employee_id) || 0) + toPaise(a.amount));
   const byMember = new Map<string, { from: string; to: string | null }[]>();
@@ -46,6 +57,7 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
       return { memberId: o.employee_id, date: String(o.ordered_for).slice(0, 10), status: o.status || 'active', guestOnly: items.length === 0 || items.every((i: any) => i.item_source === 'guest') };
     }),
     members,
+    specials,
     holidayDates: (holidays as any[]).map(h => String(h.holiday_date).slice(0, 10)),
     recurringWeekdays: ((holidaySettings as any[])[0]?.recurring_weekdays || []).map(Number),
     memberNames: Object.fromEntries((profiles as any[]).map(p => [p.id, p.full_name || ''])),

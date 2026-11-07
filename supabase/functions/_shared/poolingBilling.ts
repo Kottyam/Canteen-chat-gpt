@@ -80,9 +80,14 @@ export interface PoolingInput {
   holidayDates?: string[];
   /** Recurring weekly offs, 0=Sunday … 6=Saturday. */
   recurringWeekdays?: number[];
+  /** Special priced items (server snapshot, integer paise) per member: own items + guest items they ordered.
+   *  Added on top of the pool share; never deducted from expenses (owner t57u/t57s265). */
+  specials?: Record<string, { memberPaise: number; guestPaise: number }>;
 }
 export interface PoolingLine {
   memberId: string;
+  specialMemberPaise?: number;
+  specialGuestPaise?: number;
   windowDays: number;
   attendedDays: number;
   absentDays: number;
@@ -211,6 +216,8 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
       messCutApplied: cut, excludedDays: cut ? absent : 0, chargeableDays: charge.size,
       dailySharePaise: 0, overheadSharePaise: 0, sharePaise: 0,
       adminAddedPaise: Math.max(0, Math.round(Number(m.adminAddedPaise) || 0)), totalPaise: 0,
+      specialMemberPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.memberPaise) || 0)),
+      specialGuestPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.guestPaise) || 0)),
     });
   }
   // expenses
@@ -242,8 +249,10 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     l.sharePaise = rounded.get(m.memberId) || 0;
     l.dailySharePaise = Math.min(l.sharePaise, dailyRounded.get(m.memberId) || 0);
     l.overheadSharePaise = l.sharePaise - l.dailySharePaise;
-    l.totalPaise = l.sharePaise + l.adminAddedPaise;
+    l.totalPaise = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0);
   }
+  { const missing = Object.keys(input.specials || {}).filter(id => !lines.has(id) && ((input.specials![id].memberPaise || 0) + (input.specials![id].guestPaise || 0)) > 0).length;
+    if (missing) warnings.push(`Special item charges for ${missing} member${missing > 1 ? 's' : ''} without a membership record this month cannot be billed. Check the member list.`); }
   if (!operating.length && total > 0) warnings.push('Every day of this month is marked as a holiday.');
   const emptyDays = operating.filter(date => !members.some(m => attended.get(m.memberId)?.has(date)));
   if (emptyDays.length) warnings.push(`No orders on ${emptyDays.length} day${emptyDays.length > 1 ? 's' : ''} (${emptyDays.map(x => Number(x.slice(8))).join(', ')}). If the mess was closed, mark them as holidays.`);

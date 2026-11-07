@@ -158,3 +158,19 @@ test('IST month rollover', () => {
   assert.equal(isCompletedPeriod(2026, 9, new Date('2026-09-30T12:00:00Z')), false);
   assert.equal(isCompletedPeriod(2026, 9, new Date('2026-10-01T00:00:00Z')), true);
 });
+
+test('special priced items are additive: pool shares unchanged, totals add member + guest specials, unknown member warned', () => {
+  const o = [...orders('A', range(1, 30)), ...orders('B', range(1, 30))];
+  const plain = computePoolingBills(base({ expenses: daily, orders: o }));
+  const r = computePoolingBills(base({ expenses: daily, orders: o, specials: { A: { memberPaise: 7650, guestPaise: 2550 }, Z: { memberPaise: 100, guestPaise: 0 } } }));
+  assert.deepEqual(r.lines.map((l: any) => l.sharePaise), plain.lines.map((l: any) => l.sharePaise)); // never deducted from the pool
+  assert.equal(sum(r) + r.unallocatedPaise, 90000);
+  assert.equal(line(r, 'A').totalPaise, line(r, 'A').sharePaise + 10200);
+  assert.equal(line(r, 'A').specialGuestPaise, 2550); // guest special billed to the ordering member
+  assert.equal(line(r, 'B').totalPaise, line(r, 'B').sharePaise);
+  assert.equal(line(r, 'B').specialMemberPaise, 0);
+  assert.ok(r.warnings.some((w: string) => /Special item charges for 1 member/.test(w)));
+  // negative/fractional garbage is sanitised to integer paise >= 0
+  const g = computePoolingBills(base({ expenses: daily, orders: o, specials: { A: { memberPaise: -5, guestPaise: 10.6 } } }));
+  assert.equal(line(g, 'A').specialMemberPaise, 0); assert.equal(line(g, 'A').specialGuestPaise, 11);
+});

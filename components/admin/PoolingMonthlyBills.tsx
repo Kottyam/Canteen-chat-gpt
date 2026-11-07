@@ -58,7 +58,7 @@ const PoolingMonthlyBills: React.FC = () => {
       </div>
       <div className="space-y-2">{result.lines.map(l => <div key={l.memberId} className="grid gap-1 rounded-xl border bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · Mess cut (${l.excludedDays} days not charged)` : ''} · Charged days {l.chargeableDays}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · Mess cut (${l.excludedDays} days not charged)` : ''} · Charged days {l.chargeableDays}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}</div></div>
         <div className="text-right"><div className="text-lg font-bold">{rs(l.totalPaise)}</div>{sentFor(l.memberId) && <div className="text-xs font-semibold text-primary-700">Published</div>}</div>
       </div>)}</div>
       <div className="flex flex-wrap gap-2">
