@@ -58,7 +58,8 @@ test('db integration', { skip }, async (t) => {
     assert.equal(result.operatingDays.length, 29); // Sept minus declared holiday 13th
     assert.equal(l(A).absentDays, 1); assert.equal(l(A).messCutApplied, false); // guest-only 10th
     assert.equal(l(B).absentDays, 6); assert.equal(l(B).messCutApplied, true); // 5 skipped + 1 cancelled (4th)
-    assert.equal(l(CH).windowDays, 9); // joined 22nd IST (created 21st 20:00 UTC)
+    // joined 22nd IST: 20 pre-join operating days count as no-order days (owner rule t53s243) -> mess cut, 9 eaten days charged
+    assert.equal(l(CH).windowDays, 29); assert.equal(l(CH).absentDays, 20); assert.equal(l(CH).messCutApplied, true); assert.equal(l(CH).chargeableDays, 9);
     assert.equal(l(A).adminAddedPaise, 2000);
     assert.equal(result.lines.reduce((s: number, x: any) => s + x.sharePaise, 0) + result.unallocatedPaise, 41025);
   });
@@ -236,6 +237,25 @@ test('db integration', { skip }, async (t) => {
     assert.match(sql(URL!, { role: 'authenticated', sub: O1 }, `truncate public.pooling_bill_lines`).error.message, /permission denied/);
     // normal authorized path unchanged: owner still reads own canteen settings under RLS
     assert.equal((await as(O1).from('canteen_billing_settings').select('billing_model').maybeSingle()).data.billing_model, 'pooling');
+  });
+  await t.test('member periods: trigger records join/leave (IST, inclusive), rejoin opens new period; Standard delete flow unchanged', async () => {
+    if (root(`select to_regclass('public.pooling_member_periods') is not null`) !== 't') return;
+    const P = '11111111-0000-0000-0000-0000000000c9';
+    root(`insert into auth.users(id,email) values('${P}','p@test');
+      insert into public.profiles(id,role,status,full_name,employee_code,admin_role,canteen_id,created_at) values('${P}','employee','active','Period Member','pm','owner','${C1}','2026-09-03 20:00:00+00');`);
+    assert.equal(root(`select joined_on||'|'||coalesce(left_on::text,'open') from public.pooling_member_periods where employee_id='${P}'`), '2026-09-04|open');
+    root(`select set_config('request.jwt.claims','{"role":"authenticated","sub":"${O1}"}',false); update public.profiles set status='deleted' where id='${P}'`);
+    const today = root(`select (now() at time zone 'Asia/Kolkata')::date`);
+    assert.equal(root(`select left_on from public.pooling_member_periods where employee_id='${P}'`), today);
+    assert.equal(root(`select status from public.profiles where id='${P}'`), 'deleted'); // soft delete kept, history kept
+    root(`select set_config('request.jwt.claims','{"role":"authenticated","sub":"${O1}"}',false); update public.profiles set status='active' where id='${P}'`);
+    assert.equal(cnt(`select count(*) from public.pooling_member_periods where employee_id='${P}'`), root(`select (joined_on=(now() at time zone 'Asia/Kolkata')::date)::int from public.pooling_member_periods where employee_id='${P}' order by joined_on limit 1`) === '1' ? 1 : 2);
+    assert.equal(cnt(`select count(*) from public.pooling_member_periods where employee_id='${P}' and left_on is null`), 1);
+    // app roles: read-only for payments admins, nothing for members; no truncate
+    assert.match(sql(URL!, { role: 'authenticated', sub: O1 }, `insert into public.pooling_member_periods(canteen_id,employee_id,joined_on) values('${C1}','${P}','2026-01-01')`).error.message, /permission denied/);
+    assert.equal(root(`select has_table_privilege('authenticated','public.pooling_member_periods','TRUNCATE')`), 'f');
+    assert.equal((await as(A).from('pooling_member_periods').select('employee_id')).data.length, 0);
+    assert.ok((await as(O1).from('pooling_member_periods').select('employee_id')).data.length >= 1);
   });
 });
 

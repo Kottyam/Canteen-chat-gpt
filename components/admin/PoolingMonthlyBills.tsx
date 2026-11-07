@@ -54,7 +54,7 @@ const PoolingMonthlyBills: React.FC = () => {
         <div className="flex justify-between"><span>Shared daily</span><b>{rs(result.dailyExpensePaise)}</b></div>
         <div className="flex justify-between"><span>Shared monthly (non-operating-day expenses)</span><b>{rs(result.overheadExpensePaise)}</b></div>
         {result.unallocatedPaise > 0 && <div className="flex justify-between text-red-700 sm:col-span-2"><span>Unallocated (needs review)</span><b>{rs(result.unallocatedPaise)}</b></div>}
-        {result.warnings.map(w => <div key={w} className="text-amber-700 sm:col-span-2">{w}</div>)}
+        {result.warnings.map(w => <div key={w} className="text-xs text-gray-500 sm:col-span-2">{w}</div>)}
       </div>
       <div className="space-y-2">{result.lines.map(l => <div key={l.memberId} className="grid gap-1 rounded-xl border bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{names[l.memberId] || 'Member'}</div>
