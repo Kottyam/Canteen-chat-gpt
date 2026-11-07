@@ -61,6 +61,7 @@ test('closure is NOT inferred from no orders: a day nobody ordered is a no-order
   assert.equal(line(r, 'A').sharePaise + line(r, 'B').sharePaise, 600);
   assert.ok(r.warnings.some(w => /No orders on 1 day \(15\)/.test(w)));
   assert.equal(r.warnings.filter(w => /No orders/.test(w)).length, 1); // one grouped note, not one per day
+  assert.deepEqual(r.issues, []); // diagnostics only: nothing shown to the admin as an error
 });
 
 test('declared holidays / weekly offs are not no-order days; holiday expense = overhead by member-days', () => {
@@ -170,6 +171,7 @@ test('special priced items are additive: pool shares unchanged, totals add membe
   assert.equal(line(r, 'B').totalPaise, line(r, 'B').sharePaise);
   assert.equal(line(r, 'B').specialMemberPaise, 0);
   assert.ok(r.warnings.some((w: string) => /Special item charges for 1 member/.test(w)));
+  assert.ok(r.issues.some((w: string) => /Special item charges for 1 member/.test(w))); // money problem stays visible
   // negative/fractional garbage is sanitised to integer paise >= 0
   const g = computePoolingBills(base({ expenses: daily, orders: o, specials: { A: { memberPaise: -5, guestPaise: 10.6 } } }));
   assert.equal(line(g, 'A').specialMemberPaise, 0); assert.equal(line(g, 'A').specialGuestPaise, 11);

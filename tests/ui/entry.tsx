@@ -12,3 +12,5 @@ export { createElement } from 'react';
 export { createRoot } from 'react-dom/client';
 export { act } from 'react';
 export { specialsForDate, parsePriceToPaise } from '../../services/poolingSpecials';
+export { default as PoolingMonthlyBills } from '../../components/admin/PoolingMonthlyBills';
+export { default as MonthlyReport } from '../../components/admin/MonthlyReport';

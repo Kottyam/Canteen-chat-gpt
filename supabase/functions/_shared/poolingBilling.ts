@@ -113,7 +113,10 @@ export interface PoolingResult {
   allocatedPaise: number;
   unallocatedPaise: number;
   lines: PoolingLine[];
+  /** Internal diagnostics (stored with the calculation; not shown in the normal bills view). */
   warnings: string[];
+  /** Actionable money problems the admin must see (short). Unallocated is reported separately. */
+  issues: string[];
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -173,6 +176,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
   const start = monthStart(year, month), end = monthEnd(year, month);
   const inMonth = (d: string) => typeof d === 'string' && d >= start && d <= end;
   const warnings: string[] = [];
+  const issues: string[] = [];
   const holidays = new Set((input.holidayDates || []).filter(inMonth));
   const weekly = new Set((input.recurringWeekdays || []).map(Number));
   // attendance (consumed orders only)
@@ -227,7 +231,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
   for (const e of input.expenses) {
     if (!inMonth(e.date)) continue;
     const a = Math.round(Number(e.amountPaise) || 0);
-    if (a < 0) { warnings.push(`Negative expense ${e.id ?? e.date} ignored.`); continue; }
+    if (a < 0) { warnings.push(`Negative expense ${e.id ?? e.date} ignored.`); issues.push(`A negative expense on ${e.date} was ignored. Fix it in Expenses.`); continue; }
     total += a;
     const sharers = opSet.has(e.date) ? members.filter(m => chargeable.get(m.memberId)!.has(e.date)) : [];
     if (sharers.length) {
@@ -252,7 +256,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     l.totalPaise = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0);
   }
   { const missing = Object.keys(input.specials || {}).filter(id => !lines.has(id) && ((input.specials![id].memberPaise || 0) + (input.specials![id].guestPaise || 0)) > 0).length;
-    if (missing) warnings.push(`Special item charges for ${missing} member${missing > 1 ? 's' : ''} without a membership record this month cannot be billed. Check the member list.`); }
+    if (missing) { const t = `Special item charges for ${missing} member${missing > 1 ? 's' : ''} without a membership record this month cannot be billed. Check the member list.`; warnings.push(t); issues.push(t); } }
   if (!operating.length && total > 0) warnings.push('Every day of this month is marked as a holiday.');
   const emptyDays = operating.filter(date => !members.some(m => attended.get(m.memberId)?.has(date)));
   if (emptyDays.length) warnings.push(`No orders on ${emptyDays.length} day${emptyDays.length > 1 ? 's' : ''} (${emptyDays.map(x => Number(x.slice(8))).join(', ')}). If the mess was closed, mark them as holidays.`);
@@ -260,6 +264,6 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     year, month, periodStart: start, periodEnd: end, messCutMinDays: threshold, operatingDays: operating,
     expenseTotalPaise: total, dailyExpensePaise: daily, overheadExpensePaise: overhead,
     allocatedPaise: allocatable, unallocatedPaise: unallocated,
-    lines: members.map(m => lines.get(m.memberId)!), warnings,
+    lines: members.map(m => lines.get(m.memberId)!), warnings, issues,
   };
 }

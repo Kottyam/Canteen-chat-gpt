@@ -34,5 +34,5 @@ export const supabase: any = {
   from,
   rpc: async (name: string, args: any) => { calls.push({ rpc: name, args }); return rpcHandlers[name] ? { data: null, error: null, ...rpcHandlers[name](args) } : { data: null, error: null }; },
   auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), getUser: async () => ({ data: { user: null } }) },
-  channel: () => ({ on() { return this; }, subscribe() { return this; } }), removeChannel() {},
+  channel: () => ({ on() { return this; }, subscribe() { return this; }, unsubscribe() { return Promise.resolve('ok'); } }), removeChannel() { return Promise.resolve('ok'); },
 };

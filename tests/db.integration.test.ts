@@ -386,6 +386,21 @@ test('db integration', { skip }, async (t) => {
     assert.equal(cnt(`select count(*) from public.monthly_bills where canteen_id='${C3}' and coalesce(special_items_total,0)<>0`), 0);
   });
 
+  await t.test('manual publish while Automatic is selected (both models), then the scheduler: no duplicate bills or payments', async () => {
+    if (root(`select to_regclass('public.pooling_special_items') is not null`) !== 't') return;
+    assert.equal(root(`select string_agg(billing_model||'/'||bill_send_mode, ',' order by billing_model) from public.canteen_billing_settings where canteen_id in ('${C1}','${C3}')`), 'pooling/automatic,standard/automatic');
+    // Pooling June was published manually above (publish_pooling_bill) while C1 is Automatic. Standard: manual publish now.
+    const std = await as(O3).rpc('publish_employee_bill', { p_employee_id: D1, p_month: 6, p_year: 2026, p_food_total: 60, p_admin_added_total: 0 });
+    assert.equal(std.error, null, std.error?.message);
+    const count = (C: string, tbl: string) => cnt(`select count(*) from public.${tbl} x ${tbl === 'bill_payments' ? `join public.monthly_bills b on b.id=x.bill_id where b.canteen_id='${C}' and b.bill_month=6 and b.bill_year=2026` : `where x.canteen_id='${C}' and x.bill_month=6 and x.bill_year=2026`}`);
+    const before = [count(C1, 'monthly_bills'), count(C1, 'bill_payments'), count(C3, 'monthly_bills'), count(C3, 'bill_payments')];
+    const live = await runAutoSend({ db: svc(), now: new Date('2026-07-01T01:30:00Z'), liveSend: true }); // 07:00 IST on the 1st
+    assert.deepEqual([count(C1, 'monthly_bills'), count(C1, 'bill_payments'), count(C3, 'monthly_bills'), count(C3, 'bill_payments')], before);
+    assert.equal(live.details.filter((x: any) => x.canteenId === C3 && x.status === 'sent').length, 0); // Standard: "No new amount" -> skipped
+    for (const x of live.details.filter((x: any) => x.canteenId === C1 && x.status === 'sent')) // Pooling: returns the existing bill
+      assert.equal(cnt(`select count(*) from public.monthly_bills where canteen_id='${C1}' and bill_month=6 and employee_id='${x.employee}'`), 1);
+  });
+
   await t.test('grants/RLS for the new objects: no TRUNCATE/TRIGGER/REFERENCES/writes for app roles; RPCs not for anon; private SD functions service-only', async () => {
     if (root(`select to_regclass('public.pooling_special_items') is not null`) !== 't') return;
     for (const tbl of ['public.pooling_special_items', 'public.canteen_guest_order_settings']) {

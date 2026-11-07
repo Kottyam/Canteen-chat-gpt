@@ -108,3 +108,20 @@ Missing table/row (migration not applied) => standard, silently (exact current b
 ## NOT implemented (not approved)
 - Monthly allocation option A vs B; admin running draft; mid-month publishing/credits.
 - Standard mode still trusts client unit prices (pre-existing).
+
+## Manual publish when "Automatic" is selected (owner t60) — existing behaviour, confirmed
+- Standard ("Publish Eligible Bills") and Pooling ("Publish Bills") buttons do not read the send mode; they stay usable
+  in Automatic mode for the same eligible, completed-month bills as in Manual. Server RPCs (`publish_employee_bill`,
+  `save/publish_pooling_bill`) do not check the send mode either; their existing guards are unchanged.
+- The scheduler (when enabled) only handles the previous completed month and skips/reuses what was already published
+  (Standard: "No new amount" → skipped; Pooling: reuses the published snapshot and returns the existing bill), so a
+  manual publish followed by the automatic run creates no duplicate bills or payments (DB test).
+- Schedule: pg_cron `30 1 1-3 * *` (GMT) = 07:00 IST on the 1st–3rd. Live sending is globally OFF (dry run only).
+
+## Pooling monthly bills screen (owner t60)
+Shows only: month label, total expenses, per-member counts (ate/no-order/mess cut/charged days), admin added, special
+items, total, Published, and the action buttons. Real money problems stay visible in red (Unallocated; special charges
+that cannot be billed). Removed from the normal view: the explanatory header sentence, Operating days / Shared daily /
+Shared monthly rows, all diagnostic notes ("No orders on N days (…) … mark them as holidays", ignored-orders notes) and
+the "live recalculation for reference only" footnote. Diagnostics are still stored with the calculation (`warnings`).
+A published member shows the billed (saved) amount.

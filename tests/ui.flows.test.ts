@@ -1,5 +1,5 @@
 // Interactive UI flow tests: real components rendered in happy-dom, with fake auth/data/supabase (no network).
-import { test } from 'node:test';
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { pathToFileURL } from 'node:url';
@@ -25,12 +25,14 @@ for (const k of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputEle
   try { (globalThis as any)[k] = (win as any)[k] ?? (k === 'window' ? win : undefined); } catch { /* read-only global */ }
 }
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-(win as any).confirm = () => true;
+(win as any).confirm = () => true; const alerts: string[] = []; (globalThis as any).alert = (win as any).alert = (m: string) => { alerts.push(String(m)); }; (globalThis as any).confirm = () => true;
 const M = await import(pathToFileURL(out).href);
 const { fakeDb, auth, data, act, createRoot, createElement } = M;
 
 const tick = async (n = 6) => { for (let i = 0; i < n; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
-async function mount(el: any) { const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host); await act(async () => root.render(el)); await tick(); return { host, root }; }
+const mounted: any[] = [];
+afterEach(async () => { for (const r of mounted.splice(0)) await act(async () => r.unmount()); document.body.innerHTML = ''; auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.perms = []; data.users = []; data.orders = []; });
+async function mount(el: any) { const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host); mounted.push(root); await act(async () => root.render(el)); await tick(); return { host, root }; }
 const byText = (host: any, tag: string, re: RegExp) => [...host.querySelectorAll(tag)].find((e: any) => re.test(e.textContent || ''));
 async function click(el: any) { assert.ok(el, 'element to click exists'); await act(async () => { el.click(); }); await tick(); }
 async function type(el: any, v: string) {
@@ -179,4 +181,69 @@ test('client menu precedence mirrors the server: explicit daily TRUE/FALSE wins,
   assert.deepEqual(M.specialsForDate(s, '2026-11-16'), { fish: 2550, egg: 1000 }); // other date inherits weekly
   assert.equal(M.parsePriceToPaise('25.505'), 2551); assert.equal(M.parsePriceToPaise('0'), 0);
   for (const bad of ['', ' ', '-1', 'abc']) assert.throws(() => M.parsePriceToPaise(bad), /valid price/);
+});
+
+// Pooling monthly bills: real component + real services + real engine over the in-memory fake database.
+function seedPoolingMonth(opts: { orders: boolean; negative?: boolean }) {
+  const { year, month } = (() => { const d = new Date(); const m = d.getMonth(); return m === 0 ? { year: d.getFullYear() - 1, month: 12 } : { year: d.getFullYear(), month: m }; })();
+  const day = (n: number) => `${year}-${String(month).padStart(2, '0')}-${String(n).padStart(2, '0')}`;
+  fakeDb.rpcHandlers.current_canteen_id = () => ({ data: 'c1' });
+  fakeDb.db.profiles = [{ id: 'mA', full_name: 'Anu', role: 'employee', status: 'active', created_at: '2026-01-01T00:00:00Z' }, { id: 'mB', full_name: 'Biju', role: 'employee', status: 'active', created_at: '2026-01-01T00:00:00Z' }];
+  fakeDb.db.pooling_member_periods = [{ employee_id: 'mA', joined_on: '2026-01-01', left_on: null }, { employee_id: 'mB', joined_on: '2026-01-01', left_on: null }];
+  fakeDb.db.expenses = [{ id: 'e1', expense_date: day(10), amount: 3000 }, ];
+  fakeDb.db.orders = opts.orders ? [...Array.from({ length: 20 }, (_, i) => ({ id: `a${i}`, employee_id: 'mA', ordered_for: day(i + 1), status: 'active', order_items: [{ item_source: 'employee', quantity: 1 }] })), { id: 'b1', employee_id: 'mB', ordered_for: day(10), status: 'active', order_items: [{ item_source: 'employee', quantity: 1 }] }] : [];
+  if (opts.negative) fakeDb.db.orders.push({ id: 'z1', employee_id: 'mZ', ordered_for: day(5), status: 'active', order_items: [{ item_source: 'employee', quantity: 1, pooling_special: true, pooling_special_unit_paise: 2500 }] });
+  fakeDb.db.holiday_dates = []; fakeDb.db.holiday_settings = []; fakeDb.db.employee_adjustments = [];
+  fakeDb.db.pooling_bill_runs = [{ id: 'run1', status: 'draft', pooling_bill_lines: [] }];
+}
+const NOISE = [/No orders on/i, /mark them as holidays/i, /holiday/i, /Operating days/i, /Shared daily/i, /Shared monthly/i, /non-operating/i, /Expenses from the Expenses section/i, /Sending:/i, /live recalculation/i, /reference only/i, /without a membership record were ignored/i, /\*/];
+
+for (const mode of ['manual', 'automatic'] as const) test(`Pooling monthly bills (${mode}): no date lists / instruction notes; counts + totals shown; Publish Bills usable`, async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true });
+  M.publishBillingSettings({ billingModel: 'pooling', messCutMinDays: 6, billSendMode: mode });
+  fakeDb.db.canteen_billing_settings = [{ billing_model: 'pooling', mess_cut_min_days: 6, bill_send_mode: mode }];
+  const { host } = await mount(createElement(M.PoolingMonthlyBills));
+  const text = host.textContent;
+  assert.match(text, /Monthly Bills — Pooling/); assert.match(text, /Total expenses₹3000\.00/);
+  assert.match(text, /Anu/); assert.match(text, /Biju/); assert.match(text, /No-order/); assert.match(text, /Mess cut/); assert.match(text, /Charged days/);
+  for (const re of NOISE) assert.doesNotMatch(text, re, `noise ${re} must not be shown`);
+  assert.equal(host.querySelector('[role="alert"]'), null); // nothing actionable here
+  const publish = byText(host, 'button', /^Publish Bills$/);
+  assert.equal(publish.disabled, false, 'manual publish stays usable in Automatic mode too');
+  await click(publish);
+  assert.deepEqual(rpcs('publish_pooling_bill').map((a: any) => a.p_employee_id).sort(), ['mA', 'mB']);
+});
+
+test('Pooling monthly bills: real money problems stay visible (unallocated + special charge that cannot be billed), concise', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: false, negative: true });
+  M.publishBillingSettings({ billingModel: 'pooling', messCutMinDays: 6, billSendMode: 'automatic' });
+  const { host } = await mount(createElement(M.PoolingMonthlyBills));
+  assert.match(host.textContent, /Unallocated \(needs review\)₹3000\.00/);
+  assert.match(host.querySelector('[role="alert"]')?.textContent || '', /Special item charges for 1 member without a membership record this month cannot be billed/);
+  for (const re of [/No orders on/i, /mark them as holidays/i, /Operating days/i, /were ignored/i]) assert.doesNotMatch(host.textContent, re);
+});
+
+test('Pooling monthly bills: a published member shows the billed (saved) amount', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true });
+  fakeDb.db.pooling_bill_runs = [{ id: 'run1', status: 'published', pooling_bill_lines: [{ employee_id: 'mA', total_paise: 123456, monthly_bill_id: 'b1' }] }];
+  M.publishBillingSettings({ billingModel: 'pooling', messCutMinDays: 6, billSendMode: 'automatic' });
+  const { host } = await mount(createElement(M.PoolingMonthlyBills));
+  assert.match(host.textContent, /₹1234\.56Published/);
+});
+
+for (const mode of ['manual', 'automatic'] as const) test(`Standard monthly report (${mode}): "Publish Eligible Bills" is usable for eligible completed-month bills`, async () => {
+  fakeDb.reset(); auth.perms = ['payments', 'bills']; auth.user = { id: 'O1', name: 'Owner', role: 'admin' };
+  M.publishBillingSettings({ billingModel: 'standard', messCutMinDays: 6, billSendMode: mode });
+  fakeDb.db.canteen_billing_settings = [{ billing_model: 'standard', mess_cut_min_days: 6, bill_send_mode: mode }];
+  const d = new Date(); const m = d.getMonth(); const y = m === 0 ? d.getFullYear() - 1 : d.getFullYear(); const mm = String(m === 0 ? 12 : m).padStart(2, '0');
+  data.users = [{ id: 'E1', identityId: 'p1', name: 'Anu', role: 'employee', status: 'active' }];
+  data.orders = [{ id: 'o1', employeeId: 'E1', memberIdentityId: 'p1', date: `${y}-${mm}-05`, items: { meals: true }, itemQuantities: { meals: 2 }, itemPrices: { meals: 50 }, itemNames: { meals: 'Meals' }, status: 'active' }];
+  fakeDb.db.profiles = [{ id: 'p1', employee_code: 'E1', full_name: 'Anu', status: 'active' }];
+  fakeDb.rpcHandlers.gocanteen_business_timestamp = () => ({ data: new Date().toISOString() });
+  fakeDb.rpcHandlers.get_admin_bill_publish_states = () => ({ data: [{ employee_id: 'p1', current_total: 100, requested_total: 0, new_amount: 100, can_publish: true }] });
+  const { host } = await mount(createElement(M.MonthlyReport)); await tick(10);
+  const btn = byText(host, 'button', /^Publish Eligible Bills$/);
+  assert.ok(btn, 'button shown'); assert.equal(btn.disabled, false, `usable in ${mode} mode`);
+  await click(btn); await tick(10);
+  assert.ok(fakeDb.calls.some((c: any) => c.rpc === 'publish_employee_bill'), 'existing Standard publish RPC is called');
 });
