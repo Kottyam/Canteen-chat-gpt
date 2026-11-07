@@ -11,7 +11,9 @@
     "android:sync": "cap sync android",
     "android:open": "cap open android",
     "android:build": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
-    "prebuild": "bash scripts/fetch-android-apk.sh"
+    "prebuild": "bash scripts/fetch-android-apk.sh",
+    "test": "node --test --test-force-exit 'tests/*.test.ts'",
+    "test:db": "bash supabase/tests/run-db-tests.sh"
   },
   "dependencies": {
     "@capacitor/app": "^7.1.0",
