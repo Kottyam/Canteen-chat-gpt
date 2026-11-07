@@ -4,7 +4,7 @@
 //  * requires header `x-cron-secret`: checked against env AUTO_BILL_CRON_SECRET if set, else against the
 //    Vault secret 'auto_bill_cron_secret' via service-only RPC auto_bill_authorize (connector-manageable)
 //  * deploy with verify_jwt = false (custom header auth; publishable/secret keys are not JWTs)
-//  * sends ONLY when env AUTO_BILL_SEND_LIVE === 'true' or the private DB live switch is on; default dry run
+//  * sends ONLY when the private DB live switch is on (env cannot enable it); default dry run
 //  * a request body {"dryRun":true} forces dry run even when live
 //  * only completed months (previous IST month) are billed; idempotent per member
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
