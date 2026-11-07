@@ -21,3 +21,8 @@ test('DB error or not-ok => unauthorized (fail closed)', async () => {
   assert.equal((await authorizeCron({ header: S, dbAuthorize: async () => { throw new Error('x'); } })).ok, false);
   assert.deepEqual(await authorizeCron({ header: S, dbAuthorize: db({ ok: false, live: true }) }), { ok: false, liveSend: false });
 });
+test('env AUTO_BILL_SEND_LIVE cannot override DB OFF; env-secret path is always dry run; env false forces dry', async () => {
+  assert.deepEqual(await authorizeCron({ header: S, envLive: 'true', dbAuthorize: db({ ok: true, live: false }) }), { ok: true, liveSend: false });
+  assert.deepEqual(await authorizeCron({ header: S, envSecret: S, envLive: 'true', dbAuthorize: db({ ok: true, live: true }) }), { ok: true, liveSend: false });
+  assert.deepEqual(await authorizeCron({ header: S, envLive: 'false', dbAuthorize: db({ ok: true, live: true }) }), { ok: true, liveSend: false });
+});

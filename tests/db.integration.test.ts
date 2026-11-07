@@ -225,5 +225,17 @@ test('db integration', { skip }, async (t) => {
     assert.deepEqual((await auth(SYN)).data, { ok: true, live: true });
     root(`update gocanteen_private.auto_bill_runtime set live=false; delete from vault.secrets where name='auto_bill_cron_secret'`);
   });
+  await t.test('hardening: no TRUNCATE/TRIGGER/REFERENCES for app roles on pooling tables; SELECT kept', async () => {
+    const tables = ['public.canteen_billing_settings', 'public.pooling_bill_runs', 'public.pooling_bill_lines', 'public.bill_auto_send_attempts', 'gocanteen_private.auto_bill_runtime'];
+    for (const tb of tables) for (const r of ['anon', 'authenticated']) for (const pv of ['TRUNCATE', 'TRIGGER', 'REFERENCES'])
+      assert.equal(root(`select has_table_privilege('${r}','${tb}','${pv}')`), 'f', `${r} ${pv} ${tb}`);
+    for (const tb of tables.slice(0, 4)) {
+      assert.equal(root(`select has_table_privilege('authenticated','${tb}','SELECT')`), 't');
+      assert.equal(root(`select has_table_privilege('service_role','${tb}','TRUNCATE')`), 't');
+    }
+    assert.match(sql(URL!, { role: 'authenticated', sub: O1 }, `truncate public.pooling_bill_lines`).error.message, /permission denied/);
+    // normal authorized path unchanged: owner still reads own canteen settings under RLS
+    assert.equal((await as(O1).from('canteen_billing_settings').select('billing_model').maybeSingle()).data.billing_model, 'pooling');
+  });
 });
 
