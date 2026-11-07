@@ -18,12 +18,12 @@ If the table/row does not exist the app behaves exactly as today.
 
 ### Accounting model
 Source of money = the canteen's existing **Expenses** records for the month (`expenses.canteen_id`, `expense_date` in month, amount > 0). Menu prices / order revenue are not used. Additional revenue is not subtracted.
-1. **Operating day** = not a declared holiday / recurring weekly off AND at least one member ate (active order with at least one non-guest item). Days nobody ate are closed days and never count as absences.
+1. **Operating day** = every day of the month that is not an admin-declared holiday or recurring weekly off (Holiday Management). Closure is **never inferred** from "nobody ordered": such a day is a no-order day for every member (the pooling screen warns, so the admin can mark it as a holiday if the mess was closed).
 2. **Member window** = operating days from the member's join date (`profiles.created_at`, IST) to month end. Deleted members are excluded.
 3. **No-order days** = window operating days without a consumed order (cumulative, not continuous; several orders on a date = 1 day; cancelled and guest-only orders don't count).
 4. **Mess cut**: no-order days ≥ threshold → all those days are not charged. Below threshold → no exclusion (full share).
 5. Each expense dated on an operating day is split equally among members chargeable that day (a cut member's day is borne by the others; on days they ate they pay their share).
-6. Expenses dated on non-operating days (e.g. bulk purchases on a Sunday) are monthly overhead, split by chargeable member-days.
+6. Expenses dated on holidays/weekly offs (e.g. a bulk purchase), and expenses on a day where nobody is chargeable, are monthly overhead split by chargeable member-days (so a cut member pays a member-day share of these; the total is always preserved).
 7. Nobody chargeable → nothing charged; amount shown as **Unallocated** for admin review.
 8. Integer paise, largest-remainder rounding (ties by member id): shares sum exactly to the expense total.
 9. Admin-added amounts (`employee_adjustments`) are added to that member only, not pooled.
@@ -49,7 +49,17 @@ select cron.schedule('gocanteen-auto-bills','0 19 * * *', $$
 ```
 Daily is safe: only the previous month is billed and already-sent members are skipped.
 
+## Settings load failures
+Missing table/row (migration not applied) => standard, silently (exact current behaviour). Any other load error is surfaced: the last good settings are kept, Monthly Reports refuses to show the standard publisher, and Billing Mode cannot be saved.
+
 ## Testing
 * `npm test` — engine + auto-send tests with in-memory fakes (no network).
 * Local UI without any backend: run `npm run dev` with no `VITE_SUPABASE_*` env → app uses its existing local-storage mode; Settings → Billing Mode → Pooling hides prices in menu/member screens. The Pooling bill screen needs the database migration, so it shows an error in local mode.
 * Full end-to-end requires applying the migration to a **separate (non-production) Supabase project / branch**.
+
+### Real-Postgres integration tests (`npm run test:db`)
+`supabase/tests/run-db-tests.sh` (local throwaway DB only; refuses non-local URLs):
+1. `00_stub_base_schema.sql` — synthetic stand-in for Supabase platform pieces (roles, `auth.uid()/auth.role()`, default privileges) and the original base tables/functions that pre-date this repo's migration history (`profiles`, `orders`, `order_items`, `monthly_bills`, `expenses`, `has_admin_permission`, `is_admin_user`, …). **These are inferred from app code, not the production schema.**
+2. Replays all repo migrations in order (real `publish_employee_bill`, `current_canteen_id`, triggers incl. bill notifications). 14 unrelated migrations (subscriptions, pg_net, additional revenue) don't replay locally; the pooling migration must succeed or the run fails.
+3. Two **pre-existing** repo migration syntax defects are patched in a temp copy only: `20260907180000` (`RAISE '... 0% and 100%'` needs `%%`) and `20260920135602` (missing `;` after `$function$`). They would fail a fresh `supabase db reset`; production evidently got these objects another way.
+4. Synthetic fixtures, then `tests/db.integration.test.ts` runs as real roles/JWT claims (authenticated owner/staff/member, other tenant, anon, service_role) so RLS, grants and triggers are exercised.
