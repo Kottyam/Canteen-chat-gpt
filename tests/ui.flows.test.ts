@@ -247,3 +247,121 @@ for (const mode of ['manual', 'automatic'] as const) test(`Standard monthly repo
   await click(btn); await tick(10);
   assert.ok(fakeDb.calls.some((c: any) => c.rpc === 'publish_employee_bill'), 'existing Standard publish RPC is called');
 });
+
+// ---- Running current month (admin-only, read-only) on the same Pooling Monthly Bills page ----
+const wait = (ms: number) => act(async () => { await new Promise(r => setTimeout(r, ms)); });
+function seedCurrentMonth() {
+  const asOf = M.istBusinessDate(new Date()); const [y, m, dd] = asOf.split('-').map(Number);
+  const cd = (n: number) => `${y}-${String(m).padStart(2, '0')}-${String(n).padStart(2, '0')}`;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  for (let n = 1; n <= dd; n++) for (const id of ['mA', 'mB']) fakeDb.db.orders.push({ id: `c${id}${n}`, employee_id: id, ordered_for: cd(n), status: 'active', order_items: [{ item_source: 'employee', quantity: 1, ...(id === 'mA' && n === 1 ? { pooling_special: true, pooling_special_unit_paise: 2500 } : {}) }] });
+  fakeDb.db.expenses.push({ id: 'c1', expense_date: cd(1), amount: 1000, description: 'Rice' });
+  fakeDb.db.employee_adjustments.push({ employee_id: 'mA', amount: 50, adjustment_date: cd(1) });
+  if (dd < last) { // future rows must never count
+    fakeDb.db.expenses.push({ id: 'cF', expense_date: cd(dd + 1), amount: 5000, description: 'Future' });
+    fakeDb.db.orders.push({ id: 'cFo', employee_id: 'mA', ordered_for: cd(dd + 1), status: 'active', order_items: [{ item_source: 'employee', quantity: 1, pooling_special: true, pooling_special_unit_paise: 9900 }] });
+    fakeDb.db.employee_adjustments.push({ employee_id: 'mB', amount: 70, adjustment_date: cd(dd + 1) });
+  }
+  return { asOf, cd, dd };
+}
+const asAdmin = () => { auth.user = { id: 'O1', name: 'Owner', role: 'admin', canteenName: 'Test Canteen' }; auth.perms = ['monthly_reports', 'expenses']; };
+const draftSection = (h: any) => h.querySelector('section[aria-label="Current month"]');
+const WRITE_RPCS = ['save_pooling_bill_run', 'publish_pooling_bill', 'publish_employee_bill', 'set_pooling_special_item', 'set_billing_settings'];
+const noWrites = () => { assert.deepEqual(fakeDb.calls.filter((c: any) => c.kind && c.kind !== 'select').map((c: any) => c.table), []); assert.deepEqual(fakeDb.calls.filter((c: any) => WRITE_RPCS.includes(c.rpc)), []); };
+
+for (const mode of ['manual', 'automatic'] as const) test(`Pooling current month (${mode}): admin sees month + Draft as of, members amounts to date, no Save/Publish, no writes; previous publish unchanged`, async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { asOf } = seedCurrentMonth(); asAdmin();
+  M.publishBillingSettings({ billingModel: 'pooling', messCutMinDays: 6, billSendMode: mode });
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  const s = draftSection(host); assert.ok(s, 'current month section on the same page');
+  const t = s.textContent;
+  assert.match(t, new RegExp(`Draft as of ${M.displayBusinessDate(asOf)}`));
+  assert.match(t, /Expenses so far₹1000\.00/); // future expense excluded
+  const row = (id: string) => s.querySelector(`[data-draft-member="${id}"]`).textContent;
+  assert.match(row('mA'), /Anu/); assert.match(row('mA'), /Pool ₹500\.00/); assert.match(row('mA'), /Special ₹25\.00/); assert.match(row('mA'), /Admin added ₹50\.00/); assert.match(row('mA'), /₹575\.00$/);
+  assert.match(row('mB'), /Biju/); assert.match(row('mB'), /₹500\.00$/); assert.doesNotMatch(row('mB'), /Admin added/);
+  assert.deepEqual([...s.querySelectorAll('button')].map((b: any) => b.textContent), ['Download PDF']);
+  for (const re of NOISE) assert.doesNotMatch(t, re);
+  noWrites();
+  // previous completed month: unchanged numbers and buttons, publishes the previous run only
+  assert.match(host.textContent, /Total expenses₹3000\.00/);
+  assert.ok(byText(host, 'button', /^Save Calculation$/)); const publish = byText(host, 'button', /^Publish Bills$/); assert.equal(publish.disabled, false);
+  await click(publish);
+  assert.deepEqual(rpcs('publish_pooling_bill').map((a: any) => a.p_run_id), ['run1', 'run1']);
+});
+
+test('Pooling current month: ordinary member never sees the draft (published bills only)', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); seedCurrentMonth(); pooling();
+  auth.user = { id: 'mA', name: 'Anu', role: 'employee' };
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  assert.equal(draftSection(host), null); assert.doesNotMatch(host.textContent, /Draft as of/);
+});
+
+test('Pooling current month: Expenses add / edit / delete refresh the draft immediately (coalesced)', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { cd } = seedCurrentMonth(); asAdmin(); pooling();
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  const exp = await mount(createElement(M.Expenses));
+  const total = () => draftSection(host).textContent.match(/Expenses so far(₹[\d.]+)/)[1];
+  assert.equal(total(), '₹1000.00');
+  let events = 0; const on = () => { events++; }; window.addEventListener(M.POOLING_INPUTS_CHANGED, on);
+  await type(exp.host.querySelector('input[type="date"]'), cd(1)); await type(exp.host.querySelector('input[placeholder="Amount"]'), '200');
+  await click(byText(exp.host, 'button', /^Add Expense$/)); await wait(350); await tick();
+  assert.equal(total(), '₹1200.00'); assert.equal(events, 1);
+  const added = fakeDb.db.expenses.find((e: any) => Number(e.amount) === 200); added.id = 'new1';
+  await click(byText(exp.host, 'button', /\d{4}/)); // open the month
+  const editOf = () => [...exp.host.querySelectorAll('button')].filter((b: any) => b.textContent === 'Edit');
+  await click(editOf()[0]); await type(exp.host.querySelector('input[placeholder="Amount"]'), '300');
+  const before = fakeDb.db.expenses.map((e: any) => Number(e.amount)).reduce((a: number, b: number) => a + b, 0);
+  await click(byText(exp.host, 'button', /^Update Expense$/)); await wait(350); await tick();
+  assert.equal(events, 2); const after = fakeDb.db.expenses.map((e: any) => Number(e.amount)).reduce((a: number, b: number) => a + b, 0); assert.notEqual(after, before);
+  const shown = () => Number(total().slice(1));
+  const expected = () => fakeDb.db.expenses.filter((e: any) => e.expense_date.startsWith(cd(1).slice(0, 8)) && e.expense_date <= M.istBusinessDate(new Date())).reduce((a: number, e: any) => a + Number(e.amount), 0);
+  assert.equal(shown(), expected());
+  await click(byText(exp.host, 'button', /\d{4}/));
+  const del = [...exp.host.querySelectorAll('button')].filter((b: any) => b.textContent === 'Delete');
+  await click(del[0]); await wait(350); await tick();
+  assert.equal(events, 3); assert.equal(shown(), expected());
+  window.removeEventListener(M.POOLING_INPUTS_CHANGED, on);
+  // a burst of events = one recalculation
+  const n0 = fakeDb.calls.filter((c: any) => c.rpc === 'current_canteen_id').length;
+  for (let i = 0; i < 5; i++) window.dispatchEvent(new (window as any).Event(M.POOLING_INPUTS_CHANGED));
+  await wait(350); await tick();
+  assert.equal(fakeDb.calls.filter((c: any) => c.rpc === 'current_canteen_id').length - n0, 1);
+});
+
+test('Pooling current month: the latest data wins and never touches the previous-month run / state', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { cd } = seedCurrentMonth(); asAdmin(); pooling();
+  fakeDb.db.pooling_bill_runs = [{ id: 'run1', status: 'published', pooling_bill_lines: [{ employee_id: 'mA', total_paise: 123456, monthly_bill_id: 'b1' }] }];
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  window.dispatchEvent(new (window as any).Event(M.POOLING_INPUTS_CHANGED));
+  fakeDb.db.expenses.push({ id: 'c2', expense_date: cd(1), amount: 10, description: 'x' });
+  window.dispatchEvent(new (window as any).Event(M.POOLING_INPUTS_CHANGED)); await wait(350); await tick();
+  assert.match(draftSection(host).textContent, /Expenses so far₹1010\.00/);
+  assert.match(host.textContent, /₹1234\.56Published/); // previous month keeps its saved published amount
+  assert.doesNotMatch(draftSection(host).textContent, /Published/);
+  noWrites();
+});
+
+test('Pooling current month PDF: exports exactly the displayed draft (values, month, cutoff, NOT PUBLISHED); read-only; multi-page', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { asOf } = seedCurrentMonth(); asAdmin(); pooling();
+  const got: any[] = []; const real = M.poolingDraftPdfAdapter.download; M.poolingDraftPdfAdapter.download = async (m: any) => { got.push(m); };
+  try {
+    const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+    await click(byText(draftSection(host), 'button', /^Download PDF$/));
+    assert.equal(got.length, 1); const m = got[0];
+    assert.equal(m.canteenName, 'Test Canteen'); assert.match(m.title, /DRAFT \(NOT PUBLISHED\)/);
+    assert.equal(m.subtitle, `${m.month} · Draft as of ${M.displayBusinessDate(asOf)}`);
+    assert.deepEqual(m.rows.map((r: any) => [r.name, r.share, r.special, r.adminAdded, r.total]).sort(), [['Anu', 50000, 2500, 5000, 57500], ['Biju', 50000, 0, 0, 50000]]);
+    assert.equal(m.expenseTotal, 100000); assert.equal(m.billTotal, 107500);
+    noWrites();
+    const texts: string[] = []; let pages = 1;
+    const doc: any = { setTextColor() {}, setFont() {}, setFontSize() {}, setFillColor() {}, setDrawColor() {}, rect() {}, line() {}, addPage() { pages++; },
+      splitTextToSize: (s: string) => s.length > 20 ? [s.slice(0, 20), s.slice(20)] : [s], text: (t: any) => { texts.push(...(Array.isArray(t) ? t : [t])); } };
+    M.renderPoolingDraftPdf(doc, m, 'now');
+    for (const s of ['Test Canteen', m.subtitle, 'Rs.575.00', 'Rs.500.00', 'Rs.25.00', 'Rs.50.00', 'Total expenses: Rs.1000.00', 'Bill total: Rs.1075.00', 'Draft — not published.']) assert.ok(texts.includes(s), s);
+    const big = { ...m, rows: Array.from({ length: 80 }, (_, i) => ({ ...m.rows[0], name: `Member number ${i} with a long name` })) };
+    texts.length = 0; pages = 1; M.renderPoolingDraftPdf(doc, big, 'now');
+    assert.ok(pages > 1, 'multi-page'); for (let i = 0; i < 80; i++) assert.ok(texts.includes(`Member number ${i} with`.slice(0, 20)) && texts.includes(String(i + 1)));
+    assert.equal(texts.filter(t => t === 'Member').length, pages, 'table header on every page');
+  } finally { M.poolingDraftPdfAdapter.download = real; }
+});

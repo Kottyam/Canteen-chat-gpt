@@ -176,3 +176,31 @@ test('special priced items are additive: pool shares unchanged, totals add membe
   const g = computePoolingBills(base({ expenses: daily, orders: o, specials: { A: { memberPaise: -5, guestPaise: 10.6 } } }));
   assert.equal(line(g, 'A').specialMemberPaise, 0); assert.equal(line(g, 'A').specialGuestPaise, 11);
 });
+
+// ---- running-month draft (asOf) ----
+test('asOf day 7: the 23 future days are never operating / no-order / mess-cut days', () => {
+  // B ate nothing after day 7 in the full month view would be cut; as of day 7 B ate 1..5 only (2 absent < 6).
+  const inp = base({ expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 5))] });
+  const r = computePoolingBills({ ...inp, asOf: d(7) });
+  assert.equal(r.periodEnd, d(7)); assert.equal(r.operatingDays.length, 7);
+  assert.equal(line(r, 'B').windowDays, 7); assert.equal(line(r, 'B').absentDays, 2); assert.equal(line(r, 'B').messCutApplied, false);
+  assert.equal(r.expenseTotalPaise, 7 * 3000); assert.equal(sum(r), 21000); // future expenses/orders excluded
+  assert.equal(line(r, 'A').attendedDays, 7);
+  const full = computePoolingBills(inp); assert.equal(line(full, 'B').messCutApplied, true); assert.equal(full.operatingDays.length, 30);
+});
+test('asOf: pre-join elapsed days count toward the threshold; later joiners / post-asOf exits are not counted', () => {
+  const r = computePoolingBills(base({ asOf: d(10), messCutMinDays: 6, expenses: daily, orders: [...orders('A', range(1, 10)), ...orders('C', range(7, 10)), ...orders('D', range(1, 10))],
+    members: [{ memberId: 'A' }, { memberId: 'C', periods: [{ from: d(7) }] }, { memberId: 'D', periods: [{ from: d(1), to: d(20) }] }, { memberId: 'F', periods: [{ from: d(15) }] }] }));
+  assert.equal(line(r, 'C').absentDays, 6); assert.equal(line(r, 'C').messCutApplied, true); // 6 elapsed pre-join days
+  assert.equal(line(r, 'D').absentDays, 0); // leaves on day 20: no post-exit days yet
+  assert.equal(line(r, 'F'), undefined); // joins after the cutoff
+  const x = computePoolingBills(base({ asOf: d(25), expenses: [], orders: orders('D', range(1, 20)), members: [{ memberId: 'D', periods: [{ from: d(1), to: d(20) }] }] }));
+  assert.equal(line(x, 'D').absentDays, 5); // elapsed post-exit days 21..25 only
+});
+test('asOf omitted or >= month end: identical to the completed-month result', () => {
+  const inp = base({ expenses: [...daily, { date: d(31 - 1), amountPaise: 777 }], orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 20))], holidayDates: [d(3)], recurringWeekdays: [0] });
+  const full = computePoolingBills(inp);
+  assert.deepEqual(computePoolingBills({ ...inp, asOf: d(30) }), full);
+  assert.deepEqual(computePoolingBills({ ...inp, asOf: '2026-10-05' }), full);
+  assert.throws(() => computePoolingBills({ ...inp, asOf: '2026-08-31' }), /as-of/); assert.throws(() => computePoolingBills({ ...inp, asOf: 'x' as any }), /as-of/);
+});

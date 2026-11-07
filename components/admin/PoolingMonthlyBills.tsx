@@ -1,14 +1,77 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncActionButton from '../common/AsyncActionButton';
 import { useBillingSettings } from '../../hooks/useBillingSettings';
-import { PoolingResult, previousBillingPeriod } from '../../supabase/functions/_shared/poolingBilling';
+import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../supabase';
+import { PoolingResult, istBusinessDate, previousBillingPeriod } from '../../supabase/functions/_shared/poolingBilling';
 import { loadPoolingRun, previewPoolingBills, publishPoolingBill, savePoolingRun } from '../../services/poolingBills';
+import { buildPoolingDraftPdfModel, displayBusinessDate, monthLabel, poolingDraftPdfAdapter } from '../../utils/poolingDraftPdf';
+
+/** Fired by in-app edits that change pooling inputs (e.g. Expenses add/edit/delete). */
+export const POOLING_INPUTS_CHANGED = 'gocanteen:pooling-inputs-changed';
+const DRAFT_TABLES = ['expenses', 'employee_adjustments', 'orders', 'order_items', 'holiday_dates'] as const;
 
 const rs = (p: number) => `₹${(p / 100).toFixed(2)}`;
+
+/** Running month, 1st..today (IST): admin-only, read-only. Never saves, publishes or notifies. */
+const CurrentMonthDraft: React.FC<{ threshold: number; canteenName: string }> = ({ threshold, canteenName }) => {
+  const [draft, setDraft] = useState<{ asOf: string; result: PoolingResult; names: Record<string, string> } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const gen = useRef(0);
+  const load = useCallback(async () => {
+    const g = ++gen.current; const asOf = istBusinessDate(new Date()); const [y, m] = asOf.split('-').map(Number);
+    setLoading(true);
+    try {
+      const p = await previewPoolingBills(m, y, threshold, asOf);
+      if (g === gen.current) { setDraft({ asOf, result: p.result, names: p.memberNames }); setError(''); }
+    } catch (e: any) { if (g === gen.current) setError(e?.message || 'Could not calculate.'); }
+    finally { if (g === gen.current) setLoading(false); }
+  }, [threshold]);
+  useEffect(() => {
+    let timer: number | undefined;
+    const schedule = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void load(), 300); }; // coalesce bursts
+    const onVisible = () => { if (document.visibilityState === 'visible') schedule(); };
+    void load();
+    window.addEventListener(POOLING_INPUTS_CHANGED, schedule); window.addEventListener('focus', schedule); document.addEventListener('visibilitychange', onVisible);
+    let channel: any = null;
+    if (supabase?.channel) { channel = supabase.channel('gocanteen-pooling-draft-sync'); for (const t of DRAFT_TABLES) channel = channel.on('postgres_changes', { event: '*', schema: 'public', table: t }, schedule); channel = channel.subscribe(); }
+    return () => {
+      gen.current++; window.clearTimeout(timer);
+      window.removeEventListener(POOLING_INPUTS_CHANGED, schedule); window.removeEventListener('focus', schedule); document.removeEventListener('visibilitychange', onVisible);
+      if (channel) void channel.unsubscribe();
+    };
+  }, [load]);
+  const download = async () => {
+    if (!draft || pdfBusy) return; setPdfBusy(true);
+    try { await poolingDraftPdfAdapter.download(buildPoolingDraftPdfModel(draft.result, draft.names, canteenName, draft.asOf)); }
+    catch (e: any) { setError(e?.message || 'Could not generate the PDF.'); } finally { setPdfBusy(false); }
+  };
+  const r = draft?.result;
+  return <section aria-label="Current month" className="min-w-0 space-y-2 rounded-2xl border bg-white p-4 shadow-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div><div className="font-bold text-primary-900">{r ? monthLabel(r.year, r.month) : 'Current month'}</div>{draft && <div className="text-xs font-semibold text-amber-700">Draft as of {displayBusinessDate(draft.asOf)}</div>}</div>
+      <AsyncActionButton type="button" loading={pdfBusy} loadingLabel="Generating PDF…" disabled={!draft || loading || pdfBusy} onClick={() => void download()} className="rounded-lg border px-3 py-2 text-sm font-medium">Download PDF</AsyncActionButton>
+    </div>
+    {error && <div className="text-sm text-red-700">{error}</div>}
+    {!r && loading && <div className="text-sm text-gray-600">Calculating…</div>}
+    {r && <>
+      <div className="flex justify-between text-sm"><span>Expenses so far</span><b>{rs(r.expenseTotalPaise)}</b></div>
+      <div className="divide-y text-sm">{r.lines.map(l => <div key={l.memberId} data-draft-member={l.memberId} className="grid gap-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+        <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{draft!.names[l.memberId] || 'Member'}</div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · Mess cut (${l.excludedDays})` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
+        <div className="text-right font-bold">{rs(l.totalPaise)}</div>
+      </div>)}</div>
+    </>}
+  </section>;
+};
 
 /** Pooling-mode monthly bills: preview -> lock snapshot -> publish (existing bill format). */
 const PoolingMonthlyBills: React.FC = () => {
   const { settings } = useBillingSettings();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const { year, month } = previousBillingPeriod(new Date());
   const [result, setResult] = useState<PoolingResult | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
@@ -45,8 +108,9 @@ const PoolingMonthlyBills: React.FC = () => {
     setMessage(errors.length ? `Some bills failed: ${errors.join('; ')}` : 'Bills published.');
   };
   return <div className="min-w-0 space-y-4">
-    <div><h3 className="text-2xl font-bold text-primary-900">Monthly Bills — Pooling</h3>
-      <p className="mt-1 text-sm text-gray-600">{label}</p></div>
+    <div><h3 className="text-2xl font-bold text-primary-900">Monthly Bills — Pooling</h3></div>
+    {isAdmin && <CurrentMonthDraft threshold={settings.messCutMinDays} canteenName={user?.canteenName || ''} />}
+    <p className="text-sm font-semibold text-gray-700">{label}</p>
     {message && <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{message}</div>}
     {busy === 'load' && !result && <div className="rounded-xl border bg-gray-50 p-4 text-sm text-gray-600">Calculating…</div>}
     {result && <>

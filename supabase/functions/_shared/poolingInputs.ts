@@ -5,15 +5,17 @@
 // tenant scoped.
 import { type PoolingInput, type PoolingMember, monthStart, monthEnd, toPaise, istBusinessDate } from './poolingBilling.ts';
 
-export interface PoolingSource { canteenId: string; year: number; month: number; messCutMinDays: number }
+export interface PoolingSource { canteenId: string; year: number; month: number; messCutMinDays: number; /** running-month draft cutoff (inclusive) */ asOf?: string }
 
 async function q<T = any>(p: PromiseLike<{ data: T[] | null; error: any }>): Promise<T[]> {
   const { data, error } = await p; if (error) throw error; return data || [];
 }
 
 export async function loadPoolingInput(db: any, src: PoolingSource): Promise<PoolingInput & { memberNames: Record<string, string> }> {
-  const start = monthStart(src.year, src.month), end = monthEnd(src.year, src.month);
-  const [expenses, orders, profiles, holidays, holidaySettings, adjustments] = await Promise.all([
+  const start = monthStart(src.year, src.month), fullEnd = monthEnd(src.year, src.month);
+  const end = src.asOf && src.asOf < fullEnd ? src.asOf : fullEnd;
+  const inWin = (d: any) => { const x = String(d ?? '').slice(0, 10); return x >= start && x <= end; };
+  const [expenses0, orders0, profiles, holidays0, holidaySettings, adjustments0] = await Promise.all([
     q(db.from('expenses').select('id,expense_date,amount').eq('canteen_id', src.canteenId).gte('expense_date', start).lte('expense_date', end)),
     q(db.from('orders').select('id,employee_id,ordered_for,status,order_items(item_source,quantity,pooling_special,pooling_special_unit_paise)').eq('canteen_id', src.canteenId).gte('ordered_for', start).lte('ordered_for', end)),
     q(db.from('profiles').select('id,full_name,role,status,created_at').eq('canteen_id', src.canteenId).eq('role', 'employee')),
@@ -21,6 +23,9 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
     q(db.from('holiday_settings').select('recurring_weekdays').eq('canteen_id', src.canteenId)),
     q(db.from('employee_adjustments').select('employee_id,amount,adjustment_date').eq('canteen_id', src.canteenId).gte('adjustment_date', start).lte('adjustment_date', end)),
   ]);
+  // Same window enforced client-side too, so nothing after the cutoff can leak into a draft.
+  const expenses = expenses0.filter((e: any) => inWin(e.expense_date)), orders = orders0.filter((o: any) => inWin(o.ordered_for));
+  const holidays = holidays0.filter((h: any) => inWin(h.holiday_date)), adjustments = adjustments0.filter((a: any) => inWin(a.adjustment_date));
   // Membership periods (join/leave dates). Missing table (migration not applied) => legacy behaviour.
   let periods: any[] | null = null;
   { const { data, error } = await db.from('pooling_member_periods').select('employee_id,joined_on,left_on').eq('canteen_id', src.canteenId).lte('joined_on', end);
@@ -50,7 +55,7 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
     return [{ memberId: p.id, activeFrom: p.created_at ? istBusinessDate(new Date(p.created_at)) : null, activeTo: null, adminAddedPaise: Math.max(0, adminAdded.get(p.id) || 0) }];
   });
   return {
-    year: src.year, month: src.month, messCutMinDays: src.messCutMinDays,
+    year: src.year, month: src.month, messCutMinDays: src.messCutMinDays, ...(src.asOf ? { asOf: src.asOf } : {}),
     expenses: (expenses as any[]).map(e => ({ id: e.id, date: String(e.expense_date).slice(0, 10), amountPaise: toPaise(e.amount) })).filter(e => e.amountPaise > 0),
     orders: (orders as any[]).map(o => {
       const items = Array.isArray(o.order_items) ? o.order_items : [];

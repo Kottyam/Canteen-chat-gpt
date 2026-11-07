@@ -83,6 +83,9 @@ export interface PoolingInput {
   /** Special priced items (server snapshot, integer paise) per member: own items + guest items they ordered.
    *  Added on top of the pool share; never deducted from expenses (owner t57u/t57s265). */
   specials?: Record<string, { memberPaise: number; guestPaise: number }>;
+  /** Optional as-of business date (running month draft). Caps the window at this date: later days,
+   *  orders, expenses and memberships are not counted. Omitted => the full completed-month result. */
+  asOf?: string;
 }
 export interface PoolingLine {
   memberId: string;
@@ -173,7 +176,9 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
   const { year, month } = input;
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) throw new Error('Invalid billing month');
   const threshold = Math.max(1, Math.floor(Number(input.messCutMinDays) || DEFAULT_BILLING_SETTINGS.messCutMinDays));
-  const start = monthStart(year, month), end = monthEnd(year, month);
+  const start = monthStart(year, month), fullEnd = monthEnd(year, month);
+  if (input.asOf != null && !(typeof input.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.asOf) && input.asOf >= start)) throw new Error('Invalid as-of date');
+  const end = input.asOf && input.asOf < fullEnd ? input.asOf : fullEnd;
   const inMonth = (d: string) => typeof d === 'string' && d >= start && d <= end;
   const warnings: string[] = [];
   const issues: string[] = [];
@@ -192,6 +197,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
   const operating: string[] = [];
   for (let d = 1; d <= daysInMonth(year, month); d++) {
     const date = `${year}-${pad(month)}-${pad(d)}`;
+    if (date > end) break;
     if (holidays.has(date) || weekly.has(weekdayOf(date))) continue;
     operating.push(date);
   }
