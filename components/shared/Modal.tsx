@@ -15,7 +15,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={onClose}>
             <div className="relative w-full max-w-lg p-8 mx-4 bg-white rounded-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between">
-                    <h3 className="text-2xl font-semibold text-gray-900">{title}</h3>
+                    <h3 className="text-2xl font-semibold text-primary-900">{title}</h3>
                     <button
                         onClick={onClose}
                         className="p-1 ml-auto text-gray-400 bg-transparent rounded-lg hover:bg-gray-200 hover:text-gray-900"

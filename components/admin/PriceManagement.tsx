@@ -59,19 +59,19 @@ const PriceManagement: React.FC = () => {
   return (
     <div className="w-full min-w-0">
       <div className="mb-5">
-        <h3 className="text-xl font-bold text-gray-800 sm:text-2xl">Price Setup</h3>
-        <p className="mt-1 text-sm text-gray-500">
+        <h3 className="text-xl font-bold text-primary-900 sm:text-2xl">Price Setup</h3>
+        <p className="mt-1 text-sm text-gray-600">
           Edit the current prices. Use Menu Management for adding, renaming or deactivating menu items.
         </p>
       </div>
 
       {success && (
-        <div className="mb-4 rounded-md bg-green-100 p-3 text-sm text-green-700">
+        <div className="mb-4 rounded-lg bg-green-100 p-3 text-sm text-green-700">
           {success}
         </div>
       )}
       {error && (
-        <div className="mb-4 rounded-md bg-red-100 p-3 text-sm text-red-700">
+        <div className="mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700">
           {error}
         </div>
       )}
@@ -80,14 +80,14 @@ const PriceManagement: React.FC = () => {
         {MENU.map(({ key, label }) => (
           <div
             key={key}
-            className="flex flex-col gap-2 rounded-lg border bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-4"
+            className="flex flex-col gap-2 rounded-2xl border bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-4"
           >
             <label htmlFor={`price-${key}`} className="text-sm font-medium text-gray-700 sm:text-base">
               {label}
             </label>
 
             <div className="flex w-full items-center sm:w-40">
-              <span className="rounded-l-md border border-r-0 bg-gray-50 px-3 py-2 text-gray-500">₹</span>
+              <span className="rounded-l-md border border-r-0 bg-gray-50 px-3 py-2 text-gray-600">₹</span>
               <input
                 id={`price-${key}`}
                 type="number"
@@ -106,14 +106,14 @@ const PriceManagement: React.FC = () => {
         <div className="flex flex-col gap-2 pt-2 sm:flex-row">
           <button
             type="submit"
-            className="w-full rounded-md bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700 sm:w-auto"
+            className="w-full rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700 sm:w-auto shadow-sm"
           >
             Save Prices
           </button>
           <button
             type="button"
             onClick={resetPrices}
-            className="w-full rounded-md bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-200 sm:w-auto"
+            className="w-full rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-200 sm:w-auto"
           >
             Reset
           </button>

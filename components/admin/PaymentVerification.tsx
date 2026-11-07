@@ -98,10 +98,10 @@ const PaymentVerification: React.FC = () => {
   }, [rows]);
 
   return (
-    <section className="mt-6 rounded-xl border bg-white p-4">
+    <section className="mt-6 rounded-2xl border bg-white p-4">
       <div>
-        <h4 className="text-xl font-bold text-gray-800">Payment Verification</h4>
-        <p className="mt-1 text-sm text-gray-500">Each Publish/Re-Publish payment request is shown as a separate batch.</p>
+        <h4 className="text-xl font-bold text-primary-900">Payment Verification</h4>
+        <p className="mt-1 text-sm text-gray-600">Each Publish/Re-Publish payment request is shown as a separate batch.</p>
       </div>
       <div className="mt-4">
         <select
@@ -120,7 +120,7 @@ const PaymentVerification: React.FC = () => {
         </select>
       </div>
       {!groups.length ? (
-        <p className="mt-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-500">No payment batches for this month.</p>
+        <p className="mt-4 rounded-lg bg-gray-50 p-4 text-sm text-gray-600">No payment batches for this month.</p>
       ) : (
         <div className="mt-4 space-y-5">
           {groups.map(batchRows => {
@@ -141,12 +141,12 @@ const PaymentVerification: React.FC = () => {
                 <div className="flex flex-wrap justify-between gap-3">
                   <div>
                     <div className="font-bold text-gray-800">{name}</div>
-                    {mobile && <div className="text-sm text-gray-500">Mobile: {mobile}</div>}
-                    <div className="text-sm text-gray-500">{new Date(b.bill_year, b.bill_month - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })}</div>
+                    {mobile && <div className="text-sm text-gray-600">Mobile: {mobile}</div>}
+                    <div className="text-sm text-gray-600">{new Date(b.bill_year, b.bill_month - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })}</div>
                     {reminderCount > 0 && <div className="mt-2 text-xs font-semibold text-primary-700">{reminderLabel(reminderCount)}</div>}
                   </div>
                   <div className="text-right">
-                    <div className="text-xs font-semibold text-gray-500">Bill Amount</div>
+                    <div className="text-xs font-semibold text-gray-600">Bill Amount</div>
                     <div className="text-lg font-bold">₹{Number(b.total || 0).toFixed(2)}</div>
                     <div className="text-sm">Received ₹{received.toFixed(2)} · Pending ₹{pending.toFixed(2)}</div>
                     <div className={`text-xs font-semibold ${fullyPaid ? 'text-green-700' : 'text-amber-700'}`}>{fullyPaid ? 'Paid' : 'Pending'}</div>
@@ -162,8 +162,8 @@ const PaymentVerification: React.FC = () => {
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <div className="font-bold">Payment Batch #{p.request_sequence || i + 1}</div>
-                            <div className="text-xs text-gray-500">{p.covered_through ? `Covered through ${new Date(`${p.covered_through}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}</div>
-                            {p.payment_reference && <div className="mt-1 break-all text-xs text-gray-500">Ref: {p.payment_reference}</div>}
+                            <div className="text-xs text-gray-600">{p.covered_through ? `Covered through ${new Date(`${p.covered_through}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}</div>
+                            {p.payment_reference && <div className="mt-1 break-all text-xs text-gray-600">Ref: {p.payment_reference}</div>}
                           </div>
                           <div className="text-right">
                             <div className="text-lg font-bold">₹{Number(p.amount || 0).toFixed(2)}</div>
@@ -174,7 +174,7 @@ const PaymentVerification: React.FC = () => {
                         </div>
 
                         {(p.status === 'unpaid' || p.status === 'pending_verification') && (
-                          <AsyncActionButton type="button" loading={busy === p.id} loadingLabel="Updating Payment…" disabled={busy !== null && busy !== p.id} onClick={() => void setStatus(p.id, 'paid')} className="mt-3 w-full min-h-11 rounded-lg bg-primary-600 px-4 font-semibold text-white">Mark as Paid</AsyncActionButton>
+                          <AsyncActionButton type="button" loading={busy === p.id} loadingLabel="Updating Payment…" disabled={busy !== null && busy !== p.id} onClick={() => void setStatus(p.id, 'paid')} className="mt-3 w-full min-h-11 rounded-lg bg-primary-600 px-4 font-semibold text-white shadow-sm">Mark as Paid</AsyncActionButton>
                         )}
                         {p.status === 'pending_verification' && (
                           <AsyncActionButton type="button" loading={busy === p.id} loadingLabel="Updating Payment…" disabled={busy !== null && busy !== p.id} onClick={() => void setStatus(p.id, 'not_received')} className="mt-2 w-full min-h-11 rounded-lg border border-gray-300 px-4 font-semibold text-gray-700">Not Received</AsyncActionButton>
@@ -182,7 +182,7 @@ const PaymentVerification: React.FC = () => {
                         {showReminder && (
                           <div className="mt-3">
                             <AsyncActionButton type="button" loading={busy === `reminder:${b.id}`} loadingLabel="Sending Reminder…" disabled={busy !== null} onClick={() => void sendReminder(b, p, pending)} className="w-full min-h-11 rounded-lg border border-primary-600 px-4 font-semibold text-primary-700">Send Reminder</AsyncActionButton>
-                            {reminderCount > 0 && <p className="mt-2 text-center text-xs font-semibold text-gray-500">{reminderLabel(reminderCount)}</p>}
+                            {reminderCount > 0 && <p className="mt-2 text-center text-xs font-semibold text-gray-600">{reminderLabel(reminderCount)}</p>}
                           </div>
                         )}
                         {p.status === 'not_received' && <div className="mt-3 rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-800">Not received. The payment request can be paid again.</div>}

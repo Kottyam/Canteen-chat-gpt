@@ -133,23 +133,23 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Change Password">
       <form onSubmit={handleSubmit} className="space-y-4">
-        {error && <div className="p-3 text-sm text-red-700 bg-red-100 rounded-md">{error}</div>}
-        {success && <div className="p-3 text-sm text-green-700 bg-green-100 rounded-md">{success}</div>}
+        {error && <div className="p-3 text-sm text-red-700 bg-red-100 rounded-lg">{error}</div>}
+        {success && <div className="p-3 text-sm text-green-700 bg-green-100 rounded-lg">{success}</div>}
         <div>
           <label className="block text-sm font-medium text-gray-700">Current Password</label>
-          <input disabled={saving} type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm disabled:bg-gray-50" required />
+          <input disabled={saving} type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm disabled:bg-gray-50" required />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700">New Password</label>
-          <input disabled={saving} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm disabled:bg-gray-50" required />
+          <input disabled={saving} type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm disabled:bg-gray-50" required />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700">Confirm New Password</label>
-          <input disabled={saving} type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-md border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm disabled:bg-gray-50" required />
+          <input disabled={saving} type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-300 rounded-lg border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm disabled:bg-gray-50" required />
         </div>
         <div className="flex justify-end pt-4">
-          <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 mr-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50">Cancel</button>
-          <AsyncActionButton type="submit" loading={saving} loadingLabel="Updating Password…" className="px-4 py-2 text-sm font-medium text-white border border-transparent rounded-md shadow-sm bg-primary-600 hover:bg-primary-700">Update Password</AsyncActionButton>
+          <button type="button" onClick={onClose} disabled={saving} className="px-4 py-2 mr-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50">Cancel</button>
+          <AsyncActionButton type="submit" loading={saving} loadingLabel="Updating Password…" className="px-4 py-2 text-sm font-medium text-white border border-transparent rounded-lg shadow-sm bg-primary-600 hover:bg-primary-700">Update Password</AsyncActionButton>
         </div>
       </form>
     </Modal>
