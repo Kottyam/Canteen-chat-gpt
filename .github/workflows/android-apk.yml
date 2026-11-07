@@ -186,21 +186,14 @@ jobs:
               </style>
           </resources>
           EOF
-      - name: Apply text-only Go launcher icon
+      - name: Apply Go Canteen brand launcher icons
         run: |
           set -e
-          python3 -m pip install --quiet pillow
-          python3 - <<'PY'
-          from PIL import Image, ImageDraw, ImageFont
-          from pathlib import Path
-          sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
-          root = Path('android/app/src/main/res'); green='#008A5A'; font_path='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-          for folder,size in sizes.items():
-              out=root/folder; out.mkdir(parents=True,exist_ok=True); image=Image.new('RGB',(size,size),'white'); draw=ImageDraw.Draw(image)
-              font=ImageFont.truetype(font_path,max(10,int(size*0.32))); text='Go'; bbox=draw.textbbox((0,0),text,font=font); tw,th=bbox[2]-bbox[0],bbox[3]-bbox[1]
-              draw.text(((size-tw)/2,(size-th)/2-bbox[1]),text,font=font,fill=green); image.save(out/'ic_launcher.png','PNG'); image.save(out/'ic_launcher_round.png','PNG')
-          PY
+          # Pre-generated from the real Go Canteen logo (resources/android/res): legacy, round and adaptive icons.
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          cp -R resources/android/res/. android/app/src/main/res/
+          test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
       - name: Sync Capacitor
         run: npx cap sync android
       - name: Configure Android release signing
