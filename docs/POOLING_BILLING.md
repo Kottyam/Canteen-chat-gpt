@@ -1,6 +1,6 @@
 # Opt-in Pooling billing & Automatic monthly bill sending
 
-**Status: test branch only. Migration committed but NOT applied. Edge Function NOT deployed. No scheduler installed.**
+**Status: merged to main; NOT applied to production. See docs/POOLING_DEPLOYMENT_PLAN.md.**
 
 ## Settings (per canteen, Settings → Billing Mode, needs `payments` permission)
 | key | default (row absent) | values |
