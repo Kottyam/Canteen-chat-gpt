@@ -40,7 +40,7 @@ create table if not exists public.profiles(
   full_name text, mobile_number text, employee_code text, sr_number text, admin_role text,
   is_first_login boolean default false, created_at timestamptz not null default now(), updated_at timestamptz default now(),
   email text, auth_provider text, member_login_mode text, deleted_at timestamptz);
-create table if not exists public.admin_permissions(admin_id uuid references public.profiles(id) on delete cascade, permission text, primary key(admin_id, permission));
+create table if not exists public.admin_permissions(admin_id uuid references public.profiles(id) on delete cascade, permission text, canteen_id uuid, enabled boolean not null default true, primary key(admin_id, permission));
 create table if not exists public.menu_prices(item_code text primary key, item_name text, unit_price numeric not null default 0, active boolean default true, archived boolean default false, updated_at timestamptz default now());
 create table if not exists public.daily_menu(id uuid primary key default gen_random_uuid(), menu_date date, item_code text, item_name text, unit_price numeric default 0, active boolean default true);
 create table if not exists public.holidays(id uuid primary key default gen_random_uuid(), holiday_date date unique, created_at timestamptz default now());

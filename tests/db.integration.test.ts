@@ -2,7 +2,7 @@
 // Run: bash supabase/tests/run-db-tests.sh  (creates a throwaway local DB; synthetic data only)
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { makeClient, sql } from '../supabase/tests/pgAdapter.ts';
 import { computePoolingBills } from '../supabase/functions/_shared/poolingBilling.ts';
 import { loadPoolingInput, poolingPayload } from '../supabase/functions/_shared/poolingInputs.ts';
@@ -19,6 +19,13 @@ const su = (q: string) => { const r = sql(URL!, { role: 'service_role' }, q); re
 const pg = (q: string) => { const r = sql(URL!.replace(/$/, ''), { role: 'service_role' }, q); if (r.error) throw new Error(r.error.message); return r.rows; };
 const as = (sub: string) => makeClient(URL!, { role: 'authenticated', sub });
 const svc = () => makeClient(URL!, { role: 'service_role' });
+
+
+// superuser (local throwaway DB only) for synthetic fixture setup inside a test
+const root = (q: string) => { const r = spawnSync('psql', [URL!, '-X', '-q', '-tA', '-v', 'ON_ERROR_STOP=1', '-c', q], { encoding: 'utf8' }); if (r.status !== 0) throw new Error(r.stderr); return r.stdout.trim(); };
+const cnt = (q: string) => Number(root(q));
+const C4 = 'c4000000-0000-0000-0000-000000000000', O4 = '44444444-0000-0000-0000-000000000001', M4 = '44444444-0000-0000-0000-0000000000e1', E4 = '44444444-0000-0000-0000-0000000000d1';
+const C5 = 'c5000000-0000-0000-0000-000000000000', O5 = '55555555-0000-0000-0000-000000000001', E5 = '55555555-0000-0000-0000-0000000000d1';
 
 test('db integration', { skip }, async (t) => {
   await t.test('settings absent => standard default; pooling RPCs refuse', async () => {
@@ -152,4 +159,71 @@ test('db integration', { skip }, async (t) => {
     const again = await runAutoSend({ db: svc(), now, liveSend: true });
     assert.equal(again.sent, 0);
   });
+  await t.test('guard: Standard publish refused in a Pooling canteen; Standard canteens unchanged', async () => {
+    // C1 is pooling (set above). Owner with payments permission still cannot create a Standard bill there.
+    root(`select set_config('request.jwt.claims','{"role":"authenticated","sub":"${O1}"}',false);
+      insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('aaaa0000-0000-0000-0000-000000000001','${A}','2026-08-10','active','admin','${C1}');
+      insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('aaaa0000-0000-0000-0000-000000000001','meal','Meals',1,55,'employee','${C1}');`);
+    const before = cnt(`select count(*) from public.monthly_bills where canteen_id='${C1}'`);
+    const r = await as(O1).rpc('publish_employee_bill', { p_employee_id: A, p_month: 8, p_year: 2026, p_food_total: 0, p_admin_added_total: 0 });
+    assert.match(r.error.message, /uses Pooling billing/);
+    assert.equal(cnt(`select count(*) from public.monthly_bills where canteen_id='${C1}'`), before);
+    // direct owner insert path (RLS bills_owner_write) is guarded too
+    assert.match(sql(URL!, { role: 'authenticated', sub: O1 }, `insert into public.monthly_bills(employee_id,bill_month,bill_year,canteen_id,total,published) values('${A}',7,2026,'${C1}',1,true)`).error.message, /uses Pooling billing/);
+    // Standard canteen C3: manual publish via the unchanged function still works
+    root(`select set_config('request.jwt.claims','{"role":"authenticated","sub":"${O3}"}',false);
+      insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('aaaa0000-0000-0000-0000-000000000003','${D1}','2026-08-11','active','admin','${C3}');
+      insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('aaaa0000-0000-0000-0000-000000000003','meal','Meals',2,40,'employee','${C3}');`);
+    const ok = await as(O3).rpc('publish_employee_bill', { p_employee_id: D1, p_month: 8, p_year: 2026, p_food_total: 0, p_admin_added_total: 0 });
+    assert.equal(ok.error, null); assert.equal(Number(ok.data.total), 80);
+    assert.equal(cnt(`select count(*) from public.bill_payments where bill_id='${ok.data.id}'`), 1);
+    // flag is not left on after a pooling publish (transaction-local and reset)
+    assert.equal(root(`select coalesce(current_setting('gocanteen.pooling_publish',true),'')`), '');
+  });
+
+  await t.test('auto Standard actor: password owner w/o permission skipped, permitted master used; none permitted => safe failure', async () => {
+    root(`insert into auth.users(id,email) values('${O4}','o4@test'),('${M4}','m4@test'),('${E4}','e4@test'),('${O5}','o5@test'),('${E5}','e5@test');
+      insert into public.canteens(id,name,owner_id) values('${C4}','Std Password Owner','${O4}'),('${C5}','Std No Payer','${O5}');
+      insert into public.profiles(id,role,status,full_name,employee_code,admin_role,canteen_id,created_at) values
+        ('${O4}','admin','active','Owner Four','o4','owner','${C4}','2026-01-01'),
+        ('${M4}','admin','active','Master Four','x4','master_admin','${C4}','2026-01-02'),
+        ('${E4}','employee','active','Member Four','e4','owner','${C4}','2026-01-01'),
+        ('${O5}','admin','active','Owner Five','o5','owner','${C5}','2026-01-01'),
+        ('${E5}','employee','active','Member Five','e5','owner','${C5}','2026-01-01');
+      insert into public.admin_permissions(admin_id,canteen_id,permission,enabled) values('${M4}','${C4}','payments',true);
+      select set_config('request.jwt.claims','{"role":"authenticated","sub":"${M4}"}',false);
+      insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values('aaaa0000-0000-0000-0000-000000000004','${E4}','2026-08-12','active','admin','${C4}'),('aaaa0000-0000-0000-0000-000000000005','${E5}','2026-08-12','active','admin','${C5}');
+      insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values('aaaa0000-0000-0000-0000-000000000004','meal','Meals',1,30,'employee','${C4}'),('aaaa0000-0000-0000-0000-000000000005','meal','Meals',1,30,'employee','${C5}');`);
+    const perms = cnt(`select count(*) from public.admin_permissions`);
+    // sanity: under the REAL production rules (real-schema facsimile) a non-Google owner without a payments row lacks permission.
+    // The legacy approximate stub schema is looser, so this precondition is only asserted when the real definition is loaded.
+    const realRules = root(`select count(*) from pg_proc where proname='has_admin_permission' and prosrc like '%is_google_owner%'`) !== '0';
+    if (realRules) assert.match((await as(O4).rpc('publish_employee_bill', { p_employee_id: E4, p_month: 8, p_year: 2026, p_food_total: 0, p_admin_added_total: 0 })).error.message, /permission required/);
+    const r4 = await svc().rpc('auto_bill_publish_standard', { p_canteen: C4, p_employee: E4, p_month: 8, p_year: 2026 });
+    assert.equal(r4.error, null); assert.equal(Number(r4.data.total), 30); assert.equal(r4.data.canteen_id, C4);
+    const r5 = await svc().rpc('auto_bill_publish_standard', { p_canteen: C5, p_employee: E5, p_month: 8, p_year: 2026 });
+    if (realRules) {
+      assert.match(r5.error?.message ?? '', /No active owner\/master admin with payments permission/);
+      assert.equal(cnt(`select count(*) from public.monthly_bills where canteen_id='${C5}'`), 0);
+    }
+    assert.equal(cnt(`select count(*) from public.admin_permissions`), perms); // nothing granted
+    // still not callable by app users
+    assert.match((await as(O4).rpc('auto_bill_publish_standard', { p_canteen: C4, p_employee: E4, p_month: 8, p_year: 2026 })).error.message, /permission denied/);
+  });
+  await t.test('cron runtime gate: Vault secret compare, default dry run, service-only, fail closed', async () => {
+    const auth = async (secret: string) => (await svc().rpc('auto_bill_authorize', { p_secret: secret }));
+    assert.deepEqual((await auth('x'.repeat(40))).data, { ok: false, live: false }); // no secret configured yet
+    assert.match((await as(O1).rpc('auto_bill_authorize', { p_secret: 'x' })).error.message, /permission denied/);
+    assert.equal(cnt(`select count(*) from information_schema.role_table_grants where table_schema='gocanteen_private' and table_name='auto_bill_runtime' and grantee in ('anon','authenticated')`), 0);
+    const hasVault = root(`select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='vault' and proname='create_secret'`) !== '0';
+    if (!hasVault) return;
+    const SYN = 'synthetic-test-secret-' + 'z'.repeat(20); // synthetic, local throwaway DB only
+    root(`select vault.create_secret('${SYN}','auto_bill_cron_secret')`);
+    assert.deepEqual((await auth(SYN)).data, { ok: true, live: false });
+    assert.deepEqual((await auth(SYN + 'x')).data, { ok: false, live: false });
+    root(`update gocanteen_private.auto_bill_runtime set live=true`);
+    assert.deepEqual((await auth(SYN)).data, { ok: true, live: true });
+    root(`update gocanteen_private.auto_bill_runtime set live=false; delete from vault.secrets where name='auto_bill_cron_secret'`);
+  });
 });
+
