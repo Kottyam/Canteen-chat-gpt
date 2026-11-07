@@ -1,0 +1,18 @@
+-- gocanteen (cdrjfukxirkanrdklnli) rollback for 2026-11-07 pooling/auto-send rollout. NEVER drops bill history.
+-- Pre-change fingerprints: publish_employee_bill md5 0bcdb943f585593cbc002784313a81c0 (untouched by rollout),
+-- has_admin_permission md5 03fa53f5fd755f66ce86932683301ac8, monthly_bills triggers: set_canteen_id_trigger,
+-- snapshot_member_identity_bills, trg_snapshot_bill_upi. Counts pre: tables 32, functions 120, policies 87, triggers 46.
+-- Step A (stop scheduler):       select cron.unschedule('gocanteen-auto-bill-send');
+-- Step B (revoke cron auth):     delete from vault.secrets where name='auto_bill_cron_secret';
+-- Step C (keep sending off):     update gocanteen_private.auto_bill_runtime set live=false;
+-- Step D (remove guard only if it misbehaves): drop trigger if exists zz_guard_pooling_standard_bill on public.monthly_bills;
+-- Step E (function): delete Edge Function auto-send-monthly-bills in dashboard, or leave (401 without Vault secret).
+-- Step F (schema, ONLY if all new tables are empty — check first):
+--   select (select count(*) from public.pooling_bill_runs)+(select count(*) from public.pooling_bill_lines)
+--         +(select count(*) from public.bill_auto_send_attempts)+(select count(*) from public.canteen_billing_settings);
+--   if 0: drop function public.auto_bill_authorize(text), public.auto_bill_record_attempt, public.auto_bill_publish_standard,
+--         public.auto_bill_publish_pooling_line, public.auto_bill_save_pooling_run, public.publish_pooling_bill,
+--         public.save_pooling_bill_run, public.set_canteen_billing_settings; drop schema gocanteen_private cascade;
+--         drop table public.bill_auto_send_attempts, public.pooling_bill_lines, public.pooling_bill_runs, public.canteen_billing_settings;
+--         delete from supabase_migrations.schema_migrations where version in ('20261107100000','20261107101029');
+-- Never drop/alter monthly_bills, bill_payments, notifications.
