@@ -25,6 +25,8 @@ const PoolingMonthlyBills: React.FC = () => {
     finally { setBusy(null); }
   };
   useEffect(() => { void refresh(); }, [settings.messCutMinDays]);
+  // a published member shows the amount actually billed (saved snapshot), not the live recalculation
+  const publishedTotal = (id: string): number | undefined => { const l = run?.pooling_bill_lines?.find((x: any) => x.employee_id === id); return l?.monthly_bill_id ? Number(l.total_paise) : undefined; };
   const sentFor = (id: string) => run?.pooling_bill_lines?.find((l: any) => l.employee_id === id)?.monthly_bill_id;
   const lock = async () => {
     if (!result || !window.confirm(`Save the ${label} pooling calculation? You can recalculate until bills are published.`)) return;
@@ -44,29 +46,25 @@ const PoolingMonthlyBills: React.FC = () => {
   };
   return <div className="min-w-0 space-y-4">
     <div><h3 className="text-2xl font-bold text-primary-900">Monthly Bills — Pooling</h3>
-      <p className="mt-1 text-sm text-gray-600">{label} · Expenses from the Expenses section are shared among members. Mess cut at {settings.messCutMinDays}+ no-order days. Sending: {settings.billSendMode === 'automatic' ? 'Automatic' : 'Manual'}.</p></div>
+      <p className="mt-1 text-sm text-gray-600">{label}</p></div>
     {message && <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{message}</div>}
     {busy === 'load' && !result && <div className="rounded-xl border bg-gray-50 p-4 text-sm text-gray-600">Calculating…</div>}
     {result && <>
       <div className="grid gap-2 rounded-2xl border bg-white p-4 text-sm shadow-sm sm:grid-cols-2">
         <div className="flex justify-between"><span>Total expenses</span><b>{rs(result.expenseTotalPaise)}</b></div>
-        <div className="flex justify-between"><span>Operating days</span><b>{result.operatingDays.length}</b></div>
-        <div className="flex justify-between"><span>Shared daily</span><b>{rs(result.dailyExpensePaise)}</b></div>
-        <div className="flex justify-between"><span>Shared monthly (non-operating-day expenses)</span><b>{rs(result.overheadExpensePaise)}</b></div>
         {result.unallocatedPaise > 0 && <div className="flex justify-between text-red-700 sm:col-span-2"><span>Unallocated (needs review)</span><b>{rs(result.unallocatedPaise)}</b></div>}
-        {result.warnings.map(w => <div key={w} className="text-amber-700 sm:col-span-2">{w}</div>)}
+        {(result.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700 sm:col-span-2">{w}</div>)}
       </div>
       <div className="space-y-2">{result.lines.map(l => <div key={l.memberId} className="grid gap-1 rounded-xl border bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · Mess cut (${l.excludedDays} days not charged)` : ''} · Charged days {l.chargeableDays}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
-        <div className="text-right"><div className="text-lg font-bold">{rs(l.totalPaise)}</div>{sentFor(l.memberId) && <div className="text-xs font-semibold text-primary-700">Published</div>}</div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · Mess cut (${l.excludedDays} days not charged)` : ''} · Charged days {l.chargeableDays}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}</div></div>
+        <div className="text-right"><div className="text-lg font-bold">{rs(publishedTotal(l.memberId) ?? l.totalPaise)}</div>{sentFor(l.memberId) && <div className="text-xs font-semibold text-primary-700">Published</div>}</div>
       </div>)}</div>
       <div className="flex flex-wrap gap-2">
         <AsyncActionButton type="button" loading={busy === 'load'} loadingLabel="Calculating…" disabled={Boolean(busy)} onClick={() => void refresh()} className="rounded-lg border px-4 py-2.5 text-sm font-medium">Recalculate</AsyncActionButton>
         {run?.status !== 'published' && <AsyncActionButton type="button" loading={busy === 'save'} loadingLabel="Saving…" disabled={Boolean(busy)} onClick={() => void lock()} className="rounded-lg border border-primary-600 px-4 py-2.5 text-sm font-semibold text-primary-700">Save Calculation</AsyncActionButton>}
         <AsyncActionButton type="button" loading={busy === 'publish'} loadingLabel="Publishing…" disabled={Boolean(busy) || !run} onClick={() => void publishAll()} className="rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm">Publish Bills</AsyncActionButton>
       </div>
-      {run?.status === 'published' && <p className="text-xs text-gray-500">Bills for this month were published from the saved calculation; the list above is a live recalculation for reference only.</p>}
     </>}
   </div>;
 };

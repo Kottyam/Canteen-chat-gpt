@@ -59,7 +59,9 @@ test('closure is NOT inferred from no orders: a day nobody ordered is a no-order
   assert.equal(line(r, 'A').absentDays, 1); assert.equal(line(r, 'A').messCutApplied, true);
   // nobody chargeable on d15 -> its expense becomes monthly overhead shared by chargeable days (29 each)
   assert.equal(line(r, 'A').sharePaise + line(r, 'B').sharePaise, 600);
-  assert.ok(r.warnings.some(w => w.includes('2026-09-15')));
+  assert.ok(r.warnings.some(w => /No orders on 1 day \(15\)/.test(w)));
+  assert.equal(r.warnings.filter(w => /No orders/.test(w)).length, 1); // one grouped note, not one per day
+  assert.deepEqual(r.issues, []); // diagnostics only: nothing shown to the admin as an error
 });
 
 test('declared holidays / weekly offs are not no-order days; holiday expense = overhead by member-days', () => {
@@ -105,10 +107,42 @@ test('rounding: total distributed exactly with stable largest remainder', () => 
   assert.equal(toPaise('12.345'), 1235);
 });
 
-test('member join boundary: days before activeFrom are not absences', () => {
-  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'B', activeFrom: d(21) }], expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(21, 30))] }));
-  assert.equal(line(r, 'B').absentDays, 0); assert.equal(line(r, 'B').windowDays, 10);
-  assert.equal(line(r, 'B').sharePaise, 10 * 1500);
+// Owner rule t53s243: pre-join and post-exit operating days count toward the mess-cut threshold.
+test('join on day 21 (20 pre-join no-order days >= 6): mess cut, only eaten days charged', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'B', periods: [{ from: d(21) }] }], expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(21, 30))] }));
+  const b = line(r, 'B'); assert.equal(b.windowDays, 30); assert.equal(b.absentDays, 20); assert.equal(b.messCutApplied, true);
+  assert.equal(b.chargeableDays, 10); assert.equal(b.sharePaise, 10 * 1500); assert.equal(sum(r), 30 * 3000);
+});
+test('join in the last 5 days: qualifies for mess cut', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'B', periods: [{ from: d(26) }] }], expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(26, 30))] }));
+  assert.equal(line(r, 'B').messCutApplied, true); assert.equal(line(r, 'B').chargeableDays, 5);
+});
+test('join on day 4 with no other absence (3 < 6): no mess cut, full month share', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'B', periods: [{ from: d(4) }] }], expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(4, 30))] }));
+  const b = line(r, 'B'); assert.equal(b.absentDays, 3); assert.equal(b.messCutApplied, false);
+  assert.equal(b.chargeableDays, 30); assert.equal(b.sharePaise, 30 * 1500);
+});
+test('removed after day 27 (3 post-exit days < 6): stays billed for the month, full share', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'B', periods: [{ from: '2026-01-01', to: d(27) }] }], expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 27))] }));
+  assert.equal(line(r, 'B').messCutApplied, false); assert.equal(line(r, 'B').sharePaise, 30 * 1500);
+});
+test('post-exit + ordinary absence reaching 6 together: mess cut excludes all of them', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'B', periods: [{ from: '2026-01-01', to: d(25) }] }], expenses: daily,
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 25).filter(n => n !== 10))] }));
+  const b = line(r, 'B'); assert.equal(b.absentDays, 6); assert.equal(b.messCutApplied, true); assert.equal(b.chargeableDays, 24);
+  assert.equal(sum(r), 30 * 3000);
+});
+test('cohort: left before the month or joining after it is excluded; mid-month leaver kept; rejoin periods merge', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'OLD', periods: [{ from: '2026-01-01', to: '2026-08-31' }] },
+    { memberId: 'FUT', periods: [{ from: '2026-10-01' }] }, { memberId: 'LEFT', periods: [{ from: '2026-01-01', to: d(12) }] },
+    { memberId: 'RE', periods: [{ from: '2026-01-01', to: '2026-08-15' }, { from: d(2) }] }], expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('RE', range(2, 30))] }));
+  assert.deepEqual(r.lines.map((l: any) => l.memberId).sort(), ['A', 'LEFT', 'RE']);
+  assert.equal(line(r, 'LEFT').messCutApplied, true); // 18 post-exit days, no orders at all -> nothing charged
+  assert.equal(line(r, 'RE').absentDays, 1); assert.equal(line(r, 'RE').chargeableDays, 30);
+});
+test('legacy activeFrom (no periods) follows the same whole-month rule', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A' }, { memberId: 'B', activeFrom: d(4) }], expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(4, 30))] }));
+  assert.equal(line(r, 'B').chargeableDays, 30);
 });
 
 test('admin added amounts are member-specific, not pooled', () => {
@@ -124,4 +158,21 @@ test('IST month rollover', () => {
   assert.deepEqual(previousBillingPeriod(new Date('2027-01-01T00:00:00Z')), { year: 2026, month: 12 });
   assert.equal(isCompletedPeriod(2026, 9, new Date('2026-09-30T12:00:00Z')), false);
   assert.equal(isCompletedPeriod(2026, 9, new Date('2026-10-01T00:00:00Z')), true);
+});
+
+test('special priced items are additive: pool shares unchanged, totals add member + guest specials, unknown member warned', () => {
+  const o = [...orders('A', range(1, 30)), ...orders('B', range(1, 30))];
+  const plain = computePoolingBills(base({ expenses: daily, orders: o }));
+  const r = computePoolingBills(base({ expenses: daily, orders: o, specials: { A: { memberPaise: 7650, guestPaise: 2550 }, Z: { memberPaise: 100, guestPaise: 0 } } }));
+  assert.deepEqual(r.lines.map((l: any) => l.sharePaise), plain.lines.map((l: any) => l.sharePaise)); // never deducted from the pool
+  assert.equal(sum(r) + r.unallocatedPaise, 90000);
+  assert.equal(line(r, 'A').totalPaise, line(r, 'A').sharePaise + 10200);
+  assert.equal(line(r, 'A').specialGuestPaise, 2550); // guest special billed to the ordering member
+  assert.equal(line(r, 'B').totalPaise, line(r, 'B').sharePaise);
+  assert.equal(line(r, 'B').specialMemberPaise, 0);
+  assert.ok(r.warnings.some((w: string) => /Special item charges for 1 member/.test(w)));
+  assert.ok(r.issues.some((w: string) => /Special item charges for 1 member/.test(w))); // money problem stays visible
+  // negative/fractional garbage is sanitised to integer paise >= 0
+  const g = computePoolingBills(base({ expenses: daily, orders: o, specials: { A: { memberPaise: -5, guestPaise: 10.6 } } }));
+  assert.equal(line(g, 'A').specialMemberPaise, 0); assert.equal(line(g, 'A').specialGuestPaise, 11);
 });
