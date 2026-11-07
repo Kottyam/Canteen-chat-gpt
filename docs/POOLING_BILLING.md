@@ -63,3 +63,13 @@ Missing table/row (migration not applied) => standard, silently (exact current b
 2. Replays all repo migrations in order (real `publish_employee_bill`, `current_canteen_id`, triggers incl. bill notifications). 14 unrelated migrations (subscriptions, pg_net, additional revenue) don't replay locally; the pooling migration must succeed or the run fails.
 3. Two **pre-existing** repo migration syntax defects are patched in a temp copy only: `20260907180000` (`RAISE '... 0% and 100%'` needs `%%`) and `20260920135602` (missing `;` after `$function$`). They would fail a fresh `supabase db reset`; production evidently got these objects another way.
 4. Synthetic fixtures, then `tests/db.integration.test.ts` runs as real roles/JWT claims (authenticated owner/staff/member, other tenant, anon, service_role) so RLS, grants and triggers are exercised.
+
+## Owner decisions recorded (2026-11-07 IST)
+- t53s243: days before joining / after leaving count toward the mess-cut threshold together with ordinary
+  no-order days; exemption only when the combined count reaches the threshold (implemented in PR #47).
+- t57u (special priced menu items, NOT yet implemented): the admin opts in per menu item ("Add price?").
+  Only those items show a price to members/customers when ordering; regular pool items show no price.
+  Members who order a priced item pay price × quantity IN ADDITION to their normal pool share.
+  The special amount is NEVER deducted from pool Expenses; the common pool share calculation (including
+  mess cut) is unchanged.
+- Still undecided: monthly allocation method (option A vs B), mid-month publishing / credits, admin running draft.
