@@ -125,3 +125,14 @@ that cannot be billed). Removed from the normal view: the explanatory header sen
 Shared monthly rows, all diagnostic notes ("No orders on N days (…) … mark them as holidays", ignored-orders notes) and
 the "live recalculation for reference only" footnote. Diagnostics are still stored with the calculation (`warnings`).
 A published member shows the billed (saved) amount.
+
+## Running month on the Monthly Bills page (admin only, read-only)
+The Pooling Monthly Bills page shows the current month (1st to today, IST) above the previous completed
+month. It is computed with `computePoolingBills({ ...input, asOf })`: the window, cohort, expenses, orders,
+special-item snapshots and Admin Added amounts stop at `asOf`; days after it never count as operating,
+no-order or mess-cut days. Elapsed pre-join / post-exit days count toward the unchanged threshold.
+Without `asOf` the completed-month result is identical to before. The current month has no Save or Publish
+and never writes bills, runs or notifications; "Download PDF" exports the displayed draft only.
+Publishing stays previous-completed-month only (manual or automatic; global auto send stays off).
+It refreshes on mount, focus, in-app Expenses add/edit/delete (`gocanteen:pooling-inputs-changed`) and the
+existing realtime tables (coalesced). Members only ever see published bills.

@@ -2,11 +2,11 @@ import { supabase, supabaseEnabled } from '../supabase';
 import { computePoolingBills, PoolingResult } from '../supabase/functions/_shared/poolingBilling';
 import { loadPoolingInput, poolingPayload } from '../supabase/functions/_shared/poolingInputs';
 
-export async function previewPoolingBills(month: number, year: number, messCutMinDays: number) {
+export async function previewPoolingBills(month: number, year: number, messCutMinDays: number, asOf?: string) {
   if (!supabaseEnabled || !supabase) throw new Error('Supabase is not enabled.');
   const { data: canteenId, error } = await supabase.rpc('current_canteen_id');
   if (error || !canteenId) throw error || new Error('Canteen not found.');
-  const input = await loadPoolingInput(supabase, { canteenId, year, month, messCutMinDays });
+  const input = await loadPoolingInput(supabase, { canteenId, year, month, messCutMinDays, asOf });
   return { result: computePoolingBills(input), memberNames: input.memberNames };
 }
 export async function loadPoolingRun(month: number, year: number) {
