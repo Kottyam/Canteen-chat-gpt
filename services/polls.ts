@@ -37,7 +37,6 @@ export async function loadActivePoll(): Promise<Poll | null> {
 
 export async function savePoll(input: { title: string; options: string[]; allowMultiple: boolean; startsAt: string; endsAt: string; enabled: boolean }): Promise<Poll> {
   if (!supabaseEnabled || !supabase) throw new Error('Not connected');
-  // Disable other polls for this canteen first (simple single-active model)
   await supabase.from('polls').update({ enabled: false }).eq('enabled', true);
   const { data, error } = await supabase.from('polls').insert({
     title: input.title.trim(),
@@ -48,7 +47,7 @@ export async function savePoll(input: { title: string; options: string[]; allowM
     enabled: input.enabled,
   }).select().single();
   if (error) throw error;
-  return {
+  const poll: Poll = {
     id: data.id,
     title: data.title,
     options: data.options,
@@ -57,12 +56,50 @@ export async function savePoll(input: { title: string; options: string[]; allowM
     endsAt: data.ends_at,
     enabled: data.enabled,
   };
+  if (poll.enabled) await queuePollNotifications(poll);
+  return poll;
 }
 
 export async function setPollEnabled(id: string, enabled: boolean): Promise<void> {
   if (!supabaseEnabled || !supabase) throw new Error('Not connected');
   const { error } = await supabase.from('polls').update({ enabled }).eq('id', id);
   if (error) throw error;
+  if (enabled) {
+    const p = await loadActivePoll();
+    if (p) await queuePollNotifications(p);
+  }
+}
+
+async function queuePollNotifications(poll: Poll) {
+  if (!supabase) return;
+  const reminderAt = new Date(new Date(poll.endsAt).getTime() - 10 * 60 * 1000);
+  const now = new Date();
+  // Member reminder 10 min before end (if still in future)
+  if (reminderAt > now) {
+    const { data: members } = await supabase.from('profiles').select('id, full_name, canteen_id').eq('role', 'employee').eq('status', 'active');
+    for (const m of members || []) {
+      await supabase.from('notifications').insert({
+        recipient_id: m.id,
+        canteen_id: m.canteen_id,
+        notification_type: 'poll_reminder',
+        title: 'Poll closing soon',
+        message: `"${poll.title}" ends in 10 minutes. Please submit your response.`,
+        payload: { poll_id: poll.id, screen: 'orders', reminder_at: reminderAt.toISOString() },
+      }).select().maybeSingle();
+    }
+  }
+  // Admin summary at end time
+  const { data: admins } = await supabase.from('profiles').select('id, canteen_id').eq('role', 'admin').eq('status', 'active');
+  for (const a of admins || []) {
+    await supabase.from('notifications').insert({
+      recipient_id: a.id,
+      canteen_id: a.canteen_id,
+      notification_type: 'poll_summary',
+      title: 'Poll ended',
+      message: `Poll "${poll.title}" has ended. Check results for member submissions.`,
+      payload: { poll_id: poll.id, screen: 'settings' },
+    }).select().maybeSingle();
+  }
 }
 
 export async function submitPollResponse(pollId: string, memberId: string, memberName: string, selected: string[]): Promise<void> {
@@ -75,6 +112,19 @@ export async function submitPollResponse(pollId: string, memberId: string, membe
     submitted_at: new Date().toISOString(),
   }, { onConflict: 'poll_id,member_id' });
   if (error) throw error;
+  // Notify admins of new submission count
+  const { count } = await supabase.from('poll_responses').select('*', { count: 'exact', head: true }).eq('poll_id', pollId);
+  const { data: admins } = await supabase.from('profiles').select('id, canteen_id').eq('role', 'admin').eq('status', 'active');
+  for (const a of admins || []) {
+    await supabase.from('notifications').insert({
+      recipient_id: a.id,
+      canteen_id: a.canteen_id,
+      notification_type: 'poll_submission',
+      title: 'Poll response received',
+      message: `${memberName} submitted. Total responses: ${count ?? 0}.`,
+      payload: { poll_id: pollId, screen: 'settings' },
+    }).select().maybeSingle();
+  }
 }
 
 export async function loadPollResponses(pollId: string): Promise<PollResponse[]> {
