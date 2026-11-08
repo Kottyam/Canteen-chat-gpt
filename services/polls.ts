@@ -44,6 +44,26 @@ function mapPoll(r: any): Poll {
   };
 }
 
+
+async function notifyMembers(poll: Poll, type: 'open' | 'end') {
+  if (!supabase) return;
+  const title = type === 'open' ? 'New Poll' : 'Poll ended';
+  const message = type === 'open'
+    ? `"${poll.title}" is open. Please submit your response.`
+    : `"${poll.title}" has ended.`;
+  const { data: members } = await supabase.from('profiles').select('id, canteen_id').eq('role', 'employee').eq('status', 'active');
+  for (const m of members || []) {
+    await supabase.from('notifications').insert({
+      recipient_id: m.id,
+      canteen_id: m.canteen_id,
+      notification_type: type === 'open' ? 'poll_open' : 'poll_ended',
+      title,
+      message,
+      payload: { poll_id: poll.id, screen: 'orders' },
+    }).select().maybeSingle();
+  }
+}
+
 export async function loadActivePoll(): Promise<Poll | null> {
   if (!supabaseEnabled || !supabase) return null;
   const { data, error } = await supabase.from('polls').select('*').eq('enabled', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -85,7 +105,9 @@ export async function savePoll(input: { title: string; questions: PollQuestion[]
     enabled: input.enabled,
   }).select().single();
   if (error) throw error;
-  return mapPoll(data);
+  const saved = mapPoll(data);
+  if (saved.enabled) await notifyMembers(saved, "open");
+  return saved;
 }
 
 export async function setPollEnabled(id: string, enabled: boolean): Promise<void> {
