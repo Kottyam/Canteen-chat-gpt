@@ -3,7 +3,7 @@
 // browser client (RLS-scoped admin) and the service-role client in the Edge
 // Function; canteen_id is ALWAYS filtered explicitly so service-role reads stay
 // tenant scoped.
-import { type PoolingInput, type PoolingMember, monthStart, monthEnd, toPaise, istBusinessDate } from './poolingBilling.ts';
+import { POOLING_ENGINE_VERSION, type PoolingInput, type PoolingMember, monthStart, monthEnd, toPaise, istBusinessDate } from './poolingBilling.ts';
 
 export interface PoolingSource { canteenId: string; year: number; month: number; messCutMinDays: number; /** running-month draft cutoff (inclusive) */ asOf?: string }
 
@@ -71,5 +71,5 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
 
 /** Serializable snapshot sent to save_pooling_bill_run (server re-validates totals). */
 export function poolingPayload(r: import('./poolingBilling.ts').PoolingResult) {
-  return { ...r, engineVersion: 1 };
+  return { ...r, engineVersion: POOLING_ENGINE_VERSION };
 }

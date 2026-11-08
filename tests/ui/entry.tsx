@@ -20,3 +20,6 @@ export { poolingDraftPdfAdapter, renderPoolingDraftPdf, buildPoolingDraftPdfMode
 export { istBusinessDate } from '../../supabase/functions/_shared/poolingBilling';
 export { SplashScreen as AppLoadingScreen } from '../../App';
 export { default as Login } from '../../components/auth/Login';
+export { default as BillingModeSettings } from '../../components/admin/BillingModeSettings';
+export { refreshBillingSettings } from '../../hooks/useBillingSettings';
+export { saveBillingSettings } from '../../services/billingSettings';
