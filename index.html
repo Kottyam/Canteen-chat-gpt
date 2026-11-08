@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#059669" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="light" />
     <meta name="description" content="Go Canteen" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/pwa-192x192.png" />
@@ -14,10 +15,11 @@
     <meta name="apple-mobile-web-app-title" content="Go Canteen" />
     <title>Go Canteen</title>
     <style>
-      html, body, #root { margin: 0; min-height: 100%; width: 100%; }
+      :root { color-scheme: light; }
+      html, body, #root { margin: 0; min-height: 100%; width: 100%; background-color: #ffffff; }
       html { background: #ffffff; }
       body {
-        background: #f9fafb;
+        background: #ffffff;
         padding-top: env(safe-area-inset-top, 0px);
         padding-left: env(safe-area-inset-left, 0px);
         padding-right: env(safe-area-inset-right, 0px);
@@ -29,7 +31,7 @@
       body {
         font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Noto Sans Malayalam', sans-serif;
         color: #1f2937;
-        background: linear-gradient(180deg, #f0fdf4 0%, #f9fafb 320px);
+        background: #ffffff;
         -webkit-font-smoothing: antialiased;
       }
       input:not([type=checkbox]):not([type=radio]), select, textarea { border-radius: 0.75rem; }

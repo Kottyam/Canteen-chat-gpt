@@ -163,29 +163,64 @@ jobs:
               }
           }
           EOF
-      - name: Remove Android system splash icon
+      - name: White launch screen (single Go Canteen splash)
         run: |
-          set -e
-          mkdir -p android/app/src/main/res/values-v31 android/app/src/main/res/drawable
-          cat > android/app/src/main/res/drawable/transparent_splash_icon.xml <<'EOF'
+          set -euo pipefail
+          # The launcher ACTIVITY's theme (not the <application> theme) drives the Android 12+ system splash.
+          LAUNCH_THEME=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          m = Path('android/app/src/main/AndroidManifest.xml').read_text()
+          a = re.search(r'<activity[^>]*android:name="\.?MainActivity"[^>]*>', m, re.S) or re.search(r'<activity[^>]*android:exported="true"[^>]*>', m, re.S)
+          t = re.search(r'android:theme="@style/([^"]+)"', a.group(0)) if a else None
+          if not t: raise SystemExit('Launcher activity theme not found')
+          print(t.group(1))
+          PY
+          )
+          test "$LAUNCH_THEME" = AppTheme.NoActionBarLaunch
+          R=android/app/src/main/res
+          # Capacitor's default splash.png (Capacitor logo) is replaced by white + the real Go Canteen logo (pre-Android 12),
+          # and by plain white on Android 12+ where the system splash already shows the app icon once.
+          find "$R" -path '*/drawable*' -name 'splash.png' -delete
+          mkdir -p "$R/drawable" "$R/drawable-v31" "$R/values-v31" "$R/values-night-v31" "$R/values-night"
+          cat > "$R/drawable/splash.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-              <solid android:color="@android:color/transparent" />
-          </shape>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="@android:color/white" />
+              <item android:gravity="center" android:width="192dp" android:height="192dp" android:drawable="@mipmap/ic_launcher_foreground" />
+          </layer-list>
           EOF
-          THEME_NAME=$(grep -o 'android:theme="@style/[^\"]*"' android/app/src/main/AndroidManifest.xml | head -1 | sed 's/.*@style\///;s/"//')
-          if [ -z "$THEME_NAME" ]; then echo "Could not determine Android application theme"; exit 1; fi
-          echo "Using Android theme: $THEME_NAME"
-          cat > android/app/src/main/res/values-v31/styles.xml <<EOF
+          cat > "$R/drawable-v31/splash.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:drawable="@android:color/white" />
+          </layer-list>
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/res/values/styles.xml'); t = p.read_text()
+          launch = '<style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">'
+          noab = '<style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">'
+          if launch not in t or noab not in t: raise SystemExit('Unexpected Capacitor styles.xml')
+          t = t.replace(launch, launch + '\n        <item name="android:windowBackground">@drawable/splash</item>', 1)
+          t = t.replace(noab, noab + '\n        <item name="android:windowBackground">@android:color/white</item>\n        <item name="android:forceDarkAllowed">false</item>', 1)
+          p.write_text(t)
+          v31 = """<?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <style name="$THEME_NAME">
+              <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+                  <item name="android:background">@drawable/splash</item>
+                  <item name="android:windowBackground">@drawable/splash</item>
                   <item name="android:windowSplashScreenBackground">@android:color/white</item>
-                  <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
-                  <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+                  <item name="android:windowSplashScreenIconBackgroundColor">@android:color/white</item>
               </style>
           </resources>
-          EOF
+          """
+          for d in ('values-v31', 'values-night-v31'):
+              Path(f'android/app/src/main/res/{d}/styles.xml').write_text(v31)
+          PY
+          if find "$R" -name 'splash.png' | grep -q .; then echo 'Capacitor default splash.png still present'; exit 1; fi
+          if grep -R -I -i -l 'powered by alien' "$R" dist; then echo 'Unexpected "powered by" branding'; exit 1; fi
+          grep -F 'windowSplashScreenBackground">@android:color/white' "$R/values-night-v31/styles.xml"
       - name: Apply Go Canteen brand launcher icons
         run: |
           set -e
