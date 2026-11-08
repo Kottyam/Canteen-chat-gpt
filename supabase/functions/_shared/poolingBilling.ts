@@ -16,21 +16,18 @@
 //    consecutive). Many orders on one date = 1 day.
 //  * Mess cut (threshold 0..31, default 6): absentDays >= threshold and > 0 -> every absent day is non-chargeable (0 = any no-order day).
 //              absentDays <  threshold  -> no exclusion; all window days chargeable.
-//  * Expense allocation (owner-approved, t74s334): the month's total expense (all
-//    expenses dated in the window) is split equally across the operating days; each
-//    day's amount is shared equally among the members chargeable that day (so a cut
-//    member's day is pooled by the others). The expense date within the month does
-//    not change anyone's share. A running-month draft (asOf) uses only elapsed
-//    operating days and expenses dated <= asOf.
-//  * A day with no chargeable member, or a month with no operating days, is never
-//    moved to unchargeable members: it is reported as `unallocatedPaise` for review.
+//  * Expense allocation (updated): the month's TOTAL expense is shared proportionally
+//    across members by their chargeable days (after mess cut). Total expense /
+//    total chargeable days * each member's chargeable days. No unallocated leftover
+//    unless there are zero chargeable days. A running-month draft (asOf) uses only
+//    elapsed operating days and expenses dated <= asOf.
 //  * Special-item snapshots and Admin Added amounts are added on top (never deducted).
 //  * Rounding: exact fractional shares are computed, floored to paise and the
-//    remaining paise are given by largest remainder (days by date, members by memberId), so the
-//    distributed total equals the allocatable expense exactly.
+//    remaining paise are given by largest remainder (members by memberId), so the
+//    distributed total equals the expense total exactly.
 
-/** 2 = monthly total / operating days, per-day split among chargeable members (t74s334). Server rejects older. */
-export const POOLING_ENGINE_VERSION = 2;
+/** 3 = proportional share of total expense by chargeable days (after mess cut). Server rejects older. */
+export const POOLING_ENGINE_VERSION = 3;
 
 export type BillingModel = 'standard' | 'pooling';
 export type BillSendMode = 'manual' | 'automatic';
@@ -247,11 +244,10 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
       specialGuestPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.guestPaise) || 0)),
     });
   }
-  // expenses — approved method (owner t74s334): the month's TOTAL expense (dated in the window) is split
-  // equally across the operating days (integer paise, largest remainder by date), and each day's amount is
-  // shared equally among the members chargeable that day. The expense date inside the month does not matter.
-  // A day with nobody chargeable (or a month with no operating days) is NOT moved to others: it is reported
-  // as unallocated for admin review.
+  // expenses — proportional share by chargeable days (after mess cut).
+  // Total expense is divided by the sum of all members' chargeable days, then each member
+  // receives (their chargeable days / total chargeable days) * total expense.
+  // No unallocated unless there are zero chargeable days.
   let total = 0;
   for (const e of input.expenses) {
     if (!inMonth(e.date)) continue;
@@ -259,17 +255,19 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     if (a < 0) { warnings.push(`Negative expense ${e.id ?? e.date} ignored.`); issues.push(`A negative expense on ${e.date} was ignored. Fix it in Expenses.`); continue; }
     total += a;
   }
-  const exact = new Map<string, number>(members.map(m => [m.memberId, 0]));
+  const totalChargeableDays = members.reduce((s, m) => s + (chargeable.get(m.memberId)?.size || 0), 0);
   let unallocated = 0;
-  const perDay = operating.length ? largestRemainder(total, operating.map(date => ({ key: date, v: total / operating.length }))) : new Map<string, number>();
-  if (!operating.length) unallocated = total;
-  for (const date of operating) {
-    const amt = perDay.get(date) || 0; if (!amt) continue;
-    const sharers = members.filter(m => chargeable.get(m.memberId)!.has(date));
-    if (!sharers.length) { unallocated += amt; continue; }
-    for (const m of sharers) exact.set(m.memberId, exact.get(m.memberId)! + amt / sharers.length);
+  const exact = new Map<string, number>();
+  if (totalChargeableDays === 0) {
+    unallocated = total;
+    members.forEach(m => exact.set(m.memberId, 0));
+  } else {
+    for (const m of members) {
+      const days = chargeable.get(m.memberId)?.size || 0;
+      exact.set(m.memberId, (total * days) / totalChargeableDays);
+    }
   }
-  if (unallocated > 0) warnings.push('Some expense days have no chargeable member: amount left unallocated for admin review.');
+  if (unallocated > 0) warnings.push('No chargeable days: amount left unallocated for admin review.');
   const allocatable = total - unallocated;
   const daily = allocatable, overhead = 0;
   const rounded = largestRemainder(allocatable, members.map(m => ({ key: m.memberId, v: exact.get(m.memberId)! })));
