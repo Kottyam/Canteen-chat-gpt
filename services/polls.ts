@@ -19,6 +19,12 @@ export interface PollResponse {
 
 const missing = (e: any) => ['42P01', '42703', 'PGRST205'].includes(String(e?.code || '')) || /poll|does not exist|schema cache/i.test(String(e?.message || ''));
 
+async function myCanteenId(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.from('profiles').select('canteen_id').eq('id', (await supabase.auth.getUser()).data.user?.id).maybeSingle();
+  return data?.canteen_id || null;
+}
+
 export async function loadActivePoll(): Promise<Poll | null> {
   if (!supabaseEnabled || !supabase) return null;
   const { data, error } = await supabase.from('polls').select('*').eq('enabled', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
@@ -37,8 +43,11 @@ export async function loadActivePoll(): Promise<Poll | null> {
 
 export async function savePoll(input: { title: string; options: string[]; allowMultiple: boolean; startsAt: string; endsAt: string; enabled: boolean }): Promise<Poll> {
   if (!supabaseEnabled || !supabase) throw new Error('Not connected');
+  const canteenId = await myCanteenId();
+  if (!canteenId) throw new Error('No canteen found for current user.');
   await supabase.from('polls').update({ enabled: false }).eq('enabled', true);
   const { data, error } = await supabase.from('polls').insert({
+    canteen_id: canteenId,
     title: input.title.trim(),
     options: input.options.filter(o => o.trim()),
     allow_multiple: input.allowMultiple,
@@ -74,7 +83,6 @@ async function queuePollNotifications(poll: Poll) {
   if (!supabase) return;
   const reminderAt = new Date(new Date(poll.endsAt).getTime() - 10 * 60 * 1000);
   const now = new Date();
-  // Member reminder 10 min before end (if still in future)
   if (reminderAt > now) {
     const { data: members } = await supabase.from('profiles').select('id, full_name, canteen_id').eq('role', 'employee').eq('status', 'active');
     for (const m of members || []) {
@@ -88,7 +96,6 @@ async function queuePollNotifications(poll: Poll) {
       }).select().maybeSingle();
     }
   }
-  // Admin summary at end time
   const { data: admins } = await supabase.from('profiles').select('id, canteen_id').eq('role', 'admin').eq('status', 'active');
   for (const a of admins || []) {
     await supabase.from('notifications').insert({
@@ -104,15 +111,17 @@ async function queuePollNotifications(poll: Poll) {
 
 export async function submitPollResponse(pollId: string, memberId: string, memberName: string, selected: string[]): Promise<void> {
   if (!supabaseEnabled || !supabase) throw new Error('Not connected');
+  const canteenId = await myCanteenId();
+  if (!canteenId) throw new Error('No canteen found.');
   const { error } = await supabase.from('poll_responses').upsert({
     poll_id: pollId,
+    canteen_id: canteenId,
     member_id: memberId,
     member_name: memberName,
     selected_options: selected,
     submitted_at: new Date().toISOString(),
   }, { onConflict: 'poll_id,member_id' });
   if (error) throw error;
-  // Notify admins of new submission count
   const { count } = await supabase.from('poll_responses').select('*', { count: 'exact', head: true }).eq('poll_id', pollId);
   const { data: admins } = await supabase.from('profiles').select('id, canteen_id').eq('role', 'admin').eq('status', 'active');
   for (const a of admins || []) {
