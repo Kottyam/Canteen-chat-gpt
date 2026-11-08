@@ -47,23 +47,42 @@ const PollSettings: React.FC = () => {
         enabled,
       });
       setPoll(saved);
-      setMsg('Poll saved.');
+      setMsg(enabled ? 'Poll saved and turned on.' : 'Poll saved.');
     } catch (e: any) {
       setMsg(e?.message || 'Could not save poll.');
     } finally { setBusy(false); }
   };
 
-  const toggleEnabled = async () => {
-    if (!poll || busy) return;
-    setBusy(true);
-    try {
-      await setPollEnabled(poll.id, !enabled);
-      setEnabled(!enabled);
-      setPoll({ ...poll, enabled: !enabled });
-      setMsg(enabled ? 'Poll turned off.' : 'Poll turned on.');
-    } catch (e: any) {
-      setMsg(e?.message || 'Could not update.');
-    } finally { setBusy(false); }
+  const setOn = async () => {
+    if (!canEdit || busy) return;
+    setEnabled(true);
+    setMsg('Poll turned on. Save to apply.');
+    if (poll) {
+      setBusy(true);
+      try {
+        await setPollEnabled(poll.id, true);
+        setPoll({ ...poll, enabled: true });
+        setMsg('Poll turned on.');
+      } catch (e: any) {
+        setMsg(e?.message || 'Could not turn on.');
+      } finally { setBusy(false); }
+    }
+  };
+
+  const setOff = async () => {
+    if (!canEdit || busy) return;
+    setEnabled(false);
+    setMsg('Poll turned off. Save to apply.');
+    if (poll) {
+      setBusy(true);
+      try {
+        await setPollEnabled(poll.id, false);
+        setPoll({ ...poll, enabled: false });
+        setMsg('Poll turned off.');
+      } catch (e: any) {
+        setMsg(e?.message || 'Could not turn off.');
+      } finally { setBusy(false); }
+    }
   };
 
   const downloadPdf = async () => {
@@ -96,8 +115,8 @@ const PollSettings: React.FC = () => {
           <p className="text-xs text-gray-600">When on, members see a Poll button in the Orders tab during the set time window. Admin decides single or multiple selection.</p>
         </div>
         <div className="flex gap-1 rounded-lg bg-gray-200 p-1 sm:w-48">
-          <button type="button" disabled={!canEdit || busy || !poll} onClick={() => void toggleEnabled()} className={`min-h-11 flex-1 rounded-lg px-4 text-sm font-semibold ${enabled ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>On</button>
-          <button type="button" disabled={!canEdit || busy || !poll} onClick={() => void toggleEnabled()} className={`min-h-11 flex-1 rounded-lg px-4 text-sm font-semibold ${!enabled ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>Off</button>
+          <button type="button" disabled={!canEdit || busy} onClick={() => void setOn()} className={`min-h-11 flex-1 rounded-lg px-4 text-sm font-semibold transition ${enabled ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>On</button>
+          <button type="button" disabled={!canEdit || busy} onClick={() => void setOff()} className={`min-h-11 flex-1 rounded-lg px-4 text-sm font-semibold transition ${!enabled ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>Off</button>
         </div>
       </div>
 
