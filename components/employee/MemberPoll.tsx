@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useActivePoll } from '../../hooks/usePoll';
 import { loadPollResponses, submitPollResponse, isPollOpen } from '../../services/polls';
-import { supabase } from '../../supabase';
 
 const MemberPoll: React.FC = () => {
   const { user } = useAuth();
@@ -38,6 +37,7 @@ const MemberPoll: React.FC = () => {
   }
 
   const toggle = (qId: string, opt: string, allowMultiple: boolean) => {
+    if (submitted) return;
     setAnswers(a => {
       const cur = a[qId] || [];
       if (allowMultiple) {
@@ -48,12 +48,14 @@ const MemberPoll: React.FC = () => {
   };
 
   const submit = async () => {
-    if (busy || !user) return;
+    if (busy || !user || submitted) return;
+    if (!confirm('Submit your response? You cannot change it later.')) return;
     setBusy(true); setMsg('');
     try {
       await submitPollResponse(poll.id, user.id || user.identityId || '', user.name || user.id || 'Member', answers);
       setSubmitted(true);
-      setMsg('Your response has been submitted.');
+      setMsg('Your response has been submitted. You cannot change it.');
+      alert('Submitted successfully. You cannot change your response.');
     } catch (e: any) {
       setMsg(e?.message || 'Could not submit.');
     } finally { setBusy(false); }
@@ -75,12 +77,13 @@ const MemberPoll: React.FC = () => {
             <p className="text-xs text-gray-500">{q.allowMultiple ? 'Select one or more' : 'Select one'}</p>
             <div className="mt-2 space-y-2">
               {q.options.map(opt => (
-                <label key={opt} className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2">
+                <label key={opt} className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${submitted ? 'opacity-70' : 'cursor-pointer'}`}>
                   <input
                     type={q.allowMultiple ? 'checkbox' : 'radio'}
                     name={q.id}
                     checked={(answers[q.id] || []).includes(opt)}
                     onChange={() => toggle(q.id, opt, q.allowMultiple)}
+                    disabled={submitted}
                     className="h-4 w-4"
                   />
                   <span className="text-sm text-gray-800">{opt}</span>
@@ -90,14 +93,17 @@ const MemberPoll: React.FC = () => {
           </div>
         ))}
       </div>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => void submit()}
-        className="mt-4 w-full rounded-lg bg-primary-600 px-4 py-2.5 font-semibold text-white shadow-sm disabled:opacity-60"
-      >
-        {busy ? 'Submitting…' : submitted ? 'Update Response' : 'Submit Poll'}
-      </button>
+      {!submitted && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void submit()}
+          className="mt-4 w-full rounded-lg bg-primary-600 px-4 py-2.5 font-semibold text-white shadow-sm disabled:opacity-60"
+        >
+          {busy ? 'Submitting…' : 'Submit Poll'}
+        </button>
+      )}
+      {submitted && <p className="mt-3 text-sm font-medium text-green-700">Submitted. You cannot change your response.</p>}
       {msg && <p className="mt-2 text-xs text-gray-700">{msg}</p>}
     </div>
   );
