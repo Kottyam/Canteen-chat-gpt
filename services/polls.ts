@@ -14,12 +14,13 @@ export interface Poll {
   startsAt: string;
   endsAt: string;
   enabled: boolean;
+  createdAt?: string;
 }
 
 export interface PollResponse {
   memberId: string;
   memberName: string;
-  answers: Record<string, string[]>; // questionId -> selected options
+  answers: Record<string, string[]>;
   submittedAt: string;
 }
 
@@ -31,27 +32,50 @@ async function myCanteenId(): Promise<string | null> {
   return data?.canteen_id || null;
 }
 
+function mapPoll(r: any): Poll {
+  return {
+    id: r.id,
+    title: r.title,
+    questions: Array.isArray(r.questions) ? r.questions : [],
+    startsAt: r.starts_at,
+    endsAt: r.ends_at,
+    enabled: !!r.enabled,
+    createdAt: r.created_at,
+  };
+}
+
 export async function loadActivePoll(): Promise<Poll | null> {
   if (!supabaseEnabled || !supabase) return null;
   const { data, error } = await supabase.from('polls').select('*').eq('enabled', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (error) { if (missing(error)) return null; throw error; }
-  if (!data) return null;
-  const questions: PollQuestion[] = Array.isArray(data.questions) ? data.questions : [];
-  return {
-    id: data.id,
-    title: data.title,
-    questions,
-    startsAt: data.starts_at,
-    endsAt: data.ends_at,
-    enabled: !!data.enabled,
-  };
+  return data ? mapPoll(data) : null;
+}
+
+export async function loadRecentPolls(days = 10): Promise<Poll[]> {
+  if (!supabaseEnabled || !supabase) return [];
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase.from('polls').select('*').gte('created_at', since).order('created_at', { ascending: false });
+  if (error) { if (missing(error)) return []; throw error; }
+  return (data || []).map(mapPoll);
+}
+
+export async function deletePoll(id: string): Promise<void> {
+  if (!supabaseEnabled || !supabase) throw new Error('Not connected');
+  const { error } = await supabase.from('polls').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function cleanupOldPolls(days = 10): Promise<void> {
+  if (!supabaseEnabled || !supabase) return;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  await supabase.from('polls').delete().lt('created_at', cutoff);
 }
 
 export async function savePoll(input: { title: string; questions: PollQuestion[]; startsAt: string; endsAt: string; enabled: boolean }): Promise<Poll> {
   if (!supabaseEnabled || !supabase) throw new Error('Not connected');
   const canteenId = await myCanteenId();
   if (!canteenId) throw new Error('No canteen found for current user.');
-  await supabase.from('polls').update({ enabled: false }).eq('enabled', true);
+  if (input.enabled) await supabase.from('polls').update({ enabled: false }).eq('enabled', true);
   const { data, error } = await supabase.from('polls').insert({
     canteen_id: canteenId,
     title: input.title.trim(),
@@ -61,18 +85,12 @@ export async function savePoll(input: { title: string; questions: PollQuestion[]
     enabled: input.enabled,
   }).select().single();
   if (error) throw error;
-  return {
-    id: data.id,
-    title: data.title,
-    questions: data.questions || [],
-    startsAt: data.starts_at,
-    endsAt: data.ends_at,
-    enabled: data.enabled,
-  };
+  return mapPoll(data);
 }
 
 export async function setPollEnabled(id: string, enabled: boolean): Promise<void> {
   if (!supabaseEnabled || !supabase) throw new Error('Not connected');
+  if (enabled) await supabase.from('polls').update({ enabled: false }).neq('id', id).eq('enabled', true);
   const { error } = await supabase.from('polls').update({ enabled }).eq('id', id);
   if (error) throw error;
 }
@@ -108,4 +126,8 @@ export function isPollOpen(poll: Poll | null): boolean {
   if (!poll || !poll.enabled) return false;
   const now = Date.now();
   return now >= new Date(poll.startsAt).getTime() && now <= new Date(poll.endsAt).getTime();
+}
+
+export function isPollEnded(poll: Poll): boolean {
+  return Date.now() > new Date(poll.endsAt).getTime();
 }
