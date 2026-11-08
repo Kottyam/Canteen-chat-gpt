@@ -29,8 +29,9 @@ const PollSettings: React.FC = () => {
   const removeOption = (qIdx: number, oIdx: number) => setQuestions(q => q.map((item, i) => i === qIdx ? { ...item, options: item.options.filter((_, j) => j !== oIdx) } : item));
   const updateOption = (qIdx: number, oIdx: number, val: string) => setQuestions(q => q.map((item, i) => i === qIdx ? { ...item, options: item.options.map((o, j) => j === oIdx ? val : o) } : item));
 
+  const hasLive = polls.some(p => isPollOpen(p));
   const save = async () => {
-    if (busy) return;
+    if (busy || hasLive) return;
     const clean = questions.map(q => ({ ...q, text: q.text.trim(), options: q.options.map(o => o.trim()).filter(Boolean) })).filter(q => q.text && q.options.length >= 2);
     if (!title.trim() || clean.length < 1 || !startsAt || !endsAt) {
       setMsg('Title, at least one question with 2 options, and start/end time are required.');
@@ -91,7 +92,7 @@ const PollSettings: React.FC = () => {
           </div>
         </div>
 
-        {canEdit && (
+        {canEdit && !hasLive && (
           <div className="mt-4 space-y-4">
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Poll title" className="w-full rounded-lg border px-3 py-2 text-sm" />
             {questions.map((q, qIdx) => (
@@ -124,6 +125,7 @@ const PollSettings: React.FC = () => {
             <button type="button" disabled={busy} onClick={() => void save()} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white">{busy ? 'Saving…' : 'Save Poll'}</button>
           </div>
         )}
+        {hasLive && <p className="mt-2 text-sm text-amber-700">A poll is currently live. You can create a new poll only after it ends.</p>}
         {msg && <p className="mt-2 text-xs text-gray-700">{msg}</p>}
       </div>
 
