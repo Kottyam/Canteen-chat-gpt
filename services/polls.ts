@@ -47,7 +47,7 @@ function mapPoll(r: any): Poll {
 export async function loadActivePoll(): Promise<Poll | null> {
   if (!supabaseEnabled || !supabase) return null;
   const { data, error } = await supabase.from('polls').select('*').eq('enabled', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (error) { if (missing(error)) return null; throw error; }
+  if (error) { if (missing(error)) return null; console.warn('loadActivePoll', error); return null; }
   return data ? mapPoll(data) : null;
 }
 
