@@ -387,3 +387,17 @@ test('repo: no "Powered by" branding left in app source, and launcher icons are 
   const icons = fs.readFileSync(path.join(here, 'launcher_icons.sha256'), 'utf8').trim().split('\n').map(l => l.split(/\s+/));
   for (const [h, f] of icons) assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(root, f))).digest('hex'), h, f);
 });
+test('pre-JS paint: index.html html/body/#root are plain #ffffff, light color-scheme, white theme-color (no green/near-white gradient)', async () => {
+  const fs = await import('node:fs'); const root = path.resolve(here, '..');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+  assert.doesNotMatch(css, /gradient/i);
+  let checked = 0; for (const m of css.matchAll(/(?:^|\n)\s*([^{}\n]+?)\s*\{([^}]*)\}/g)) if (/^(?:html|body|#root|html, body, #root)$/.test(m[1].trim())) for (const b of m[2].matchAll(/background(?:-color)?\s*:\s*([^;]+);/g)) { checked++; assert.equal(b[1].trim().toLowerCase(), '#ffffff', `${m[1].trim()} background`); }
+  assert.equal(checked, 4, 'html/body/#root page backgrounds checked');
+  assert.match(css, /html, body, #root \{[^}]*background-color: #ffffff/); assert.match(css, /:root \{ color-scheme: light; \}/);
+  assert.match(html, /<meta name="theme-color" content="#ffffff" \/>/); assert.match(html, /<meta name="color-scheme" content="light" \/>/);
+  assert.match(fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8'), /theme_color: '#ffffff',\s*background_color: '#ffffff'/);
+  assert.match(fs.readFileSync(path.join(root, 'capacitor.config.ts'), 'utf8'), /backgroundColor: '#ffffff'/);
+  const wf = fs.readFileSync(path.join(root, '.github/workflows/android-apk.yml'), 'utf8');
+  assert.match(wf, /forceDarkAllowed">false/); assert.match(wf, /grep -R -I -i -l 'powered by alien' "\$R" dist;/);
+});

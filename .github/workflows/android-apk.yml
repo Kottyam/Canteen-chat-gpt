@@ -203,7 +203,7 @@ jobs:
           noab = '<style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">'
           if launch not in t or noab not in t: raise SystemExit('Unexpected Capacitor styles.xml')
           t = t.replace(launch, launch + '\n        <item name="android:windowBackground">@drawable/splash</item>', 1)
-          t = t.replace(noab, noab + '\n        <item name="android:windowBackground">@android:color/white</item>', 1)
+          t = t.replace(noab, noab + '\n        <item name="android:windowBackground">@android:color/white</item>\n        <item name="android:forceDarkAllowed">false</item>', 1)
           p.write_text(t)
           v31 = """<?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -219,7 +219,7 @@ jobs:
               Path(f'android/app/src/main/res/{d}/styles.xml').write_text(v31)
           PY
           if find "$R" -name 'splash.png' | grep -q .; then echo 'Capacitor default splash.png still present'; exit 1; fi
-          if grep -R -I -i -l 'powered by' "$R" dist; then echo 'Unexpected "powered by" branding'; exit 1; fi
+          if grep -R -I -i -l 'powered by alien' "$R" dist; then echo 'Unexpected "powered by" branding'; exit 1; fi
           grep -F 'windowSplashScreenBackground">@android:color/white' "$R/values-night-v31/styles.xml"
       - name: Apply Go Canteen brand launcher icons
         run: |

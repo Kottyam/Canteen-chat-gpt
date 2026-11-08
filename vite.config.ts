@@ -25,7 +25,7 @@ export default defineConfig(({ mode }) => {
             scope: '/',
             display: 'standalone',
             orientation: 'portrait',
-            theme_color: '#059669',
+            theme_color: '#ffffff',
             background_color: '#ffffff',
             prefer_related_applications: false,
             related_applications: [
