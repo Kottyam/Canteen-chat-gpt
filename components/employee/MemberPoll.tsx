@@ -1,36 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useActivePoll } from '../../hooks/usePoll';
-import { loadPollResponses, submitPollResponse } from '../../services/polls';
+import { loadPollResponses, submitPollResponse, isPollOpen } from '../../services/polls';
 import { supabase } from '../../supabase';
 
 const MemberPoll: React.FC = () => {
   const { user } = useAuth();
-  const { poll, open } = useActivePoll();
+  const { poll } = useActivePoll();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [submitted, setSubmitted] = useState(false);
-  const [notified, setNotified] = useState(false);
 
-  useEffect(() => {
-    if (!poll || !user || notified) return;
-    // Create in-app notification for the member when poll is open
-    const createNotif = async () => {
-      try {
-        await supabase?.from('notifications').insert({
-          recipient_id: user.identityId || user.id,
-          canteen_id: (await supabase.from('profiles').select('canteen_id').eq('id', user.identityId || user.id).maybeSingle()).data?.canteen_id,
-          notification_type: 'poll_open',
-          title: 'New Poll',
-          message: `"${poll.title}" is open. Please submit your response.`,
-          payload: { poll_id: poll.id, screen: 'orders' },
-        });
-        setNotified(true);
-      } catch { /* ignore */ }
-    };
-    if (open) void createNotif();
-  }, [poll, open, user, notified]);
+  const open = isPollOpen(poll);
 
   useEffect(() => {
     if (!poll || !user) return;
@@ -49,7 +31,7 @@ const MemberPoll: React.FC = () => {
     return (
       <div className="mt-5 rounded-2xl border bg-gray-50 p-4">
         <h3 className="font-bold text-gray-800">Poll</h3>
-        <p className="mt-1 text-sm text-gray-600">"{poll.title}" is not open right now.</p>
+        <p className="mt-1 text-sm text-gray-600">"{poll.title}"</p>
         <p className="mt-1 text-xs text-gray-500">Opens: {new Date(poll.startsAt).toLocaleString()} – {new Date(poll.endsAt).toLocaleString()}</p>
       </div>
     );
