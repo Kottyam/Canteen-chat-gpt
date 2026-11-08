@@ -45,23 +45,37 @@ function mapPoll(r: any): Poll {
 }
 
 
-async function notifyMembers(poll: Poll, type: 'open' | 'end') {
+async function notifyAll(poll: Poll) {
   if (!supabase) return;
-  const title = type === 'open' ? 'New Poll' : 'Poll ended';
-  const message = type === 'open'
-    ? `"${poll.title}" is open. Please submit your response.`
-    : `"${poll.title}" has ended.`;
+  const reminderAt = new Date(new Date(poll.endsAt).getTime() - 10 * 60 * 1000);
+  const endAt = new Date(poll.endsAt);
   const { data: members } = await supabase.from('profiles').select('id, canteen_id').eq('role', 'employee').eq('status', 'active');
-  for (const m of members || []) {
-    await supabase.from('notifications').insert({
-      recipient_id: m.id,
-      canteen_id: m.canteen_id,
-      notification_type: type === 'open' ? 'poll_open' : 'poll_ended',
-      title,
-      message,
-      payload: { poll_id: poll.id, screen: 'orders' },
-    }).select().maybeSingle();
+  const { data: admins } = await supabase.from('profiles').select('id, canteen_id').eq('role', 'admin').eq('status', 'active');
+
+  const insert = async (rows: any[], title: string, message: string, type: string, when: Date) => {
+    for (const r of rows) {
+      await supabase.from('notifications').insert({
+        recipient_id: r.id,
+        canteen_id: r.canteen_id,
+        notification_type: type,
+        title,
+        message,
+        payload: { poll_id: poll.id, screen: 'orders' },
+        created_at: when.toISOString(),
+      }).select().maybeSingle();
+    }
+  };
+
+  // Immediate: poll open
+  await insert(members || [], 'New Poll', `"${poll.title}" is open. Please submit your response.`, 'poll_open', new Date());
+  // 10 min before end
+  if (reminderAt > new Date()) {
+    await insert(members || [], 'Poll ending soon', `"${poll.title}" ends in 10 minutes. Please submit.`, 'poll_reminder', reminderAt);
+    await insert(admins || [], 'Poll ending soon', `"${poll.title}" ends in 10 minutes. Please remind members.`, 'poll_reminder_admin', reminderAt);
   }
+  // On end
+  await insert(members || [], 'Poll ended', `"${poll.title}" has ended.`, 'poll_ended', endAt);
+  await insert(admins || [], 'Poll results ready', `"${poll.title}" has ended. Results are ready.`, 'poll_results', endAt);
 }
 
 export async function loadActivePoll(): Promise<Poll | null> {
@@ -106,7 +120,7 @@ export async function savePoll(input: { title: string; questions: PollQuestion[]
   }).select().single();
   if (error) throw error;
   const saved = mapPoll(data);
-  if (saved.enabled) await notifyMembers(saved, "open");
+  if (saved.enabled) await notifyAll(saved);
   return saved;
 }
 
