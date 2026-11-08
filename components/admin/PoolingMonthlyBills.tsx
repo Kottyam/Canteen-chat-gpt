@@ -78,6 +78,8 @@ const PoolingMonthlyBills: React.FC = () => {
   const [run, setRun] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [view, setView] = useState<'current' | 'previous'>('current');
+  const [pdfBusy, setPdfBusy] = useState(false);
   const label = new Date(year, month - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
   const refresh = async () => {
     setBusy('load'); setMessage('');
@@ -107,9 +109,23 @@ const PoolingMonthlyBills: React.FC = () => {
     setRun(await loadPoolingRun(month, year)); setBusy(null);
     setMessage(errors.length ? `Some bills failed: ${errors.join('; ')}` : 'Bills published.');
   };
+  const downloadPdf = async () => {
+    if (!result || pdfBusy) return;
+    setPdfBusy(true);
+    try {
+      const asOf = result.periodEnd || `${year}-${String(month).padStart(2, '0')}-01`;
+      await poolingDraftPdfAdapter.download(buildPoolingDraftPdfModel(result, names, user?.canteenName || '', asOf));
+    } catch (e: any) { setMessage(e?.message || 'Could not generate the PDF.'); }
+    finally { setPdfBusy(false); }
+  };
   return <div className="min-w-0 space-y-4">
     <div><h3 className="text-2xl font-bold text-primary-900">Monthly Bills — Pooling</h3></div>
-    {isAdmin && <CurrentMonthDraft threshold={settings.messCutMinDays} canteenName={user?.canteenName || ''} />}
+    <div className="mb-2 flex gap-2 rounded-xl bg-gray-100 p-1">
+      <button type="button" onClick={() => setView('current')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold ${view === 'current' ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>Current Month</button>
+      <button type="button" onClick={() => setView('previous')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold ${view === 'previous' ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>Previous Month</button>
+    </div>
+    {view === 'current' && isAdmin && <CurrentMonthDraft threshold={settings.messCutMinDays} canteenName={user?.canteenName || ''} />}
+    {view === 'previous' && <>
     <p className="text-sm font-semibold text-gray-700">{label}</p>
     {message && <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{message}</div>}
     {busy === 'load' && !result && <div className="rounded-xl border bg-gray-50 p-4 text-sm text-gray-600">Calculating…</div>}
@@ -128,7 +144,9 @@ const PoolingMonthlyBills: React.FC = () => {
         <AsyncActionButton type="button" loading={busy === 'load'} loadingLabel="Calculating…" disabled={Boolean(busy)} onClick={() => void refresh()} className="rounded-lg border px-4 py-2.5 text-sm font-medium">Recalculate</AsyncActionButton>
         {run?.status !== 'published' && <AsyncActionButton type="button" loading={busy === 'save'} loadingLabel="Saving…" disabled={Boolean(busy)} onClick={() => void lock()} className="rounded-lg border border-primary-600 px-4 py-2.5 text-sm font-semibold text-primary-700">Save Calculation</AsyncActionButton>}
         <AsyncActionButton type="button" loading={busy === 'publish'} loadingLabel="Publishing…" disabled={Boolean(busy) || !run} onClick={() => void publishAll()} className="rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm">Publish Bills</AsyncActionButton>
+        <AsyncActionButton type="button" loading={pdfBusy} loadingLabel="Generating PDF…" disabled={!result || Boolean(busy) || pdfBusy} onClick={() => void downloadPdf()} className="rounded-lg border px-4 py-2.5 text-sm font-medium">Download PDF</AsyncActionButton>
       </div>
+    </>}
     </>}
   </div>;
 };
