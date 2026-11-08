@@ -6,7 +6,7 @@
 | key | default (row absent) | values |
 |---|---|---|
 | billing_model | `standard` (current behaviour, unchanged) | `standard`, `pooling` |
-| mess_cut_min_days | 6 | 1–31 |
+| mess_cut_min_days | 6 (also used for a missing/invalid value) | whole number 0–31; 0 = no minimum (every actual no-order day is not charged). Out-of-range values are rejected, never clamped. |
 | bill_send_mode | `manual` (current behaviour) | `manual`, `automatic` |
 
 If the table/row does not exist the app behaves exactly as today.
@@ -21,16 +21,17 @@ Source of money = the canteen's existing **Expenses** records for the month (`ex
 1. **Operating day** = every day of the month that is not an admin-declared holiday or recurring weekly off (Holiday Management). Closure is **never inferred** from "nobody ordered": such a day is a no-order day for every member (the pooling screen warns, so the admin can mark it as a holiday if the mess was closed).
 2. **Member window** = operating days from the member's join date (`profiles.created_at`, IST) to month end. Deleted members are excluded.
 3. **No-order days** = window operating days without a consumed order (cumulative, not continuous; several orders on a date = 1 day; cancelled and guest-only orders don't count).
-4. **Mess cut**: no-order days ≥ threshold → all those days are not charged. Below threshold → no exclusion (full share).
-5. Each expense dated on an operating day is split equally among members chargeable that day (a cut member's day is borne by the others; on days they ate they pay their share).
-6. Expenses dated on holidays/weekly offs (e.g. a bulk purchase), and expenses on a day where nobody is chargeable, are monthly overhead split by chargeable member-days (so a cut member pays a member-day share of these; the total is always preserved).
-7. Nobody chargeable → nothing charged; amount shown as **Unallocated** for admin review.
-8. Integer paise, largest-remainder rounding (ties by member id): shares sum exactly to the expense total.
-9. Admin-added amounts (`employee_adjustments`) are added to that member only, not pooled.
+4. **Mess cut**: no-order days ≥ threshold (and at least one) → all those days are not charged. Below threshold → no exclusion (full share). Threshold 0 → any no-order day is not charged; 31 → practically never cut.
+5. **Expense split (owner-approved method, t74s334, engine v2):** the month's **total** expenses are divided equally across the month's operating days; each day's amount is shared equally among the members chargeable that day (a cut member's no-order days are borne by the others). The date of an expense inside the month does not change anyone's share. Example: ₹3000, 30 operating days (₹100/day): A ate 1 day, B 30 days → A ₹50, B ₹2950; A ate 10 days → A ₹500, B ₹2500.
+6. A running-month draft (as of today, IST) uses only the elapsed operating days and the expenses dated up to today.
+7. A day where nobody is chargeable, or a month without operating days, is **not** moved to other members: that amount is shown as **Unallocated** for admin review.
+8. Integer paise, largest-remainder rounding (per-day amounts by date, member shares by member id): shares + unallocated sum exactly to the expense total.
+9. Admin-added amounts (`employee_adjustments`) and special-item snapshot charges (member + guest) are added to that member only, on top of the pool share; never deducted from expenses.
+11. Attendance comes from the member's orders whoever placed them (the member or an admin on their behalf); cancelled, empty and guest-only orders are not attendance.
 10. Guests: guest items do not create attendance and are not charged separately; their cost is inside the pooled expenses. (Decision for owner — see PR.)
 
 ### Snapshot / idempotency
-`pooling_bill_runs` (one per canteen+month) + `pooling_bill_lines`. Server re-checks the expense total against `expenses` and that all members belong to the canteen. Draft runs can be recalculated; once any bill is published the run is locked. Publishing writes the same `monthly_bills` + `bill_payments` rows as the standard path (same member Bills screen / UPI payment flow). It refuses if a bill already exists for that member+month.
+`pooling_bill_runs` (one per canteen+month) + `pooling_bill_lines`. Server re-checks the expense total against `expenses`, that all members belong to the canteen, that the mess cut setting is unchanged, and refuses payloads / unpublished saved runs from an older engine (`engineVersion` < 2) so an old app cannot save or publish the previous dated-expense split. Already-published months are never recalculated. Draft runs can be recalculated; once any bill is published the run is locked. Publishing writes the same `monthly_bills` + `bill_payments` rows as the standard path (same member Bills screen / UPI payment flow). It refuses if a bill already exists for that member+month.
 
 ## Automatic sending
 The existing "send" = publishing the bill in-app (`monthly_bills`/`bill_payments`, then existing notifications). It is a server-side database action, so unattended sending is technically possible. No WhatsApp/SMS is involved.

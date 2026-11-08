@@ -42,6 +42,11 @@ test('db integration', { skip }, async (t) => {
     assert.match((await as(S1).rpc('set_canteen_billing_settings', { p_billing_model: 'standard', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' })).error.message, /permission required/);
     assert.match((await as(A).rpc('set_canteen_billing_settings', { p_billing_model: 'standard', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' })).error.message, /permission required/);
     assert.match((await as(O1).rpc('set_canteen_billing_settings', { p_billing_model: 'weird', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' })).error.message, /check constraint/);
+    // mess cut threshold 0..31 (0 = no minimum); out of range rejected, never clamped
+    for (const n of [0, 1, 2, 3, 10, 31]) { const r = await as(O1).rpc('set_canteen_billing_settings', { p_billing_model: 'pooling', p_mess_cut_min_days: n, p_bill_send_mode: 'manual' }); assert.equal(r.error, null, String(n)); assert.equal(r.data.mess_cut_min_days, n); }
+    for (const n of [-1, 32]) assert.match((await as(O1).rpc('set_canteen_billing_settings', { p_billing_model: 'pooling', p_mess_cut_min_days: n, p_bill_send_mode: 'manual' })).error.message, /whole number from 0 to 31/);
+    assert.throws(() => root(`update public.canteen_billing_settings set mess_cut_min_days=-1 where canteen_id='${C1}'`), /check constraint/);
+    assert.equal((await as(O1).rpc('set_canteen_billing_settings', { p_billing_model: 'pooling', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' })).data.mess_cut_min_days, 6);
     const mem = await as(A).from('canteen_billing_settings').select('billing_model').maybeSingle();
     assert.equal(mem.data.billing_model, 'pooling');
     const other = await as(N1).from('canteen_billing_settings').select('*');
@@ -77,6 +82,12 @@ test('db integration', { skip }, async (t) => {
     assert.equal(ok.error, null); runId = ok.data.id;
     const again = await as(O1).rpc('save_pooling_bill_run', { p_month: 9, p_year: 2026, p_payload: payload }); // draft replace
     assert.equal(again.error, null); runId = again.data.id;
+    // engine v2 only: old-app payloads and old saved draft runs are refused (published runs untouched)
+    assert.match((await as(O1).rpc('save_pooling_bill_run', { p_month: 9, p_year: 2026, p_payload: { ...payload, engineVersion: 1 } })).error.message, /old pooling calculation/);
+    assert.match((await as(O1).rpc('save_pooling_bill_run', { p_month: 9, p_year: 2026, p_payload: { ...payload, messCutMinDays: 5 } })).error.message, /Mess cut setting changed/);
+    root(`update public.pooling_bill_runs set calculation = calculation || '{"engineVersion":1}' where id='${runId}'`);
+    assert.match((await as(O1).rpc('publish_pooling_bill', { p_run_id: runId, p_employee_id: A })).error.message, /old pooling method/);
+    root(`update public.pooling_bill_runs set calculation = calculation || '{"engineVersion":2}' where id='${runId}'`);
     assert.equal(pg(`select json_agg(1) from public.pooling_bill_runs where canteen_id='${C1}'`).length, 1);
   });
 

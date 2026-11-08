@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import AsyncActionButton from '../common/AsyncActionButton';
-import { CanteenBillingSettings } from '../../supabase/functions/_shared/poolingBilling';
-import { saveBillingSettings } from '../../services/billingSettings';
+import { CanteenBillingSettings, parseMessCutDays } from '../../supabase/functions/_shared/poolingBilling';
+import { MESS_CUT_RANGE_MESSAGE, saveBillingSettings } from '../../services/billingSettings';
 import { publishBillingSettings, useBillingSettings } from '../../hooks/useBillingSettings';
 
 const BillingModeSettings: React.FC = () => {
@@ -9,14 +9,20 @@ const BillingModeSettings: React.FC = () => {
   const [draft, setDraft] = useState<CanteenBillingSettings>(settings);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  // Days are edited as text: clearing / typing "31" is never coerced per keystroke; validated on Save only.
+  const [daysText, setDaysText] = useState(String(settings.messCutMinDays));
+  const daysDirty = useRef(false);
   useEffect(() => { setDraft(settings); }, [settings]);
+  useEffect(() => { if (!daysDirty.current) setDaysText(String(settings.messCutMinDays)); }, [settings.messCutMinDays]);
   const save = async () => {
+    const days = draft.billingModel === 'pooling' ? parseMessCutDays(daysText) : (parseMessCutDays(daysText) ?? settings.messCutMinDays);
+    if (days === null) { setMessage(MESS_CUT_RANGE_MESSAGE); return; }
     if (draft.billingModel !== settings.billingModel && !window.confirm(draft.billingModel === 'pooling'
       ? 'Switch to Pooling? Menu prices will be hidden from members and monthly bills will share this canteen\'s expenses. Stored prices are kept.'
       : 'Switch back to Standard (menu price) billing? Stored menu prices will be used again.')) return;
     if (draft.billSendMode === 'automatic' && settings.billSendMode !== 'automatic' && !window.confirm('Enable Automatic bill sending? Each new month, last month\'s bills will be published to members automatically.')) return;
     setBusy(true); setMessage('');
-    try { const saved = await saveBillingSettings(draft); publishBillingSettings(saved); setMessage('Billing settings saved.'); }
+    try { const saved = await saveBillingSettings({ ...draft, messCutMinDays: days }); daysDirty.current = false; setDaysText(String(saved.messCutMinDays)); publishBillingSettings(saved); setMessage('Billing settings saved.'); }
     catch (e: any) { setMessage(e?.message || 'Could not save billing settings.'); }
     finally { setBusy(false); }
   };
@@ -31,10 +37,10 @@ const BillingModeSettings: React.FC = () => {
         <button type="button" disabled={busy || !loaded} className={opt(draft.billingModel === 'pooling')} onClick={() => setDraft({ ...draft, billingModel: 'pooling' })}>Pooling</button>
       </div>
       {draft.billingModel === 'pooling' && <label className="mt-4 block text-sm font-medium text-gray-700">Mess cut: minimum no-order days in a month
-        <input type="number" min={1} max={31} step={1} disabled={busy} value={draft.messCutMinDays}
-          onChange={e => setDraft({ ...draft, messCutMinDays: Math.min(31, Math.max(1, Math.floor(Number(e.target.value) || 1))) })}
+        <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2} aria-label="Mess cut days" disabled={busy || !loaded} value={daysText}
+          onChange={e => { daysDirty.current = true; setDaysText(e.target.value); }}
           className="mt-1 block w-32 rounded-lg border p-2.5" />
-        <span className="mt-1 block text-xs text-gray-500">Counted automatically from orders (days need not be continuous). If a member has this many or more no-order days, those days are not charged and are shared by the others. Fewer days: full share.</span>
+        <span className="mt-1 block text-xs text-gray-500">0 to 31. If a member has this many or more no-order days, those days are not charged and are shared by the others. 0: every no-order day is not charged.</span>
       </label>}
     </div>
     <div className="rounded-2xl border bg-white p-4 shadow-sm">

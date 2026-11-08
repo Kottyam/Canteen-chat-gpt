@@ -15,7 +15,9 @@ test('defaults: absent settings row = exact standard/manual behaviour', () => {
   assert.deepEqual(normalizeBillingSettings({}), { billingModel: 'standard', messCutMinDays: 6, billSendMode: 'manual' });
   assert.equal(normalizeBillingSettings({ billing_model: 'weird', bill_send_mode: 'x' }).billingModel, 'standard');
   assert.equal(normalizeBillingSettings({ billing_model: 'pooling', mess_cut_min_days: 4 }).messCutMinDays, 4);
-  assert.equal(normalizeBillingSettings({ mess_cut_min_days: 0 }).messCutMinDays, 6);
+  assert.equal(normalizeBillingSettings({ mess_cut_min_days: 0 }).messCutMinDays, 0); // 0 = no minimum (valid)
+  for (const bad of [-1, 32, 1.5, null, '', 'x', undefined]) assert.equal(normalizeBillingSettings({ billing_model: 'pooling', mess_cut_min_days: bad }).messCutMinDays, 6, String(bad));
+  for (const ok of [0, 1, 2, 3, 10, 31]) assert.equal(normalizeBillingSettings({ mess_cut_min_days: ok }).messCutMinDays, ok);
 });
 
 const daily = range(1, 30).map(n => ({ date: d(n), amountPaise: 3000 }));
@@ -49,7 +51,8 @@ test('cancelled and guest-only orders are not attendance; duplicate orders same 
     orders: [...orders('A', [1, 2, ...others]), ...orders('A', [1]), ...orders('B', others), ...orders('B', [1], { status: 'cancelled' }), ...orders('B', [2], { guestOnly: true })] }));
   assert.equal(line(r, 'A').attendedDays, 30);
   assert.equal(line(r, 'B').absentDays, 2); assert.equal(line(r, 'B').messCutApplied, true);
-  assert.equal(line(r, 'A').sharePaise, 2000); assert.equal(line(r, 'B').sharePaise, 0);
+  // monthly 2000 / 30 days; B (cut) is not charged on days 1-2, A takes those days alone
+  assert.equal(line(r, 'A').sharePaise, 1067); assert.equal(line(r, 'B').sharePaise, 933); assert.equal(sum(r), 2000);
 });
 
 test('closure is NOT inferred from no orders: a day nobody ordered is a no-order day for everyone', () => {
@@ -57,21 +60,21 @@ test('closure is NOT inferred from no orders: a day nobody ordered is a no-order
     orders: [...orders('A', range(1, 30).filter(n => n !== 15)), ...orders('B', range(1, 30).filter(n => n !== 15))] }));
   assert.equal(r.operatingDays.length, 30);
   assert.equal(line(r, 'A').absentDays, 1); assert.equal(line(r, 'A').messCutApplied, true);
-  // nobody chargeable on d15 -> its expense becomes monthly overhead shared by chargeable days (29 each)
-  assert.equal(line(r, 'A').sharePaise + line(r, 'B').sharePaise, 600);
+  // monthly 600 / 30 = 20 per day; nobody chargeable on d15 -> that day's 20 is unallocated (never moved to cut members)
+  assert.equal(line(r, 'A').sharePaise, 290); assert.equal(line(r, 'B').sharePaise, 290); assert.equal(r.unallocatedPaise, 20);
   assert.ok(r.warnings.some(w => /No orders on 1 day \(15\)/.test(w)));
   assert.equal(r.warnings.filter(w => /No orders/.test(w)).length, 1); // one grouped note, not one per day
   assert.deepEqual(r.issues, []); // diagnostics only: nothing shown to the admin as an error
 });
 
-test('declared holidays / weekly offs are not no-order days; holiday expense = overhead by member-days', () => {
+test('declared holidays / weekly offs are not operating or no-order days; an expense dated on a holiday is part of the monthly total', () => {
   const sundays = [6, 13, 20, 27];
   const work = range(1, 30).filter(n => n !== 3 && !sundays.includes(n));
   const r = computePoolingBills(base({ messCutMinDays: 1, holidayDates: [d(3)], recurringWeekdays: [0], expenses: [{ date: d(3), amountPaise: 900 }],
     orders: [...orders('A', work), ...orders('B', work)] }));
   assert.equal(r.operatingDays.length, 25);
   assert.equal(line(r, 'A').absentDays, 0); assert.equal(line(r, 'A').messCutApplied, false);
-  assert.equal(r.overheadExpensePaise, 900);
+  assert.equal(r.overheadExpensePaise, 0); assert.equal(r.expenseTotalPaise, 900);
   assert.equal(line(r, 'A').sharePaise, 450); assert.equal(line(r, 'B').sharePaise, 450);
 });
 
@@ -95,12 +98,12 @@ test('threshold is inclusive: default 6 no-order days triggers, 5 does not', () 
   const mk = (absent: number) => computePoolingBills(base({ members: [{ memberId: 'A' }], expenses: daily, orders: orders('A', range(1, 30 - absent)) }));
   assert.equal(line(mk(5), 'A').messCutApplied, false); assert.equal(line(mk(5), 'A').sharePaise, 90000);
   assert.equal(line(mk(6), 'A').messCutApplied, true);
-  // single member cut: their absent days have nobody chargeable -> overhead back onto their chargeable days (sole member)
-  assert.equal(line(mk(6), 'A').sharePaise, 90000);
+  // sole member cut: the 6 absent days have nobody chargeable -> 6/30 of the month is unallocated (not charged)
+  assert.equal(line(mk(6), 'A').sharePaise, 72000); assert.equal(mk(6).unallocatedPaise, 18000);
 });
 
 test('rounding: total distributed exactly with stable largest remainder', () => {
-  const r = computePoolingBills({ ...base({ members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }] }), expenses: [{ date: d(1), amountPaise: 1000 }], orders: [...orders('A', [1]), ...orders('B', [1]), ...orders('C', [1])] });
+  const r = computePoolingBills({ ...base({ members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }] }), expenses: [{ date: d(1), amountPaise: 1000 }], orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30)), ...orders('C', range(1, 30))] });
   assert.deepEqual(r.lines.map((l: any) => l.sharePaise), [334, 333, 333]);
   const a = apportion(10, [{ key: 'x', weight: 1 }, { key: 'y', weight: 1 }, { key: 'z', weight: 1 }]);
   assert.equal([...a.values()].reduce((s, v) => s + v, 0), 10);
@@ -146,7 +149,7 @@ test('legacy activeFrom (no periods) follows the same whole-month rule', () => {
 });
 
 test('admin added amounts are member-specific, not pooled', () => {
-  const r = computePoolingBills(base({ members: [{ memberId: 'A', adminAddedPaise: 250 }, { memberId: 'B' }], expenses: [{ date: d(1), amountPaise: 1000 }], orders: [...orders('A', [1]), ...orders('B', [1])] }));
+  const r = computePoolingBills(base({ members: [{ memberId: 'A', adminAddedPaise: 250 }, { memberId: 'B' }], expenses: [{ date: d(1), amountPaise: 1000 }], orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))] }));
   assert.equal(line(r, 'A').totalPaise, 750); assert.equal(sum(r), 1000);
 });
 
@@ -203,4 +206,97 @@ test('asOf omitted or >= month end: identical to the completed-month result', ()
   assert.deepEqual(computePoolingBills({ ...inp, asOf: d(30) }), full);
   assert.deepEqual(computePoolingBills({ ...inp, asOf: '2026-10-05' }), full);
   assert.throws(() => computePoolingBills({ ...inp, asOf: '2026-08-31' }), /as-of/); assert.throws(() => computePoolingBills({ ...inp, asOf: 'x' as any }), /as-of/);
+});
+
+// ---- Approved method B (t74s334): monthly total / operating days, each day shared by members chargeable that day ----
+const R3000 = 300000;
+test('method B: Rs3000/30 days, A ate 1 day, B 30 -> A Rs50, B Rs2950, whatever the expense dates', () => {
+  const ord = [...orders('A', [1]), ...orders('B', range(1, 30))];
+  for (const expenses of [[{ date: d(1), amountPaise: R3000 }], [{ date: d(2), amountPaise: R3000 }], range(1, 30).map(n => ({ date: d(n), amountPaise: 10000 }))]) {
+    const r = computePoolingBills(base({ expenses, orders: ord }));
+    assert.equal(line(r, 'A').chargeableDays, 1); assert.equal(line(r, 'A').messCutApplied, true);
+    assert.equal(line(r, 'A').sharePaise, 5000); assert.equal(line(r, 'B').sharePaise, 295000); assert.equal(r.unallocatedPaise, 0);
+  }
+});
+test('method B: A ate 10 days, B 30 -> A Rs500, B Rs2500; identical monthly totals give identical shares for any dates', () => {
+  const ord = [...orders('A', range(1, 10)), ...orders('B', range(1, 30))];
+  const a = computePoolingBills(base({ expenses: [{ date: d(30), amountPaise: R3000 }], orders: ord }));
+  assert.equal(line(a, 'A').sharePaise, 50000); assert.equal(line(a, 'B').sharePaise, 250000);
+  const b = computePoolingBills(base({ expenses: [{ date: d(5), amountPaise: 100000 }, { date: d(20), amountPaise: 200000 }], orders: ord }));
+  assert.deepEqual(b.lines.map((l: any) => l.sharePaise), a.lines.map((l: any) => l.sharePaise));
+});
+test('method B: holidays / weekly offs are excluded from the operating-day denominator', () => {
+  const work = range(1, 30).filter(n => ![6, 13, 20, 27, 3].includes(n)); // 25 operating days
+  const r = computePoolingBills(base({ holidayDates: [d(3)], recurringWeekdays: [0], expenses: [{ date: d(3), amountPaise: 250000 }], orders: [...orders('A', work.slice(0, 5)), ...orders('B', work)] }));
+  assert.equal(r.operatingDays.length, 25); // 10000/day: A 5 days shared (5000 each), B alone on the other 20 days
+  assert.equal(line(r, 'A').sharePaise, 25000); assert.equal(line(r, 'B').sharePaise, 225000);
+});
+test('method B: no operating days / days with nobody chargeable -> unallocated for review, never divided by zero or shifted', () => {
+  const all = computePoolingBills(base({ recurringWeekdays: [0, 1, 2, 3, 4, 5, 6], expenses: [{ date: d(4), amountPaise: 777 }], orders: orders('A', [4]) }));
+  assert.equal(all.operatingDays.length, 0); assert.equal(all.unallocatedPaise, 777); assert.equal(sum(all), 0);
+  const gap = computePoolingBills(base({ expenses: [{ date: d(1), amountPaise: R3000 }], orders: [...orders('A', range(1, 10)), ...orders('B', range(1, 10))] }));
+  assert.equal(sum(gap) + gap.unallocatedPaise, R3000); assert.equal(gap.unallocatedPaise, 200000); assert.equal(line(gap, 'A').sharePaise, 50000);
+});
+test('method B: odd paise are distributed exactly and deterministically (repeatable)', () => {
+  const inp = base({ members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }], expenses: [{ date: d(9), amountPaise: 100001 }], orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30)), ...orders('C', range(3, 30))] });
+  const r1 = computePoolingBills(inp), r2 = computePoolingBills(JSON.parse(JSON.stringify(inp)));
+  assert.equal(sum(r1) + r1.unallocatedPaise, 100001); assert.deepEqual(r1.lines, r2.lines);
+  for (const l of r1.lines) assert.ok(Number.isInteger(l.sharePaise));
+});
+test('threshold 0 / 6 / 31: 0 cuts any actual no-order day, 31 keeps a full share with 29 absences, 6 unchanged', () => {
+  const ord = [...orders('A', [1]), ...orders('B', range(1, 30))];
+  const t = (n: number) => computePoolingBills(base({ messCutMinDays: n, expenses: [{ date: d(1), amountPaise: R3000 }], orders: ord }));
+  assert.equal(line(t(0), 'A').messCutApplied, true); assert.equal(line(t(0), 'A').sharePaise, 5000);
+  assert.equal(line(t(0), 'B').messCutApplied, false); assert.equal(line(t(0), 'B').excludedDays, 0); // nobody absent: nothing to cut
+  assert.equal(line(t(6), 'A').sharePaise, 5000);
+  assert.equal(line(t(31), 'A').absentDays, 29); assert.equal(line(t(31), 'A').messCutApplied, false); assert.equal(line(t(31), 'A').sharePaise, 150000);
+  const one = computePoolingBills(base({ messCutMinDays: 0, expenses: [{ date: d(1), amountPaise: R3000 }], orders: [...orders('A', range(2, 30)), ...orders('B', range(1, 30))] }));
+  assert.equal(line(one, 'A').excludedDays, 1); assert.equal(line(one, 'A').sharePaise, 145000);
+});
+test('method B with asOf: denominator = elapsed operating days, only expenses <= asOf; pre-join elapsed days count', () => {
+  const r = computePoolingBills(base({ asOf: d(10), expenses: [{ date: d(2), amountPaise: 100000 }, { date: d(25), amountPaise: 999999 }],
+    orders: [...orders('A', range(1, 10)), ...orders('C', range(7, 30))], members: [{ memberId: 'A' }, { memberId: 'C', periods: [{ from: d(7) }] }, { memberId: 'F', periods: [{ from: d(15) }] }] }));
+  assert.equal(r.operatingDays.length, 10); assert.equal(r.expenseTotalPaise, 100000);
+  assert.equal(line(r, 'C').absentDays, 6); assert.equal(line(r, 'C').chargeableDays, 4); // 6 pre-join days -> cut
+  assert.equal(line(r, 'A').sharePaise, 80000); assert.equal(line(r, 'C').sharePaise, 20000); assert.equal(line(r, 'F'), undefined);
+});
+test('specials + admin added stay additive on top of the pool share (never deducted from expenses)', () => {
+  const r = computePoolingBills(base({ members: [{ memberId: 'A', adminAddedPaise: 700 }, { memberId: 'B' }], specials: { A: { memberPaise: 300, guestPaise: 200 } },
+    expenses: [{ date: d(1), amountPaise: R3000 }], orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))] }));
+  assert.equal(line(r, 'A').sharePaise, 150000); assert.equal(line(r, 'A').totalPaise, 151200); assert.equal(sum(r), R3000);
+});
+
+// ---- t73: attendance from orders made by the member OR by an admin on their behalf (real loader) ----
+import { loadPoolingInput } from '../supabase/functions/_shared/poolingInputs.ts';
+function fakeDb(tables: Record<string, any[]>) {
+  return { from(t: string) { const q: any = { select: () => q, eq: () => q, gte: () => q, lte: () => q, then: (res: any) => res({ data: tables[t] || [], error: null }) }; return q; } };
+}
+const prof = (id: string) => ({ id, full_name: id, role: 'employee', status: 'active', created_at: '2026-01-01T00:00:00Z' });
+async function load(orders: any[]) {
+  const db = fakeDb({ expenses: [{ id: 'e', expense_date: d(1), amount: 3000 }], orders, profiles: [prof('A'), prof('B')], holiday_dates: [], holiday_settings: [], employee_adjustments: [],
+    pooling_member_periods: [{ employee_id: 'A', joined_on: '2026-01-01', left_on: null }, { employee_id: 'B', joined_on: '2026-01-01', left_on: null }] });
+  const inp = await loadPoolingInput(db, { canteenId: 'c', year: 2026, month: 9, messCutMinDays: 6 }); return { inp, r: computePoolingBills(inp) };
+}
+const bFull = range(1, 30).map(n => ({ id: `b${n}`, employee_id: 'B', ordered_for: d(n), status: 'active', order_items: [{ item_source: 'employee', quantity: 1 }] }));
+test('attendance: an admin-placed order counts exactly like the member\'s own order', async () => {
+  const self = await load([...bFull, { id: 'a', employee_id: 'A', ordered_for: d(3), status: 'active', order_source: 'employee', order_items: [{ item_source: 'employee', quantity: 1 }] }]);
+  const admin = await load([...bFull, { id: 'a', employee_id: 'A', ordered_for: d(3), status: 'active', order_source: 'admin', order_items: [{ item_source: 'admin', quantity: 1 }] }]);
+  assert.equal(line(admin.r, 'A').attendedDays, 1); assert.deepEqual(admin.r.lines, self.r.lines); assert.equal(line(admin.r, 'A').sharePaise, 5000);
+});
+test('attendance: a cancelled order is no attendance and no charge', async () => {
+  const { r } = await load([...bFull, { id: 'a', employee_id: 'A', ordered_for: d(3), status: 'cancelled', order_items: [{ item_source: 'admin', quantity: 1, pooling_special: true, pooling_special_unit_paise: 900 }] }]);
+  assert.equal(line(r, 'A').attendedDays, 0); assert.equal(line(r, 'A').sharePaise, 0); assert.equal(line(r, 'A').specialMemberPaise, 0);
+});
+test('attendance: guest-only order is not member attendance; guest specials charged to the ordering member', async () => {
+  const { r } = await load([...bFull, { id: 'a', employee_id: 'A', ordered_for: d(3), status: 'active', order_items: [{ item_source: 'guest', quantity: 2, pooling_special: true, pooling_special_unit_paise: 500 }] }]);
+  assert.equal(line(r, 'A').attendedDays, 0); assert.equal(line(r, 'A').specialGuestPaise, 1000); assert.equal(line(r, 'A').totalPaise, 1000);
+});
+test('attendance: mixed member+guest items = 1 day; member and guest specials both billed to the member (not the admin)', async () => {
+  const { r } = await load([...bFull, { id: 'a', employee_id: 'A', ordered_for: d(3), status: 'active', order_source: 'admin', order_items: [{ item_source: 'admin', quantity: 1, pooling_special: true, pooling_special_unit_paise: 300 }, { item_source: 'guest', quantity: 1, pooling_special: true, pooling_special_unit_paise: 400 }] }, { id: 'a2', employee_id: 'A', ordered_for: d(3), status: 'active', order_items: [{ item_source: 'employee', quantity: 1 }] }]);
+  assert.equal(line(r, 'A').attendedDays, 1); assert.equal(line(r, 'A').specialMemberPaise, 300); assert.equal(line(r, 'A').specialGuestPaise, 400);
+  assert.deepEqual(r.lines.map((l: any) => l.memberId).sort(), ['A', 'B']);
+});
+test('attendance: an order with no items is excluded', async () => {
+  const { r } = await load([...bFull, { id: 'a', employee_id: 'A', ordered_for: d(3), status: 'active', order_items: [] }]);
+  assert.equal(line(r, 'A').attendedDays, 0); assert.equal(line(r, 'A').sharePaise, 0);
 });

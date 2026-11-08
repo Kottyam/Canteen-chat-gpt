@@ -1,5 +1,5 @@
 import { supabase, supabaseEnabled } from '../supabase';
-import { CanteenBillingSettings, DEFAULT_BILLING_SETTINGS, normalizeBillingSettings } from '../supabase/functions/_shared/poolingBilling';
+import { CanteenBillingSettings, DEFAULT_BILLING_SETTINGS, isValidMessCutDays, normalizeBillingSettings } from '../supabase/functions/_shared/poolingBilling';
 
 const LOCAL_KEY = 'gocanteen.billingSettings.local';
 export interface BillingSettingsLoad { settings: CanteenBillingSettings; error: string | null }
@@ -25,7 +25,9 @@ export async function loadBillingSettings(): Promise<BillingSettingsLoad> {
   } catch (e: any) { return { settings: { ...DEFAULT_BILLING_SETTINGS }, error: e?.message || 'Could not load billing settings.' }; }
 }
 
+export const MESS_CUT_RANGE_MESSAGE = 'Mess cut days must be a whole number from 0 to 31.';
 export async function saveBillingSettings(next: CanteenBillingSettings): Promise<CanteenBillingSettings> {
+  if (!isValidMessCutDays(next.messCutMinDays)) throw new Error(MESS_CUT_RANGE_MESSAGE); // never silently replaced
   const clean = normalizeBillingSettings(next);
   if (!supabaseEnabled || !supabase) { localStorage.setItem(LOCAL_KEY, JSON.stringify(clean)); return clean; }
   const { data, error } = await supabase.rpc('set_canteen_billing_settings', { p_billing_model: clean.billingModel, p_mess_cut_min_days: clean.messCutMinDays, p_bill_send_mode: clean.billSendMode });

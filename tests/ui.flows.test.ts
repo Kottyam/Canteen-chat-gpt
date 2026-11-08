@@ -365,3 +365,51 @@ test('Pooling current month PDF: exports exactly the displayed draft (values, mo
     assert.equal(texts.filter(t => t === 'Member').length, pages, 'table header on every page');
   } finally { M.poolingDraftPdfAdapter.download = real; }
 });
+
+// ---- t72: Mess cut days editable 0..31 (text draft, validated on Save only) ----
+function billingDb(days: number) {
+  fakeDb.reset(); auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments'];
+  fakeDb.db.canteen_billing_settings = [{ billing_model: 'pooling', mess_cut_min_days: days, bill_send_mode: 'manual' }];
+  fakeDb.rpcHandlers.set_canteen_billing_settings = (a: any) => { const row = { billing_model: a.p_billing_model, mess_cut_min_days: a.p_mess_cut_min_days, bill_send_mode: a.p_bill_send_mode }; fakeDb.db.canteen_billing_settings = [row]; return { data: row }; };
+}
+async function openBilling() { await act(async () => { await M.refreshBillingSettings(); }); const r = await mount(createElement(M.BillingModeSettings)); await tick(); return r.host; }
+const daysInput = (h: any) => h.querySelector('input[aria-label="Mess cut days"]');
+const saveSettings = (h: any) => click(byText(h, 'button', /^Save Billing Settings$/));
+test('mess cut days: clear / 0 / 1 / 2 / 3 / 10 / 31 are typed without coercion, saved and reloaded', async () => {
+  for (const n of [0, 1, 2, 3, 10, 31]) {
+    billingDb(6); let h = await openBilling();
+    assert.equal(daysInput(h).value, '6');
+    await type(daysInput(h), ''); assert.equal(daysInput(h).value, '', 'clearing is allowed (no jump to 1)');
+    if (n === 31) { await type(daysInput(h), '3'); assert.equal(daysInput(h).value, '3'); }
+    await type(daysInput(h), String(n)); assert.equal(daysInput(h).value, String(n));
+    await saveSettings(h);
+    assert.deepEqual(rpcs('set_canteen_billing_settings').map((a: any) => a.p_mess_cut_min_days), [n]);
+    assert.match(h.textContent, /Billing settings saved\./);
+    for (const r of mounted.splice(0)) await act(async () => r.unmount());
+    h = await openBilling(); assert.equal(daysInput(h).value, String(n), 'reloaded from the saved row');
+  }
+});
+test('mess cut days: -1 / 32 / 1.5 / empty / text are rejected on Save with a simple message and never persisted', async () => {
+  for (const bad of ['-1', '32', '1.5', '', ' ', 'abc', '07a']) {
+    billingDb(6); const h = await openBilling();
+    await type(daysInput(h), bad); await saveSettings(h);
+    assert.equal(rpcs('set_canteen_billing_settings').length, 0, `no save for ${JSON.stringify(bad)}`);
+    assert.match(h.textContent, /Mess cut days must be a whole number from 0 to 31\./);
+    assert.equal(daysInput(h).value, bad, 'what the admin typed is kept, not silently replaced');
+    assert.equal(fakeDb.db.canteen_billing_settings[0].mess_cut_min_days, 6);
+    for (const r of mounted.splice(0)) await act(async () => r.unmount());
+  }
+});
+test('mess cut days: an in-progress edit is not reset by a settings reload; other fields saved unchanged', async () => {
+  billingDb(6); const h = await openBilling();
+  await type(daysInput(h), '1');
+  await act(async () => { M.publishBillingSettings({ billingModel: 'pooling', messCutMinDays: 6, billSendMode: 'manual' }); }); await tick();
+  assert.equal(daysInput(h).value, '1');
+  await saveSettings(h);
+  assert.deepEqual(rpcs('set_canteen_billing_settings'), [{ p_billing_model: 'pooling', p_mess_cut_min_days: 1, p_bill_send_mode: 'manual' }]);
+});
+test('service: saveBillingSettings refuses out-of-range days instead of defaulting', async () => {
+  billingDb(6);
+  for (const bad of [-1, 32, 1.5, NaN]) await assert.rejects(M.saveBillingSettings({ billingModel: 'pooling', messCutMinDays: bad, billSendMode: 'manual' }), /whole number from 0 to 31/);
+  assert.equal(rpcs('set_canteen_billing_settings').length, 0);
+});
