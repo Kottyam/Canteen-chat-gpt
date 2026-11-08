@@ -5,6 +5,7 @@ const config: CapacitorConfig = {
   appName: 'Go Canteen',
   webDir: 'dist',
   bundledWebRuntime: false,
+  backgroundColor: '#ffffff',
   plugins: {
     PushNotifications: {
       presentationOptions: ['alert', 'badge', 'sound'],

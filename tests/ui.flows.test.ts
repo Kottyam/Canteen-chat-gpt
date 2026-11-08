@@ -366,6 +366,42 @@ test('Pooling current month PDF: exports exactly the displayed draft (values, mo
   } finally { M.poolingDraftPdfAdapter.download = real; }
 });
 
+// ---- Startup / landing: white, single brand (no "Powered by" plate) ----
+test('startup loading screen is plain white with no extra branding; landing (Login) background is white, not the green gradient', async () => {
+  const a = await mount(createElement(M.AppLoadingScreen));
+  const el: any = a.host.querySelector('[data-testid="app-loading"]');
+  assert.ok(el); assert.match(el.className, /\bbg-white\b/); assert.equal(el.style.backgroundColor.replace(/\s/g, ''), /rgb/.test(el.style.backgroundColor) ? 'rgb(255,255,255)' : '#ffffff');
+  assert.equal(a.host.textContent.trim(), ''); assert.doesNotMatch(a.host.innerHTML, /powered by/i);
+  auth.user = null;
+  const l = await mount(createElement(M.Login));
+  const land: any = l.host.querySelector('[data-testid="login-landing"]');
+  assert.ok(land); assert.match(land.className, /\bbg-white\b/); assert.doesNotMatch(land.className, /gradient|from-primary|via-primary|to-primary|bg-primary/);
+  assert.match(l.host.textContent, /Go Canteen/); assert.doesNotMatch(l.host.innerHTML, /powered by/i);
+});
+test('repo: no "Powered by" branding left in app source, and launcher icons are untouched', async () => {
+  const fs = await import('node:fs'); const crypto = await import('node:crypto');
+  const root = path.resolve(here, '..');
+  for (const f of ['App.tsx', 'index.html', 'components/auth/Login.tsx', 'components/shared/SplashScreen.tsx']) assert.doesNotMatch(fs.readFileSync(path.join(root, f), 'utf8'), /powered by/i, f);
+  const wf = fs.readFileSync(path.join(root, '.github/workflows/android-apk.yml'), 'utf8');
+  assert.match(wf, /test "\$LAUNCH_THEME" = AppTheme\.NoActionBarLaunch/); assert.match(wf, /values-night-v31/); assert.doesNotMatch(wf, /<style name="\$THEME_NAME">/);
+  const icons = fs.readFileSync(path.join(here, 'launcher_icons.sha256'), 'utf8').trim().split('\n').map(l => l.split(/\s+/));
+  for (const [h, f] of icons) assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(root, f))).digest('hex'), h, f);
+});
+test('pre-JS paint: index.html html/body/#root are plain #ffffff, light color-scheme, white theme-color (no green/near-white gradient)', async () => {
+  const fs = await import('node:fs'); const root = path.resolve(here, '..');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+  assert.doesNotMatch(css, /gradient/i);
+  let checked = 0; for (const m of css.matchAll(/(?:^|\n)\s*([^{}\n]+?)\s*\{([^}]*)\}/g)) if (/^(?:html|body|#root|html, body, #root)$/.test(m[1].trim())) for (const b of m[2].matchAll(/background(?:-color)?\s*:\s*([^;]+);/g)) { checked++; assert.equal(b[1].trim().toLowerCase(), '#ffffff', `${m[1].trim()} background`); }
+  assert.equal(checked, 4, 'html/body/#root page backgrounds checked');
+  assert.match(css, /html, body, #root \{[^}]*background-color: #ffffff/); assert.match(css, /:root \{ color-scheme: light; \}/);
+  assert.match(html, /<meta name="theme-color" content="#ffffff" \/>/); assert.match(html, /<meta name="color-scheme" content="light" \/>/);
+  assert.match(fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8'), /theme_color: '#ffffff',\s*background_color: '#ffffff'/);
+  assert.match(fs.readFileSync(path.join(root, 'capacitor.config.ts'), 'utf8'), /backgroundColor: '#ffffff'/);
+  const wf = fs.readFileSync(path.join(root, '.github/workflows/android-apk.yml'), 'utf8');
+  assert.match(wf, /forceDarkAllowed">false/); assert.match(wf, /grep -R -I -i -l 'powered by alien' "\$R" dist;/);
+});
+
 // ---- t72: Mess cut days editable 0..31 (text draft, validated on Save only) ----
 function billingDb(days: number) {
   fakeDb.reset(); auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments'];
