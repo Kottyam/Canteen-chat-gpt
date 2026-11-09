@@ -367,11 +367,12 @@ test('Pooling current month PDF: exports exactly the displayed draft (values, mo
 });
 
 // ---- Startup / landing: white, single brand (no "Powered by" plate) ----
-test('startup loading screen is plain white with no extra branding; landing (Login) background is white, not the green gradient', async () => {
+test('startup screen is white with exactly ONE green "Go Canteen" wordmark and no "Powered by"; landing (Login) background is white, not the green gradient', async () => {
   const a = await mount(createElement(M.AppLoadingScreen));
   const el: any = a.host.querySelector('[data-testid="app-loading"]');
   assert.ok(el); assert.match(el.className, /\bbg-white\b/); assert.equal(el.style.backgroundColor.replace(/\s/g, ''), /rgb/.test(el.style.backgroundColor) ? 'rgb(255,255,255)' : '#ffffff');
-  assert.equal(a.host.textContent.trim(), ''); assert.doesNotMatch(a.host.innerHTML, /powered by/i);
+  assert.equal(a.host.textContent.trim(), 'Go Canteen'); assert.doesNotMatch(a.host.innerHTML, /powered by/i);
+  const wm: any = a.host.querySelectorAll('[data-testid="app-wordmark"]'); assert.equal(wm.length, 1); assert.match(wm[0].className, /\btext-primary-700\b/);
   auth.user = null;
   const l = await mount(createElement(M.Login));
   const land: any = l.host.querySelector('[data-testid="login-landing"]');
@@ -400,6 +401,9 @@ test('pre-JS paint: index.html html/body/#root are plain #ffffff, light color-sc
   assert.match(fs.readFileSync(path.join(root, 'capacitor.config.ts'), 'utf8'), /backgroundColor: '#ffffff'/);
   const wf = fs.readFileSync(path.join(root, '.github/workflows/android-apk.yml'), 'utf8');
   assert.match(wf, /forceDarkAllowed">false/); assert.match(wf, /grep -R -I -i -l 'powered by alien' "\$R" dist;/);
+  // single branded screen: native launch window is white only (no logo pre-12, transparent system icon on 12+)
+  assert.doesNotMatch(wf, /ic_launcher_foreground" \/>\n\s*<\/layer-list>/); assert.doesNotMatch(wf, /android:drawable="@mipmap\/ic_launcher_foreground"/);
+  assert.match(wf, /windowSplashScreenAnimatedIcon">@drawable\/splash_icon_transparent/); assert.match(wf, /splash_icon_transparent\.xml/);
 });
 
 // ---- t72: Mess cut days editable 0..31 (text draft, validated on Save only) ----
