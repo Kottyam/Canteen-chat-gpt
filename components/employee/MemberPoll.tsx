@@ -24,17 +24,8 @@ const MemberPoll: React.FC = () => {
     return () => { alive = false; };
   }, [poll, user]);
 
-  if (!poll) return null;
-
-  if (!open) {
-    return (
-      <div className="mt-5 rounded-2xl border bg-gray-50 p-4">
-        <h3 className="font-bold text-gray-800">Poll</h3>
-        <p className="mt-1 text-sm text-gray-600">"{poll.title}"</p>
-        <p className="mt-1 text-xs text-gray-500">Opens: {new Date(poll.startsAt).toLocaleString()} – {new Date(poll.endsAt).toLocaleString()}</p>
-      </div>
-    );
-  }
+  // Members see only a currently live poll — never ended history/results or a pre-start preview.
+  if (!poll || !open) return null;
 
   const toggle = (qId: string, opt: string, allowMultiple: boolean) => {
     if (submitted) return;

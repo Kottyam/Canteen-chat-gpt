@@ -31,7 +31,7 @@ const { fakeDb, auth, data, act, createRoot, createElement } = M;
 
 const tick = async (n = 6) => { for (let i = 0; i < n; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
 const mounted: any[] = [];
-afterEach(async () => { for (const r of mounted.splice(0)) await act(async () => r.unmount()); document.body.innerHTML = ''; auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.perms = []; data.users = []; data.orders = []; });
+afterEach(async () => { for (const r of mounted.splice(0)) await act(async () => r.unmount()); document.body.innerHTML = ''; auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.perms = []; auth.loading = false; auth.googleOAuthInProgress = false; data.users = []; data.orders = []; });
 async function mount(el: any) { const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host); mounted.push(root); await act(async () => root.render(el)); await tick(); return { host, root }; }
 const byText = (host: any, tag: string, re: RegExp) => [...host.querySelectorAll(tag)].find((e: any) => re.test(e.textContent || ''));
 async function click(el: any) { assert.ok(el, 'element to click exists'); await act(async () => { el.click(); }); await tick(); }
@@ -367,11 +367,12 @@ test('Pooling current month PDF: exports exactly the displayed draft (values, mo
 });
 
 // ---- Startup / landing: white, single brand (no "Powered by" plate) ----
-test('startup loading screen is plain white with no extra branding; landing (Login) background is white, not the green gradient', async () => {
+test('startup loading screen is white with the Go Canteen logo; landing (Login) background is white, not the green gradient', async () => {
   const a = await mount(createElement(M.AppLoadingScreen));
   const el: any = a.host.querySelector('[data-testid="app-loading"]');
   assert.ok(el); assert.match(el.className, /\bbg-white\b/); assert.equal(el.style.backgroundColor.replace(/\s/g, ''), /rgb/.test(el.style.backgroundColor) ? 'rgb(255,255,255)' : '#ffffff');
-  assert.equal(a.host.textContent.trim(), ''); assert.doesNotMatch(a.host.innerHTML, /powered by/i);
+  const logo = el.querySelector('img'); assert.ok(logo); assert.match(logo.getAttribute('src') || '', /gocanteen-icon/); assert.match(logo.getAttribute('alt') || '', /Go Canteen/i);
+  assert.match(a.host.textContent, /Go Canteen/); assert.doesNotMatch(a.host.innerHTML, /powered by/i);
   auth.user = null;
   const l = await mount(createElement(M.Login));
   const land: any = l.host.querySelector('[data-testid="login-landing"]');
@@ -448,4 +449,56 @@ test('service: saveBillingSettings refuses out-of-range days instead of defaulti
   billingDb(6);
   for (const bad of [-1, 32, 1.5, NaN]) await assert.rejects(M.saveBillingSettings({ billingModel: 'pooling', messCutMinDays: bad, billSendMode: 'manual' }), /whole number from 0 to 31/);
   assert.equal(rpcs('set_canteen_billing_settings').length, 0);
+});
+
+function assertBrandedLoading(host: any) {
+  const el = host.querySelector('[data-testid="app-loading"]');
+  assert.ok(el, 'branded loading view is shown');
+  const logo = el.querySelector('img');
+  assert.ok(logo); assert.match(logo.getAttribute('src') || '', /gocanteen-icon/);
+  assert.match(host.textContent, /Go Canteen/);
+  assert.doesNotMatch(host.innerHTML, /powered by/i);
+}
+test('auth restore, logout, and OAuth callback all reuse the same branded loading view', async () => {
+  auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.loading = true; auth.googleOAuthInProgress = false;
+  assertBrandedLoading((await mount(createElement(M.AppContent))).host);
+  auth.loading = true; auth.user = null; auth.googleOAuthInProgress = false;
+  assertBrandedLoading((await mount(createElement(M.AppContent))).host);
+  auth.loading = false; auth.user = null; auth.googleOAuthInProgress = true;
+  assertBrandedLoading((await mount(createElement(M.AppContent))).host);
+  assertBrandedLoading((await mount(createElement(M.Login))).host);
+});
+
+function seedPolls() {
+  fakeDb.reset();
+  const now = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  fakeDb.db.polls = [
+    { id: 'ended', title: 'Old Lunch Poll', questions: [{ id: 'q1', text: 'Done?', options: ['Yes', 'No'], allowMultiple: false }], starts_at: iso(now - 3e6), ends_at: iso(now - 6e5), enabled: true, created_at: iso(now - 3e6) },
+    { id: 'live', title: 'Live Dinner Poll', questions: [{ id: 'q1', text: 'Soup?', options: ['Yes', 'No'], allowMultiple: false }], starts_at: iso(now - 6e5), ends_at: iso(now + 3e6), enabled: true, created_at: iso(now - 1e5) },
+    { id: 'soon', title: 'Upcoming Breakfast Poll', questions: [], starts_at: iso(now + 6e5), ends_at: iso(now + 3e6), enabled: true, created_at: iso(now) },
+  ];
+  fakeDb.db.poll_responses = [];
+}
+test('member login shows only a currently live poll, never ended history or a scheduled preview', async () => {
+  seedPolls(); auth.user = { id: 'M001', name: 'Member', role: 'employee' };
+  const h = (await mount(createElement(M.MemberPoll))).host;
+  assert.match(h.textContent, /Live Dinner Poll/);
+  assert.doesNotMatch(h.textContent, /Old Lunch Poll|Upcoming Breakfast Poll/);
+});
+test('member login shows nothing when the only polls have already ended', async () => {
+  seedPolls(); fakeDb.db.polls = fakeDb.db.polls.filter((p: any) => p.id === 'ended');
+  auth.user = { id: 'M001', name: 'Member', role: 'employee' };
+  const h = (await mount(createElement(M.MemberPoll))).host;
+  assert.equal(h.textContent.trim(), '');
+  assert.doesNotMatch(h.textContent, /Old Lunch Poll|Poll/);
+});
+test('admin Poll settings still list ended polls and their results download', async () => {
+  seedPolls(); auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments'];
+  const h = (await mount(createElement(M.PollSettings))).host;
+  assert.match(h.textContent, /Old Lunch Poll/);
+  assert.match(h.textContent, /Live Dinner Poll/);
+  assert.match(h.textContent, /Upcoming Breakfast Poll/);
+  assert.match(h.textContent, /Ended/);
+  assert.match(h.textContent, /Download Results PDF/);
 });

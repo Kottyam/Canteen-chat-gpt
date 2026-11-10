@@ -468,5 +468,31 @@ test('db integration', { skip }, async (t) => {
     // other tenant unaffected by C1/C3 toggles
     assert.equal(root(`select gocanteen_private.guest_orders_enabled('${C2}')`), 't');
   });
+
+  await t.test('members see only currently active polls; admins still see ended history and results', async () => {
+    if (root(`select to_regclass('public.polls') is not null`) !== 't') return;
+    const live = 'a1000000-0000-0000-0000-000000000001', ended = 'a1000000-0000-0000-0000-000000000002', soon = 'a1000000-0000-0000-0000-000000000003';
+    root(`delete from public.polls where id in ('${live}','${ended}','${soon}')`);
+    root(`insert into public.polls (id,canteen_id,title,options,questions,starts_at,ends_at,enabled) values
+      ('${live}','${C1}','Live Poll','[]','[]', now() - interval '1 hour', now() + interval '2 hour', true),
+      ('${ended}','${C1}','Ended Poll','[]','[]', now() - interval '3 hour', now() - interval '1 hour', true),
+      ('${soon}','${C1}','Soon Poll','[]','[]', now() + interval '1 hour', now() + interval '3 hour', true)`);
+    root(`insert into public.poll_responses (poll_id,canteen_id,member_id,member_name,answers) values
+      ('${live}','${C1}','${A}','Asha','{}'), ('${ended}','${C1}','${A}','Asha','{}')`);
+    const memberPolls = await as(A).from('polls').select('id,title');
+    assert.equal(memberPolls.error, null, memberPolls.error?.message);
+    assert.deepEqual((memberPolls.data || []).map((r: any) => r.title).sort(), ['Live Poll']);
+    const adminPolls = await as(O1).from('polls').select('title');
+    assert.equal(adminPolls.error, null, adminPolls.error?.message);
+    assert.deepEqual((adminPolls.data || []).map((r: any) => r.title).sort(), ['Ended Poll', 'Live Poll', 'Soon Poll']);
+    const memberRows = await as(A).from('poll_responses').select('poll_id');
+    assert.equal(memberRows.error, null, memberRows.error?.message);
+    assert.deepEqual((memberRows.data || []).map((r: any) => r.poll_id).sort(), [live]);
+    const adminRows = await as(O1).from('poll_responses').select('poll_id');
+    assert.equal(adminRows.error, null, adminRows.error?.message);
+    assert.deepEqual((adminRows.data || []).map((r: any) => r.poll_id).sort(), [live, ended].sort());
+    const blocked = sql(URL!, { role: 'authenticated', sub: A }, `insert into public.poll_responses(poll_id,canteen_id,member_id,member_name,answers) values('${ended}','${C1}','${A}','Asha','{"q":["x"]}')`);
+    assert.ok(blocked.error, 'member must not write a response on an ended poll');
+  });
 });
 

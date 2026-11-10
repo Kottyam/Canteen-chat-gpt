@@ -10,7 +10,16 @@ export const db: Record<string, any[]> = {};
 export const calls: any[] = [];
 export const rpcHandlers: Record<string, (args: any) => { data?: any; error?: any }> = {};
 export function reset() { for (const k of Object.keys(db)) delete db[k]; calls.length = 0; for (const k of Object.keys(rpcHandlers)) delete rpcHandlers[k]; }
-const match = (r: any, ops: any[]) => ops.every(([op, a]) => op === 'eq' ? (!(a[0] in r) || r[a[0]] === a[1]) : op === 'in' ? a[1].includes(r[a[0]]) : op === 'not' ? !(a[1] === 'is' && a[2] === null && r[a[0]] == null) : true);
+const match = (r: any, ops: any[]) => ops.every(([op, a]) => {
+  if (op === 'eq') return !(a[0] in r) || r[a[0]] === a[1];
+  if (op === 'in') return a[1].includes(r[a[0]]);
+  if (op === 'not') return !(a[1] === 'is' && a[2] === null && r[a[0]] == null);
+  if (op === 'lte') return r[a[0]] <= a[1];
+  if (op === 'gte') return r[a[0]] >= a[1];
+  if (op === 'lt') return r[a[0]] < a[1];
+  if (op === 'gt') return r[a[0]] > a[1];
+  return true;
+});
 function run(table: string, ops: any[], single: boolean) {
   const kind = ops.find(([op]) => ['select', 'insert', 'update', 'delete', 'upsert'].includes(op))?.[0] || 'select';
   calls.push({ table, kind, ops });
