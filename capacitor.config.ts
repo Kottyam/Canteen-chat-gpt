@@ -10,6 +10,13 @@ const config: CapacitorConfig = {
     PushNotifications: {
       presentationOptions: ['alert', 'badge', 'sound'],
     },
+    SplashScreen: {
+      launchShowDuration: 0,
+      launchAutoHide: true,
+      launchFadeOutDuration: 0,
+      backgroundColor: '#ffffffff',
+      showSpinner: false,
+    },
   },
 };
 
