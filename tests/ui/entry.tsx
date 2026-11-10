@@ -25,3 +25,5 @@ export { default as PollSettings } from '../../components/admin/PollSettings';
 export { default as BillingModeSettings } from '../../components/admin/BillingModeSettings';
 export { refreshBillingSettings } from '../../hooks/useBillingSettings';
 export { saveBillingSettings } from '../../services/billingSettings';
+export { default as AIIntelligence } from '../../components/admin/AIIntelligence';
+export { markAppPresented, resetAppPresentedForTests } from '../../utils/appSession';

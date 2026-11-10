@@ -67,7 +67,21 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="gc-boot" data-testid="boot-splash" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#ffffff;">
+        <img src="/gocanteen-icon.png" alt="Go Canteen" width="96" height="96" style="display:block;width:96px;height:96px;object-fit:contain;opacity:1;" />
+      </div>
+    </div>
+    <script>
+      (function () {
+        try {
+          if (sessionStorage.getItem('gocanteen_ui_ready') === '1') {
+            var boot = document.getElementById('gc-boot');
+            if (boot) boot.innerHTML = '<p style="margin:0;font-weight:800;font-size:1.5rem;letter-spacing:-0.025em;color:#065f46;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;">Go Canteen</p>';
+          }
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
