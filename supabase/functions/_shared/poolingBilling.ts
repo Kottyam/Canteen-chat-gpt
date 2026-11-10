@@ -239,7 +239,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
       memberId: m.memberId, windowDays: window.length, attendedDays: att.length, absentDays: absent,
       messCutApplied: cut, excludedDays: cut ? absent : 0, chargeableDays: charge.size,
       dailySharePaise: 0, overheadSharePaise: 0, sharePaise: 0,
-      adminAddedPaise: Math.max(0, Math.round(Number(m.adminAddedPaise) || 0)), totalPaise: 0,
+      adminAddedPaise: Math.round(Number(m.adminAddedPaise) || 0), totalPaise: 0,
       specialMemberPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.memberPaise) || 0)),
       specialGuestPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.guestPaise) || 0)),
     });
@@ -276,7 +276,11 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     l.sharePaise = rounded.get(m.memberId) || 0;
     l.dailySharePaise = l.sharePaise;
     l.overheadSharePaise = 0;
-    l.totalPaise = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0);
+    const rawTotal = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0);
+    if (rawTotal < 0) {
+      warnings.push('A member\'s bill was clamped to Rs.0 because an admin deduction exceeded their unbilled share.');
+      l.totalPaise = 0;
+    } else l.totalPaise = rawTotal;
   }
   { const missing = Object.keys(input.specials || {}).filter(id => !lines.has(id) && ((input.specials![id].memberPaise || 0) + (input.specials![id].guestPaise || 0)) > 0).length;
     if (missing) { const t = `Special item charges for ${missing} member${missing > 1 ? 's' : ''} without a membership record this month cannot be billed. Check the member list.`; warnings.push(t); issues.push(t); } }

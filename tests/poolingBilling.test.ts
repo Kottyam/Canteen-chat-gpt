@@ -300,3 +300,38 @@ test('attendance: an order with no items is excluded', async () => {
   const { r } = await load([...bFull, { id: 'a', employee_id: 'A', ordered_for: d(3), status: 'active', order_items: [] }]);
   assert.equal(line(r, 'A').attendedDays, 0); assert.equal(line(r, 'A').sharePaise, 0);
 });
+
+test('negative admin-added deducts only that member by exactly 20; others unchanged', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 10000 }],
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    members: [{ memberId: 'A', adminAddedPaise: -2000 }, { memberId: 'B' }],
+  }));
+  assert.equal(line(r, 'A').sharePaise, 5000);
+  assert.equal(line(r, 'A').adminAddedPaise, -2000);
+  assert.equal(line(r, 'A').totalPaise, 3000);
+  assert.equal(line(r, 'B').adminAddedPaise, 0);
+  assert.equal(line(r, 'B').totalPaise, line(r, 'B').sharePaise);
+});
+
+test('positive admin-added still increases only that member', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 10000 }],
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    members: [{ memberId: 'A', adminAddedPaise: 2000 }, { memberId: 'B' }],
+  }));
+  assert.equal(line(r, 'A').totalPaise, line(r, 'A').sharePaise + 2000);
+  assert.equal(line(r, 'B').totalPaise, line(r, 'B').sharePaise);
+});
+
+test('admin deduction larger than the member share clamps the bill total at 0', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 10000 }],
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    members: [{ memberId: 'A', adminAddedPaise: -99999 }, { memberId: 'B' }],
+  }));
+  assert.equal(line(r, 'A').totalPaise, 0);
+  assert.ok(r.warnings.some((w: string) => /clamped/i.test(w)));
+  assert.equal(line(r, 'B').totalPaise, line(r, 'B').sharePaise);
+});
+

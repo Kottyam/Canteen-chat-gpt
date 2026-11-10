@@ -608,3 +608,86 @@ test('Pooling Expenses shows Download PDF and generates a monthly report; Standa
   const s = await mount(createElement(M.Expenses));
   assert.equal(s.host.querySelector('[data-testid="expense-pdf-download"]'), null, 'Standard hides expense PDF download');
 });
+
+test('member published-bill PDF is offered only for published months and uses the stored total when lines differ', async () => {
+  fakeDb.reset();
+  fakeDb.setAuthUid('mid-1');
+  auth.user = { id: 'M001', identityId: 'mid-1', name: 'Anu', role: 'employee', canteenName: 'Test Canteen' };
+  data.orders = [{
+    date: '2026-10-07', status: 'active', orderSource: 'admin',
+    items: { rice: true }, itemNames: { rice: 'Rice' }, itemQuantities: { rice: 1 }, itemPrices: { rice: 80 },
+    guestItems: { tea: true }, guestItemNames: { tea: 'Tea' }, guestItemQuantities: { tea: 1 }, guestItemPrices: { tea: 20 },
+  }];
+  fakeDb.db.profiles = [{ id: 'mid-1', employee_code: 'M001' }];
+  fakeDb.db.employee_adjustments = [{ id: 'adj1', employee_id: 'mid-1', adjustment_date: '2026-10-07', amount: -20, description: 'Less rice' }];
+  fakeDb.db.monthly_bills = [
+    { id: 'b1', employee_id: 'mid-1', bill_year: 2026, bill_month: 10, published: true, food_total: 80, guest_food_total: 20, admin_added_total: -20, special_items_total: 0, total: 80, member_name_snapshot: 'Anu' },
+    { id: 'b2', employee_id: 'mid-1', bill_year: 2026, bill_month: 9, published: false, food_total: 10, guest_food_total: 0, admin_added_total: 0, total: 10 },
+  ];
+  standard();
+  const r = await mount(createElement(M.Bills));
+  const box = r.host.querySelector('[data-testid="member-bill-pdf-download"]');
+  assert.ok(box, 'published bills show Download PDF');
+  const months = [...box.querySelectorAll('[aria-label="Bill PDF month"] option')].map((o: any) => o.value);
+  assert.deepEqual(months, ['10']);
+  const captured: any[] = [];
+  const prev = M.memberBillPdfAdapter.download;
+  M.memberBillPdfAdapter.download = async (m: any) => { captured.push(m); };
+  try {
+    await click([...box.querySelectorAll('button')].find((b: any) => /Download PDF/.test(b.textContent || '')));
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0].publishedTotal, 80);
+    assert.equal(captured[0].billingModel, 'standard');
+    assert.ok(captured[0].entries.some((e: any) => e.label === 'Admin-placed order'));
+    assert.ok(captured[0].entries.some((e: any) => e.label === 'Guest order'));
+    assert.ok(captured[0].entries.some((e: any) => e.label === 'Admin deduction' && e.amount === -20));
+    const mismatch = M.buildMemberBillPdfModel(
+      { bill_year: 2026, bill_month: 10, food_total: 100, guest_food_total: 0, admin_added_total: 0, total: 250 },
+      [{ date: '2026-10-01', status: 'active', items: { x: true }, itemNames: { x: 'X' }, itemQuantities: { x: 1 }, itemPrices: { x: 100 } }],
+      [], 'Test Canteen', 'Anu', 'standard'
+    );
+    assert.equal(mismatch.computedTotal, 100);
+    assert.equal(mismatch.publishedTotal, 250);
+    assert.equal(mismatch.reconciled, false);
+  } finally {
+    M.memberBillPdfAdapter.download = prev;
+  }
+});
+
+test('Admin extra amount accepts a minus within unbilled room and rejects published or oversize minuses', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments'];
+  data.users = [{ id: 'E1', identityId: 'eid-1', name: 'Asha', role: 'employee', status: 'active' }];
+  fakeDb.db.profiles = [{ id: 'eid-1', employee_code: 'E1' }];
+  let room = { published: false, available: 50 };
+  fakeDb.rpcHandlers.get_member_unbilled_admin_room = () => ({ data: room });
+  const r = await mount(createElement(M.AdminEmployeeOrder));
+  const pick = r.host.querySelector('select');
+  const setSel = Object.getOwnPropertyDescriptor((win as any).HTMLSelectElement.prototype, 'value')!.set!;
+  await act(async () => { setSel.call(pick, 'E1'); pick.dispatchEvent(new (win as any).Event('change', { bubbles: true })); });
+  await tick(2);
+  assert.match(r.host.textContent, /Unbilled amount available for minus: ₹50\.00/);
+  const amt = r.host.querySelector('[data-testid="admin-extra-amount"]');
+  await type(amt, '-20');
+  await click(byText(r.host, 'button', /^Add Amount$/));
+  const inserted = fakeDb.db.employee_adjustments || [];
+  assert.equal(inserted.length, 1);
+  assert.equal(Number(inserted[0].amount), -20);
+  assert.match(r.host.textContent, /−₹20\.00|recorded −₹20/);
+  room = { published: true, available: 0 };
+  await act(async () => { /* rerender via changing employee to refetch */ });
+  // remount to pick up published room
+  for (const mnt of mounted.splice(0)) await act(async () => mnt.unmount());
+  const r2 = await mount(createElement(M.AdminEmployeeOrder));
+  const pick2 = r2.host.querySelector('select');
+  await act(async () => { setSel.call(pick2, 'E1'); pick2.dispatchEvent(new (win as any).Event('change', { bubbles: true })); });
+  await tick(2);
+  assert.match(r2.host.textContent, /already published/);
+  const amt2 = r2.host.querySelector('[data-testid="admin-extra-amount"]');
+  await type(amt2, '-10');
+  await click(byText(r2.host, 'button', /^Add Amount$/));
+  assert.match(r2.host.textContent, /already published/);
+  assert.equal(M.negativeAdjustmentBlocked(-20, { published: false, available: 10 }), "Minus amount can't exceed this member's unbilled amount (₹10.00)");
+  assert.equal(M.negativeAdjustmentBlocked(-20, { published: false, available: 0 }), "Minus amount can't exceed this member's unbilled amount (₹0.00)");
+  assert.equal(M.parseAdminAdjustmentAmount('25').ok, true);
+});

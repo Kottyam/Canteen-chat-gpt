@@ -8,8 +8,10 @@ export const normalizeMobileNumber = (v: string) => v;
 export const internalEmailForLogin = (id: string) => `${id}@fake.local`;
 export const db: Record<string, any[]> = {};
 export const calls: any[] = [];
+export let authUid: string | null = null;
+export function setAuthUid(id: string | null) { authUid = id; }
 export const rpcHandlers: Record<string, (args: any) => { data?: any; error?: any }> = {};
-export function reset() { for (const k of Object.keys(db)) delete db[k]; calls.length = 0; for (const k of Object.keys(rpcHandlers)) delete rpcHandlers[k]; }
+export function reset() { for (const k of Object.keys(db)) delete db[k]; calls.length = 0; for (const k of Object.keys(rpcHandlers)) delete rpcHandlers[k]; authUid = null; }
 const match = (r: any, ops: any[]) => ops.every(([op, a]) => {
   if (op === 'eq') return !(a[0] in r) || r[a[0]] === a[1];
   if (op === 'in') return a[1].includes(r[a[0]]);
@@ -24,7 +26,7 @@ function run(table: string, ops: any[], single: boolean) {
   const kind = ops.find(([op]) => ['select', 'insert', 'update', 'delete', 'upsert'].includes(op))?.[0] || 'select';
   calls.push({ table, kind, ops });
   const rows = (db[table] ||= []);
-  if (kind === 'insert' || kind === 'upsert') { const v = ops.find(([op]) => op === kind)[1][0]; rows.push(...(Array.isArray(v) ? v : [v])); return { data: null, error: null }; }
+  if (kind === 'insert' || kind === 'upsert') { const v = ops.find(([op]) => op === kind)[1][0]; const list = Array.isArray(v) ? v : [v]; rows.push(...list); return { data: single ? list[0] : list, error: null }; }
   if (kind === 'delete') { db[table] = rows.filter(r => !match(r, ops)); return { data: null, error: null }; }
   if (kind === 'update') { const v = ops.find(([op]) => op === 'update')[1][0]; rows.filter(r => match(r, ops)).forEach(r => Object.assign(r, v)); return { data: null, error: null }; }
   const out = rows.filter(r => match(r, ops));
@@ -42,6 +44,6 @@ function from(table: string) {
 export const supabase: any = {
   from,
   rpc: async (name: string, args: any) => { calls.push({ rpc: name, args }); return rpcHandlers[name] ? { data: null, error: null, ...rpcHandlers[name](args) } : { data: null, error: null }; },
-  auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), getUser: async () => ({ data: { user: null } }) },
+  auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), getUser: async () => ({ data: { user: authUid ? { id: authUid } : null } }) },
   channel: () => ({ on() { return this; }, subscribe() { return this; }, unsubscribe() { return Promise.resolve('ok'); } }), removeChannel() { return Promise.resolve('ok'); },
 };
