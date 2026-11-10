@@ -80,9 +80,11 @@ async function notifyAll(poll: Poll) {
 
 export async function loadActivePoll(): Promise<Poll | null> {
   if (!supabaseEnabled || !supabase) return null;
-  const { data, error } = await supabase.from('polls').select('*').eq('enabled', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  const now = new Date().toISOString();
+  const { data, error } = await supabase.from('polls').select('*').eq('enabled', true).lte('starts_at', now).gte('ends_at', now).order('created_at', { ascending: false }).limit(1).maybeSingle();
   if (error) { if (missing(error)) return null; console.warn('loadActivePoll', error); return null; }
-  return data ? mapPoll(data) : null;
+  const poll = data ? mapPoll(data) : null;
+  return isPollOpen(poll) ? poll : null;
 }
 
 export async function loadRecentPolls(days = 10): Promise<Poll[]> {
