@@ -212,6 +212,7 @@ jobs:
                   <item name="android:windowBackground">@drawable/splash</item>
                   <item name="android:windowSplashScreenBackground">@android:color/white</item>
                   <item name="android:windowSplashScreenIconBackgroundColor">@android:color/white</item>
+                  <item name="android:windowSplashScreenAnimationDuration">0</item>
               </style>
           </resources>
           """

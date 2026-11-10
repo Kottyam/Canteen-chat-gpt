@@ -31,7 +31,7 @@ const { fakeDb, auth, data, act, createRoot, createElement } = M;
 
 const tick = async (n = 6) => { for (let i = 0; i < n; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
 const mounted: any[] = [];
-afterEach(async () => { for (const r of mounted.splice(0)) await act(async () => r.unmount()); document.body.innerHTML = ''; auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.perms = []; auth.loading = false; auth.googleOAuthInProgress = false; data.users = []; data.orders = []; });
+afterEach(async () => { for (const r of mounted.splice(0)) await act(async () => r.unmount()); document.body.innerHTML = ''; auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.perms = []; auth.loading = false; auth.googleOAuthInProgress = false; data.users = []; data.orders = []; M.resetAppPresentedForTests(); });
 async function mount(el: any) { const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host); mounted.push(root); await act(async () => root.render(el)); await tick(); return { host, root }; }
 const byText = (host: any, tag: string, re: RegExp) => [...host.querySelectorAll(tag)].find((e: any) => re.test(e.textContent || ''));
 async function click(el: any) { assert.ok(el, 'element to click exists'); await act(async () => { el.click(); }); await tick(); }
@@ -367,12 +367,38 @@ test('Pooling current month PDF: exports exactly the displayed draft (values, mo
 });
 
 // ---- Startup / landing: white, single brand (no "Powered by" plate) ----
-test('startup loading screen is white with the Go Canteen logo; landing (Login) background is white, not the green gradient', async () => {
-  const a = await mount(createElement(M.AppLoadingScreen));
-  const el: any = a.host.querySelector('[data-testid="app-loading"]');
-  assert.ok(el); assert.match(el.className, /\bbg-white\b/); assert.equal(el.style.backgroundColor.replace(/\s/g, ''), /rgb/.test(el.style.backgroundColor) ? 'rgb(255,255,255)' : '#ffffff');
-  const logo = el.querySelector('img'); assert.ok(logo); assert.match(logo.getAttribute('src') || '', /gocanteen-icon/); assert.match(logo.getAttribute('alt') || '', /Go Canteen/i);
-  assert.match(a.host.textContent, /Go Canteen/); assert.doesNotMatch(a.host.innerHTML, /powered by/i);
+function loadingEl(host: any) {
+  const el: any = host.querySelector('[data-testid="app-loading"]');
+  assert.ok(el, 'branded loading view is shown');
+  assert.match(el.className, /\bbg-white\b/);
+  assert.doesNotMatch(host.innerHTML, /powered by/i);
+  return el;
+}
+function assertIconLoading(host: any) {
+  const el = loadingEl(host);
+  assert.equal(el.getAttribute('data-variant'), 'icon');
+  const logo = el.querySelector('img');
+  assert.ok(logo); assert.match(logo.getAttribute('src') || '', /gocanteen-icon/);
+  assert.match(logo.getAttribute('alt') || '', /Go Canteen/i);
+  assert.doesNotMatch(logo.className, /opacity-|animate-pulse|animate-bounce|fade/);
+  assert.equal((logo.getAttribute('style') || '').replace(/\s/g, '').includes('opacity:1') || logo.style.opacity === '1' || logo.style.opacity === '', true);
+  assert.equal(el.querySelector('p'), null, 'first-launch screen has no wordmark text');
+}
+function assertWordmarkLoading(host: any) {
+  const el = loadingEl(host);
+  assert.equal(el.getAttribute('data-variant'), 'wordmark');
+  assert.equal(el.querySelector('img'), null, 'later loading screens have no icon');
+  assert.match(el.textContent, /Go Canteen/);
+  assert.match(el.querySelector('p')?.className || '', /text-primary-800/);
+}
+test('startup loading screen is white: first launch shows only a crisp icon; later gaps show only the green wordmark; login stays white', async () => {
+  M.resetAppPresentedForTests();
+  const icon = await mount(createElement(M.AppLoadingScreen));
+  assertIconLoading(icon.host);
+  const explicit = await mount(createElement(M.AppLoadingScreen, { variant: 'icon' }));
+  assertIconLoading(explicit.host);
+  const word = await mount(createElement(M.AppLoadingScreen, { variant: 'wordmark' }));
+  assertWordmarkLoading(word.host);
   auth.user = null;
   const l = await mount(createElement(M.Login));
   const land: any = l.host.querySelector('[data-testid="login-landing"]');
@@ -399,6 +425,8 @@ test('pre-JS paint: index.html html/body/#root are plain #ffffff, light color-sc
   assert.match(html, /<meta name="theme-color" content="#ffffff" \/>/); assert.match(html, /<meta name="color-scheme" content="light" \/>/);
   assert.match(fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8'), /theme_color: '#ffffff',\s*background_color: '#ffffff'/);
   assert.match(fs.readFileSync(path.join(root, 'capacitor.config.ts'), 'utf8'), /backgroundColor: '#ffffff'/);
+  assert.match(html, /id="gc-boot"/); assert.match(html, /gocanteen-icon\.png/); assert.match(html, /gocanteen_ui_ready/);
+  assert.doesNotMatch(html.slice(html.indexOf('id="gc-boot"'), html.indexOf('type="module"')), /opacity:\s*0|animate-pulse|powered by/i);
   const wf = fs.readFileSync(path.join(root, '.github/workflows/android-apk.yml'), 'utf8');
   assert.match(wf, /forceDarkAllowed">false/); assert.match(wf, /grep -R -I -i -l 'powered by alien' "\$R" dist;/);
 });
@@ -451,23 +479,48 @@ test('service: saveBillingSettings refuses out-of-range days instead of defaulti
   assert.equal(rpcs('set_canteen_billing_settings').length, 0);
 });
 
-function assertBrandedLoading(host: any) {
-  const el = host.querySelector('[data-testid="app-loading"]');
-  assert.ok(el, 'branded loading view is shown');
-  const logo = el.querySelector('img');
-  assert.ok(logo); assert.match(logo.getAttribute('src') || '', /gocanteen-icon/);
-  assert.match(host.textContent, /Go Canteen/);
-  assert.doesNotMatch(host.innerHTML, /powered by/i);
-}
-test('auth restore, logout, and OAuth callback all reuse the same branded loading view', async () => {
+test('auth restore on cold start shows the icon; logout, OAuth, and later gaps show only the wordmark', async () => {
+  M.resetAppPresentedForTests();
   auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.loading = true; auth.googleOAuthInProgress = false;
-  assertBrandedLoading((await mount(createElement(M.AppContent))).host);
+  assertIconLoading((await mount(createElement(M.AppContent))).host);
+  M.markAppPresented();
   auth.loading = true; auth.user = null; auth.googleOAuthInProgress = false;
-  assertBrandedLoading((await mount(createElement(M.AppContent))).host);
+  assertWordmarkLoading((await mount(createElement(M.AppContent))).host);
   auth.loading = false; auth.user = null; auth.googleOAuthInProgress = true;
-  assertBrandedLoading((await mount(createElement(M.AppContent))).host);
-  assertBrandedLoading((await mount(createElement(M.Login))).host);
+  assertWordmarkLoading((await mount(createElement(M.AppContent))).host);
+  assertWordmarkLoading((await mount(createElement(M.Login))).host);
 });
+
+test('AI Intelligence hides finance panels in Pooling and keeps them in Standard', async () => {
+  auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments', 'bills', 'orders', 'members'];
+  const financeHeadings = ['Financial Trend', 'Member Behaviour Intelligence', 'Payment Behaviour Intelligence', 'Financial Intelligence', 'Revenue / Expense / Net Revenue Trends'];
+  standard();
+  const std = await mount(createElement(M.AIIntelligence));
+  for (const label of financeHeadings) assert.ok(std.host.textContent.includes(label), label + ' visible in Standard');
+  assert.match(std.host.textContent, /Meal Pattern Analysis/);
+  const fs = await import('node:fs');
+  const aiSrc = fs.readFileSync(path.join(path.resolve(here, '..'), 'components/admin/AIIntelligence.tsx'), 'utf8');
+  assert.match(aiSrc, /\{!pooling&&<div><h4 className="font-semibold">Monthly Financial Forecast/);
+  pooling();
+  const pool = await mount(createElement(M.AIIntelligence));
+  for (const label of financeHeadings) assert.equal(pool.host.textContent.includes(label), false, label + ' hidden in Pooling');
+  assert.match(pool.host.textContent, /Meal Pattern Analysis/);
+  assert.match(pool.host.textContent, /Quantity & Kitchen Intelligence/);
+  const poolForecast = [...pool.host.querySelectorAll('button')].find((e: any) => /Forecasting/.test(e.textContent || ''));
+  await click(poolForecast);
+  assert.match(pool.host.textContent, /Forecasting/);
+  assert.equal(pool.host.textContent.includes('Monthly Financial Forecast'), false);
+  assert.equal(pool.host.textContent.includes('Net Revenue'), false);
+});
+
+test('repo: poll notifications are not inserted from the browser client', async () => {
+  const fs = await import('node:fs');
+  const polls = fs.readFileSync(path.join(path.resolve(here, '..'), 'services/polls.ts'), 'utf8');
+  assert.doesNotMatch(polls, /notifyAll|from\('notifications'\)\.insert/);
+  const deliver = fs.readFileSync(path.join(path.resolve(here, '..'), 'supabase/functions/deliver-member-push/index.ts'), 'utf8');
+  assert.match(deliver, /'poll_id'/);
+});
+
 
 function seedPolls() {
   fakeDb.reset();

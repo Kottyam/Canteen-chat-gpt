@@ -494,5 +494,55 @@ test('db integration', { skip }, async (t) => {
     const blocked = sql(URL!, { role: 'authenticated', sub: A }, `insert into public.poll_responses(poll_id,canteen_id,member_id,member_name,answers) values('${ended}','${C1}','${A}','Asha','{"q":["x"]}')`);
     assert.ok(blocked.error, 'member must not write a response on an ended poll');
   });
+
+  await t.test('poll_open notifies eligible members exactly once when a poll becomes open; no backfill for ended or pre-marked polls', async () => {
+    if (root(`select to_regprocedure('public.notify_poll_open_if_needed(uuid)') is not null`) !== 't') return;
+    const openId = 'b1000000-0000-0000-0000-000000000001';
+    const endedId = 'b1000000-0000-0000-0000-000000000002';
+    const soonId = 'b1000000-0000-0000-0000-000000000003';
+    const markedId = 'b1000000-0000-0000-0000-000000000004';
+    const poolId = 'b1000000-0000-0000-0000-000000000005';
+    const stdId = 'b1000000-0000-0000-0000-000000000006';
+    root(`delete from public.notifications where payload->>'poll_id' in ('${openId}','${endedId}','${soonId}','${markedId}','${poolId}','${stdId}')`);
+    root(`delete from public.polls where id in ('${openId}','${endedId}','${soonId}','${markedId}','${poolId}','${stdId}')`);
+    const n = (id: string) => cnt(`select count(*) from public.notifications where notification_type='poll_open' and payload->>'poll_id'='${id}'`);
+    root(`insert into public.polls (id,canteen_id,title,options,questions,starts_at,ends_at,enabled,open_notified_at) values
+      ('${endedId}','${C1}','Ended','[]','[]', now() - interval '3 hour', now() - interval '1 hour', true, null),
+      ('${markedId}','${C1}','Already marked','[]','[]', now() - interval '1 hour', now() + interval '2 hour', true, now()),
+      ('${soonId}','${C1}','Soon','[]','[]', now() + interval '1 hour', now() + interval '3 hour', true, null)`);
+    assert.equal(n(endedId), 0, 'ended poll must not notify');
+    assert.equal(n(markedId), 0, 'pre-marked / existing poll must not notify');
+    assert.equal(n(soonId), 0, 'scheduled future poll must not notify yet');
+    root(`insert into public.polls (id,canteen_id,title,options,questions,starts_at,ends_at,enabled) values
+      ('${openId}','${C1}','Open now','[]','[]', now() - interval '5 minutes', now() + interval '2 hour', true)`);
+    const first = n(openId);
+    assert.ok(first >= 1, 'open poll notifies members once it is actually open');
+    assert.equal(root(`select payload->>'screen' from public.notifications where payload->>'poll_id'='${openId}' limit 1`), 'poll');
+    root(`select public.notify_poll_open_if_needed('${openId}')`);
+    root(`update public.polls set enabled=false where id='${openId}'`);
+    root(`update public.polls set enabled=true where id='${openId}'`);
+    assert.equal(n(openId), first, 're-save / re-enable must not double-send');
+    root(`alter table public.polls disable trigger polls_notify_open`);
+    root(`update public.polls set starts_at = now() - interval '1 minute' where id='${soonId}'`);
+    root(`alter table public.polls enable trigger polls_notify_open`);
+    assert.equal(n(soonId), 0, 'clock passing without scheduler/trigger does not send');
+    root(`select public.gocanteen_notification_scheduler()`);
+    const soonFirst = n(soonId);
+    assert.ok(soonFirst >= 1, 'scheduler sends when starts_at has arrived');
+    root(`select public.gocanteen_notification_scheduler()`);
+    assert.equal(n(soonId), soonFirst, 'scheduler is idempotent');
+    const soonCount = n(soonId);
+    root(`select public.notify_poll_open_if_needed('${soonId}')`);
+    assert.equal(n(soonId), soonCount);
+    await as(O1).rpc('set_canteen_billing_settings', { p_billing_model: 'pooling', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' });
+    root(`insert into public.polls (id,canteen_id,title,options,questions,starts_at,ends_at,enabled) values
+      ('${poolId}','${C1}','Pooling open','[]','[]', now() - interval '5 minutes', now() + interval '2 hour', true)`);
+    assert.ok(n(poolId) >= 1, 'pooling mode still notifies');
+    await as(O1).rpc('set_canteen_billing_settings', { p_billing_model: 'standard', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' });
+    root(`insert into public.polls (id,canteen_id,title,options,questions,starts_at,ends_at,enabled) values
+      ('${stdId}','${C1}','Standard open','[]','[]', now() - interval '5 minutes', now() + interval '2 hour', true)`);
+    assert.ok(n(stdId) >= 1, 'standard mode still notifies');
+  });
+
 });
 
