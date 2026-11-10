@@ -40,6 +40,10 @@ create policy poll_responses_select on public.poll_responses
     )
   );
 
+-- Production currently uses poll_responses_insert / poll_responses_update;
+-- the repo's first poll migration used *_member_upsert / *_member_update. Drop both.
+drop policy if exists poll_responses_insert on public.poll_responses;
+drop policy if exists poll_responses_update on public.poll_responses;
 drop policy if exists poll_responses_member_upsert on public.poll_responses;
 create policy poll_responses_member_upsert on public.poll_responses
   for insert to authenticated
