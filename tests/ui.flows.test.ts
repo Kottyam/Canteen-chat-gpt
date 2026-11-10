@@ -374,31 +374,18 @@ function loadingEl(host: any) {
   assert.doesNotMatch(host.innerHTML, /powered by/i);
   return el;
 }
-function assertIconLoading(host: any) {
-  const el = loadingEl(host);
-  assert.equal(el.getAttribute('data-variant'), 'icon');
-  const logo = el.querySelector('img');
-  assert.ok(logo); assert.match(logo.getAttribute('src') || '', /gocanteen-icon/);
-  assert.match(logo.getAttribute('alt') || '', /Go Canteen/i);
-  assert.doesNotMatch(logo.className, /opacity-|animate-pulse|animate-bounce|fade/);
-  assert.equal((logo.getAttribute('style') || '').replace(/\s/g, '').includes('opacity:1') || logo.style.opacity === '1' || logo.style.opacity === '', true);
-  assert.equal(el.querySelector('p'), null, 'first-launch screen has no wordmark text');
-}
 function assertWordmarkLoading(host: any) {
   const el = loadingEl(host);
   assert.equal(el.getAttribute('data-variant'), 'wordmark');
-  assert.equal(el.querySelector('img'), null, 'later loading screens have no icon');
+  assert.equal(el.querySelector('img'), null, 'loading screens have no icon');
   assert.match(el.textContent, /Go Canteen/);
   assert.match(el.querySelector('p')?.className || '', /text-primary-800/);
 }
-test('startup loading screen is white: first launch shows only a crisp icon; later gaps show only the green wordmark; login stays white', async () => {
+test('startup loading screen is white: every gap shows only the green wordmark; login stays white', async () => {
   M.resetAppPresentedForTests();
-  const icon = await mount(createElement(M.AppLoadingScreen));
-  assertIconLoading(icon.host);
-  const explicit = await mount(createElement(M.AppLoadingScreen, { variant: 'icon' }));
-  assertIconLoading(explicit.host);
-  const word = await mount(createElement(M.AppLoadingScreen, { variant: 'wordmark' }));
-  assertWordmarkLoading(word.host);
+  assertWordmarkLoading((await mount(createElement(M.AppLoadingScreen))).host);
+  assertWordmarkLoading((await mount(createElement(M.AppLoadingScreen, { variant: 'icon' }))).host);
+  assertWordmarkLoading((await mount(createElement(M.AppLoadingScreen, { variant: 'wordmark' }))).host);
   auth.user = null;
   const l = await mount(createElement(M.Login));
   const land: any = l.host.querySelector('[data-testid="login-landing"]');
@@ -425,9 +412,16 @@ test('pre-JS paint: index.html html/body/#root are plain #ffffff, light color-sc
   assert.match(html, /<meta name="theme-color" content="#ffffff" \/>/); assert.match(html, /<meta name="color-scheme" content="light" \/>/);
   assert.match(fs.readFileSync(path.join(root, 'vite.config.ts'), 'utf8'), /theme_color: '#ffffff',\s*background_color: '#ffffff'/);
   assert.match(fs.readFileSync(path.join(root, 'capacitor.config.ts'), 'utf8'), /backgroundColor: '#ffffff'/);
-  assert.match(html, /id="gc-boot"/); assert.match(html, /gocanteen-icon\.png/); assert.match(html, /gocanteen_ui_ready/);
-  assert.doesNotMatch(html.slice(html.indexOf('id="gc-boot"'), html.indexOf('type="module"')), /opacity:\s*0|animate-pulse|powered by/i);
+  assert.match(html, /id="gc-boot"/); assert.match(html, /Go Canteen<\/p>/);
+  const boot = html.slice(html.indexOf('id="gc-boot"'), html.indexOf('type="module"'));
+  assert.doesNotMatch(boot, /gocanteen-icon|opacity:\s*0|animate-pulse|powered by/i);
+  const cap = fs.readFileSync(path.join(root, 'capacitor.config.ts'), 'utf8');
+  assert.match(cap, /launchShowDuration:\s*0/); assert.match(cap, /launchFadeOutDuration:\s*0/);
+  const loadSrc = fs.readFileSync(path.join(root, 'components/shared/AppLoadingScreen.tsx'), 'utf8');
+  assert.doesNotMatch(loadSrc, /gocanteen-icon|setTimeout|minDuration|fade-in|fade-out|animate-pulse/);
   const wf = fs.readFileSync(path.join(root, '.github/workflows/android-apk.yml'), 'utf8');
+  assert.doesNotMatch(wf, /android:drawable="@mipmap\/ic_launcher_foreground"/);
+  assert.match(wf, /splash_empty_icon/); assert.match(wf, /windowSplashScreenAnimatedIcon/);
   assert.match(wf, /forceDarkAllowed">false/); assert.match(wf, /grep -R -I -i -l 'powered by alien' "\$R" dist;/);
 });
 
@@ -479,10 +473,10 @@ test('service: saveBillingSettings refuses out-of-range days instead of defaulti
   assert.equal(rpcs('set_canteen_billing_settings').length, 0);
 });
 
-test('auth restore on cold start shows the icon; logout, OAuth, and later gaps show only the wordmark', async () => {
+test('auth restore, logout, OAuth, and later gaps all show only the green wordmark', async () => {
   M.resetAppPresentedForTests();
   auth.user = { id: 'M001', name: 'Member', role: 'employee' }; auth.loading = true; auth.googleOAuthInProgress = false;
-  assertIconLoading((await mount(createElement(M.AppContent))).host);
+  assertWordmarkLoading((await mount(createElement(M.AppContent))).host);
   M.markAppPresented();
   auth.loading = true; auth.user = null; auth.googleOAuthInProgress = false;
   assertWordmarkLoading((await mount(createElement(M.AppContent))).host);
@@ -554,4 +548,63 @@ test('admin Poll settings still list ended polls and their results download', as
   assert.match(h.textContent, /Upcoming Breakfast Poll/);
   assert.match(h.textContent, /Ended/);
   assert.match(h.textContent, /Download Results PDF/);
+});
+
+test('Pooling Expenses shows Download PDF and generates a monthly report; Standard hides it', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'O1', name: 'Owner', role: 'admin', canteenName: 'Test Canteen' }; auth.perms = ['expenses'];
+  fakeDb.db.expenses = [
+    { id: 'e1', expense_date: '2026-10-07', amount: 150, description: 'Vegetables' },
+    { id: 'e2', expense_date: '2026-10-12', amount: 80.5, description: 'Oil' },
+    { id: 'e3', expense_date: '2026-09-03', amount: 40, description: 'Gas' },
+  ];
+  pooling();
+  const r = await mount(createElement(M.Expenses));
+  const box = r.host.querySelector('[data-testid="expense-pdf-download"]');
+  assert.ok(box, 'Pooling Expenses shows Download PDF');
+  assert.match(box.textContent, /Download PDF/);
+  const yearSel: any = r.host.querySelector('[aria-label="Expense PDF year"]');
+  const monthSel: any = r.host.querySelector('[aria-label="Expense PDF month"]');
+  assert.ok(yearSel && monthSel);
+  const setSel = Object.getOwnPropertyDescriptor((win as any).HTMLSelectElement.prototype, 'value')!.set!;
+  await act(async () => { setSel.call(yearSel, '2026'); yearSel.dispatchEvent(new (win as any).Event('change', { bubbles: true })); });
+  await act(async () => { setSel.call(monthSel, '10'); monthSel.dispatchEvent(new (win as any).Event('change', { bubbles: true })); });
+  await tick(1);
+  const captured: any[] = [];
+  const prev = M.expensesPdfAdapter.download;
+  M.expensesPdfAdapter.download = async (m: any) => { captured.push(m); };
+  try {
+    await click([...box.querySelectorAll('button')].find((b: any) => /Download PDF/.test(b.textContent || '')));
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0].canteenName, 'Test Canteen');
+    assert.equal(captured[0].year, 2026);
+    assert.equal(captured[0].month, 10);
+    assert.equal(captured[0].empty, false);
+    assert.equal(captured[0].rows.length, 2);
+    assert.equal(captured[0].total, 230.5);
+    assert.match(captured[0].filename, /2026-10/);
+    assert.ok(captured[0].rows.some((row: any) => row.description === 'Vegetables' && row.amount === 150));
+    await act(async () => { setSel.call(monthSel, '11'); monthSel.dispatchEvent(new (win as any).Event('change', { bubbles: true })); });
+    await tick(1);
+    await click([...r.host.querySelectorAll('button')].find((b: any) => /Download PDF/.test(b.textContent || '')));
+    assert.equal(captured[1].empty, true);
+    assert.equal(captured[1].rows.length, 0);
+    assert.match(r.host.textContent, /No expenses for this month/);
+    const rec: string[] = [];
+    const doc = { setTextColor() {}, setFont() {}, setFontSize() {}, setFillColor() {}, setDrawColor() {}, rect() {}, line() {}, addPage() {}, splitTextToSize: (s: string) => [s], text: (s: any) => { (Array.isArray(s) ? s : [s]).forEach((x: any) => { if (typeof x === 'string') rec.push(x); }); } };
+    M.renderExpensesPdf(doc, captured[1], 'now');
+    assert.ok(rec.includes('No expenses for this month.'));
+    rec.length = 0;
+    M.renderExpensesPdf(doc, captured[0], 'now');
+    assert.ok(rec.includes('GO CANTEEN'));
+    assert.ok(rec.includes('Test Canteen'));
+    assert.ok(rec.some((s: string) => /EXPENSES/.test(s) && /October/.test(s)));
+    assert.ok(rec.includes('Vegetables'));
+    assert.ok(rec.includes('Rs.230.50') || rec.includes('Total: Rs.230.50'));
+  } finally {
+    M.expensesPdfAdapter.download = prev;
+  }
+  standard();
+  const s = await mount(createElement(M.Expenses));
+  assert.equal(s.host.querySelector('[data-testid="expense-pdf-download"]'), null, 'Standard hides expense PDF download');
 });

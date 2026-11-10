@@ -179,15 +179,14 @@ jobs:
           )
           test "$LAUNCH_THEME" = AppTheme.NoActionBarLaunch
           R=android/app/src/main/res
-          # Capacitor's default splash.png (Capacitor logo) is replaced by white + the real Go Canteen logo (pre-Android 12),
-          # and by plain white on Android 12+ where the system splash already shows the app icon once.
+          # Native splash is plain white (no launcher icon). Android 12+ requires an icon slot,
+          # so use a full-size white vector instead of the app icon. Launcher mipmaps stay unchanged.
           find "$R" -path '*/drawable*' -name 'splash.png' -delete
           mkdir -p "$R/drawable" "$R/drawable-v31" "$R/values-v31" "$R/values-night-v31" "$R/values-night"
           cat > "$R/drawable/splash.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
               <item android:drawable="@android:color/white" />
-              <item android:gravity="center" android:width="192dp" android:height="192dp" android:drawable="@mipmap/ic_launcher_foreground" />
           </layer-list>
           EOF
           cat > "$R/drawable-v31/splash.xml" <<'EOF'
@@ -196,13 +195,23 @@ jobs:
               <item android:drawable="@android:color/white" />
           </layer-list>
           EOF
+          cat > "$R/drawable/splash_empty_icon.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="288dp"
+              android:height="288dp"
+              android:viewportWidth="288"
+              android:viewportHeight="288">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M0,0h288v288h-288z" />
+          </vector>
+          EOF
           python3 - <<'PY'
           from pathlib import Path
           p = Path('android/app/src/main/res/values/styles.xml'); t = p.read_text()
           launch = '<style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">'
           noab = '<style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">'
           if launch not in t or noab not in t: raise SystemExit('Unexpected Capacitor styles.xml')
-          t = t.replace(launch, launch + '\n        <item name="android:windowBackground">@drawable/splash</item>', 1)
+          t = t.replace(launch, launch + '\n        <item name="android:windowBackground">@drawable/splash</item>\n        <item name="windowSplashScreenBackground">@android:color/white</item>\n        <item name="android:windowSplashScreenBackground">@android:color/white</item>\n        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_empty_icon</item>\n        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_empty_icon</item>\n        <item name="windowSplashScreenIconBackgroundColor">@android:color/white</item>\n        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/white</item>\n        <item name="windowSplashScreenAnimationDuration">0</item>\n        <item name="android:windowSplashScreenAnimationDuration">0</item>\n        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>', 1)
           t = t.replace(noab, noab + '\n        <item name="android:windowBackground">@android:color/white</item>\n        <item name="android:forceDarkAllowed">false</item>', 1)
           p.write_text(t)
           v31 = """<?xml version="1.0" encoding="utf-8"?>
@@ -213,6 +222,10 @@ jobs:
                   <item name="android:windowSplashScreenBackground">@android:color/white</item>
                   <item name="android:windowSplashScreenIconBackgroundColor">@android:color/white</item>
                   <item name="android:windowSplashScreenAnimationDuration">0</item>
+                  <item name="windowSplashScreenAnimatedIcon">@drawable/splash_empty_icon</item>
+                  <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_empty_icon</item>
+                  <item name="windowSplashScreenBackground">@android:color/white</item>
+                  <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
               </style>
           </resources>
           """
