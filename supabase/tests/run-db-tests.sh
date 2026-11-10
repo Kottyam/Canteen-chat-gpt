@@ -19,7 +19,7 @@ for f in /tmp/gc-migcopy-$$/*.sql; do
   [ "$(basename "$f")" = 20260904173000_backfill_legacy_canteen_links.sql ] && psql "$URL" -Xq -f supabase/tests/00b_seed_legacy_admin.sql >/dev/null 2>&1
   if ! out=$(psql "$URL" -Xq -v ON_ERROR_STOP=1 -1 -f "$f" 2>&1); then
     fails=$((fails+1)); echo "  pre-existing migration not replayable locally: $(basename "$f"): $(echo "$out" | grep ERROR | head -1 | cut -c1-140)"
-    case "$f" in *20261107100000_opt_in_pooling*|*20261107101029_pooling_standard_publish_guard*|*20261107102605_harden*|*20261107105152_pooling_member_periods*|*20261107110003_pooling_special_priced_items*) ours=FAILED;; esac
+    case "$f" in *20261107100000_opt_in_pooling*|*20261107101029_pooling_standard_publish_guard*|*20261107102605_harden*|*20261107105152_pooling_member_periods*|*20261107110003_pooling_special_priced_items*|*20261110200000_negative_admin_adjustments_unbilled_room*) ours=FAILED;; esac
   fi
 done
 echo "migrations replayed with $fails unrelated failures; pooling migrations (20261107100000 + 20261107101029): $ours"

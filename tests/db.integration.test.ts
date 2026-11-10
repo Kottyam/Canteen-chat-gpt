@@ -544,5 +544,63 @@ test('db integration', { skip }, async (t) => {
     assert.ok(n(stdId) >= 1, 'standard mode still notifies');
   });
 
+  await t.test('negative admin adjustments are capped by unbilled amount and rejected in published months (standard and pooling)', async () => {
+    if (root(`select to_regclass('gocanteen_private.member_unpublished_payable') is not null`) !== 't') return;
+    const CS = 'c9000000-0000-0000-0000-000000000000';
+    const OS = '99999999-0000-0000-0000-000000000001';
+    const MS = '99999999-0000-0000-0000-0000000000a1';
+    const extra = '99999999-0000-0000-0000-0000000000a2';
+    root(`
+      insert into auth.users(id,email) values('${OS}','os9@test'),('${MS}','ms9@test'),('${extra}','ex9@test') on conflict do nothing;
+      insert into public.canteens(id,name) values('${CS}','Neg Canteen') on conflict do nothing;
+      insert into public.profiles(id,role,status,full_name,employee_code,admin_role,canteen_id,created_at)
+        values('${OS}','admin','active','Owner9','o9','owner','${CS}','2026-01-01')
+        on conflict (id) do nothing;
+      insert into public.profiles(id,role,status,full_name,employee_code,canteen_id,created_at)
+        values('${MS}','employee','active','Member9','m9','${CS}','2026-01-01'),
+              ('${extra}','employee','active','Member9b','m9b','${CS}','2026-01-01')
+        on conflict (id) do nothing;
+      insert into public.admin_permissions(admin_id,canteen_id,permission,enabled)
+        select '${OS}','${CS}','payments',true
+        where not exists (select 1 from public.admin_permissions where admin_id='${OS}' and permission='payments');
+    `);
+    const tryAdj = (emp: string, date: string, amt: number) =>
+      sql(URL!, { role: 'authenticated', sub: OS },
+        `insert into public.employee_adjustments(employee_id,adjustment_date,amount,description,canteen_id) values('${emp}','${date}',${amt},'t','${CS}')`);
+    // Standard: December food 100, minus 20 ok; minus 90 then rejected; published month rejected
+    await as(OS).rpc('set_canteen_billing_settings', { p_billing_model: 'standard', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' });
+    root(`insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id)
+      values('99999999-0000-0000-0000-000000000011','${MS}','2026-12-03','active','employee','${CS}');
+      insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id)
+      values('99999999-0000-0000-0000-000000000011','rice','Rice',1,100,'member','${CS}');`);
+    const ok20 = tryAdj(MS, '2026-12-03', -20);
+    assert.equal(ok20.error, null, ok20.error?.message);
+    const over = tryAdj(MS, '2026-12-04', -90);
+    assert.match(String(over.error?.message || ''), /unbilled amount/);
+    const zeroRoom = tryAdj(MS, '2026-11-02', -5);
+    assert.match(String(zeroRoom.error?.message || ''), /unbilled amount/);
+    root(`insert into public.monthly_bills(employee_id,bill_month,bill_year,food_total,guest_food_total,admin_added_total,total,published,published_at,canteen_id)
+      values('${MS}',12,2026,100,0,-20,80,true,now(),'${CS}')`);
+    const pub = tryAdj(MS, '2026-12-10', -5);
+    assert.match(String(pub.error?.message || ''), /already published/);
+    // Pooling: January unpublished, expense 200 and both members attend so share 100 each; -20 ok, -150 rejected
+    await as(OS).rpc('set_canteen_billing_settings', { p_billing_model: 'pooling', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual' });
+    root(`insert into public.expenses(id,expense_date,amount,description,canteen_id) values('99999999-0000-0000-0000-000000000021','2026-01-05',200,'e','${CS}');
+      insert into public.orders(id,employee_id,ordered_for,status,order_source,canteen_id) values
+        ('99999999-0000-0000-0000-000000000012','${MS}','2026-01-05','active','employee','${CS}'),
+        ('99999999-0000-0000-0000-000000000013','${extra}','2026-01-05','active','employee','${CS}');
+      insert into public.order_items(order_id,item_code,item_name,quantity,unit_price,item_source,canteen_id) values
+        ('99999999-0000-0000-0000-000000000012','rice','Rice',1,0,'member','${CS}'),
+        ('99999999-0000-0000-0000-000000000013','rice','Rice',1,0,'member','${CS}');`);
+    const pok = tryAdj(MS, '2026-01-05', -20);
+    assert.equal(pok.error, null, pok.error?.message);
+    const pover = tryAdj(MS, '2026-01-06', -150);
+    assert.match(String(pover.error?.message || ''), /unbilled amount/);
+    root(`insert into public.monthly_bills(employee_id,bill_month,bill_year,food_total,guest_food_total,admin_added_total,total,published,published_at,canteen_id)
+      values('${MS}',1,2026,100,0,-20,80,true,now(),'${CS}')`);
+    const ppub = tryAdj(MS, '2026-01-20', -5);
+    assert.match(String(ppub.error?.message || ''), /already published/);
+  });
+
 });
 

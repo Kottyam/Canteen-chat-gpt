@@ -28,3 +28,7 @@ export { refreshBillingSettings } from '../../hooks/useBillingSettings';
 export { saveBillingSettings } from '../../services/billingSettings';
 export { default as AIIntelligence } from '../../components/admin/AIIntelligence';
 export { markAppPresented, resetAppPresentedForTests } from '../../utils/appSession';
+export { default as Bills } from '../../components/employee/Bills';
+export { default as AdminEmployeeOrder } from '../../components/admin/AdminEmployeeOrder';
+export { memberBillPdfAdapter, buildMemberBillPdfModel, renderMemberBillPdf } from '../../utils/memberBillPdf';
+export { parseAdminAdjustmentAmount, negativeAdjustmentBlocked } from '../../utils/adminAdjustmentValidation';

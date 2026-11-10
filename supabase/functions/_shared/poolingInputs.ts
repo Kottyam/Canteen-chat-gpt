@@ -50,9 +50,9 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
   }
   const members: PoolingMember[] = (profiles as any[]).flatMap((p): PoolingMember[] => {
     const ps = byMember.get(p.id);
-    if (ps?.length) return [{ memberId: p.id, periods: ps, adminAddedPaise: Math.max(0, adminAdded.get(p.id) || 0) }];
+    if (ps?.length) return [{ memberId: p.id, periods: ps, adminAddedPaise: adminAdded.get(p.id) || 0 }];
     if (p.status === 'deleted') return []; // removed before periods were recorded: leave date unknown, not guessed
-    return [{ memberId: p.id, activeFrom: p.created_at ? istBusinessDate(new Date(p.created_at)) : null, activeTo: null, adminAddedPaise: Math.max(0, adminAdded.get(p.id) || 0) }];
+    return [{ memberId: p.id, activeFrom: p.created_at ? istBusinessDate(new Date(p.created_at)) : null, activeTo: null, adminAddedPaise: adminAdded.get(p.id) || 0 }];
   });
   return {
     year: src.year, month: src.month, messCutMinDays: src.messCutMinDays, ...(src.asOf ? { asOf: src.asOf } : {}),
