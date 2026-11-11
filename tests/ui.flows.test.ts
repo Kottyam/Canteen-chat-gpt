@@ -550,6 +550,67 @@ test('admin Poll settings still list ended polls and their results download', as
   assert.match(h.textContent, /Download Results PDF/);
 });
 
+test('admin can download an ended poll results PDF through the shared deliverPdf path (web + Android), read-only', async () => {
+  seedPolls(); auth.user = { id: 'O1', name: 'Owner', role: 'admin', canteenName: 'Kochi' }; auth.perms = ['payments'];
+  fakeDb.db.poll_responses = [
+    { poll_id: 'ended', member_id: 'E1', member_name: 'Asha', answers: { q1: ['Yes'] }, submitted_at: new Date(Date.now() - 2e6).toISOString() },
+    { poll_id: 'ended', member_id: 'E2', member_name: 'Biju', answers: { q1: ['No'] }, submitted_at: new Date(Date.now() - 1e6).toISOString() },
+  ];
+  const before = JSON.stringify({ polls: fakeDb.db.polls, responses: fakeDb.db.poll_responses });
+  const captured: any[] = [];
+  const prev = M.pollResultsPdfAdapter.download;
+  M.pollResultsPdfAdapter.download = async (m: any) => { captured.push(m); };
+  try {
+    const h = (await mount(createElement(M.PollSettings))).host;
+    const endedBtn: any = h.querySelector('[data-testid="poll-download-ended"]');
+    const liveBtn: any = h.querySelector('[data-testid="poll-download-live"]');
+    assert.ok(endedBtn); assert.equal(endedBtn.disabled, false);
+    assert.ok(liveBtn); assert.equal(liveBtn.disabled, true);
+    await click(endedBtn);
+    assert.equal(captured.length, 1);
+    const m = captured[0];
+    assert.equal(m.title, 'Old Lunch Poll');
+    assert.equal(m.status, 'Ended');
+    assert.equal(m.responseCount, 2);
+    assert.deepEqual(m.questions[0].tallies, [{ option: 'Yes', count: 1 }, { option: 'No', count: 1 }]);
+    assert.deepEqual(m.rows.map((r: any) => r.memberName), ['Asha', 'Biju']);
+    assert.equal(m.canteenName, 'Kochi');
+    assert.doesNotMatch(h.textContent, /Could not download/);
+    assert.equal(JSON.stringify({ polls: fakeDb.db.polls, responses: fakeDb.db.poll_responses }), before);
+    M.pollResultsPdfAdapter.download = async () => { throw new Error('share cancelled'); };
+    await click(h.querySelector('[data-testid="poll-download-ended"]'));
+    assert.match(h.textContent, /Could not download poll results: share cancelled/);
+  } finally { M.pollResultsPdfAdapter.download = prev; }
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(path.join(path.resolve(here, '..'), 'components/admin/PollSettings.tsx'), 'utf8');
+  assert.doesNotMatch(src, /doc\.save\(/);
+  const pdfSrc = fs.readFileSync(path.join(path.resolve(here, '..'), 'utils/pollResultsPdf.ts'), 'utf8');
+  assert.match(pdfSrc, /deliverPdf\(doc, model\.filename\)/);
+});
+
+test('poll results PDF renders summary + responses with light cell fills (no black cells)', () => {
+  const poll = { id: 'p1', title: 'Menu fixation', questions: [{ id: 'q1', text: 'Lunch?', options: ['Rice', 'Chapati'], allowMultiple: false }, { id: 'q2', text: 'Extras', options: ['Egg', 'Fish'], allowMultiple: true }], startsAt: '2026-11-08T13:46:00Z', endsAt: '2026-11-08T14:46:00Z', enabled: true };
+  const model = M.buildPollResultsPdfModel(poll, [{ memberId: 'E1', memberName: 'Asha', answers: { q1: ['Rice'], q2: ['Egg', 'Fish'] }, submittedAt: '2026-11-08T13:50:00Z' }], 'Kochi');
+  assert.deepEqual(model.questions[1].tallies, [{ option: 'Egg', count: 1 }, { option: 'Fish', count: 1 }]);
+  assert.deepEqual(model.rows[0].answers, ['Rice', 'Egg, Fish']);
+  const ops: string[] = [];
+  const fakeDoc = {
+    setTextColor() { ops.push('tc'); }, setFont() {}, setFontSize() {}, setFillColor(...a: number[]) { ops.push(`fill:${a.join(',')}`); },
+    setDrawColor() {}, setLineWidth() {}, rect() { ops.push('rect'); }, addPage() {}, setPage() {}, getNumberOfPages() { return 1; },
+    splitTextToSize(s: string) { return [String(s ?? '')]; }, text(s: any) { ops.push(`text:${s}`); },
+  };
+  M.renderPollResultsPdf(fakeDoc, model, 'now');
+  ops.forEach((op, i) => {
+    if (op !== 'rect') return;
+    const prev = ops[i - 1];
+    assert.ok(prev.startsWith('fill:'), `rect ${i} preceded by ${prev}`);
+    const rgb = prev.slice(5).split(',').map(Number);
+    assert.ok(rgb[0] + rgb[1] + rgb[2] > 600, prev);
+  });
+  const txt = ops.filter(o => o.startsWith('text:')).join('|');
+  assert.match(txt, /POLL RESULTS/); assert.match(txt, /Menu fixation/); assert.match(txt, /1 vote \(100%\)/); assert.match(txt, /Asha/);
+});
+
 test('Pooling Expenses shows Download PDF and generates a monthly report; Standard hides it', async () => {
   fakeDb.reset();
   auth.user = { id: 'O1', name: 'Owner', role: 'admin', canteenName: 'Test Canteen' }; auth.perms = ['expenses'];
