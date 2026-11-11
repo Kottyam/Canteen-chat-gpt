@@ -13,6 +13,23 @@ const displayDate = (iso: string) => {
 const money = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 const pdfMoney = (n: number) => formatSignedRupees(n).replace('−₹', '-Rs.').replace('₹', 'Rs.');
 
+const isoDay = (year: number, month: number, day: number) =>
+  `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+const monthLastDay = (year: number, month: number) => isoDay(year, month, new Date(Date.UTC(year, month, 0)).getUTCDate());
+function includedInPublishedBill(date: string, createdAt: string | undefined, bill: MemberBillPdfBill, year: number, month: number) {
+  const start = String(bill.billing_start_date || isoDay(year, month, 1)).slice(0, 10);
+  const end = String(bill.billing_end_date || monthLastDay(year, month)).slice(0, 10);
+  const day = String(date || '').slice(0, 10);
+  if (!day || day < start || day > end) return false;
+  if (!bill.published_at) return true;
+  if (!createdAt) return true;
+  const created = Date.parse(createdAt);
+  const published = Date.parse(bill.published_at);
+  if (!Number.isFinite(created) || !Number.isFinite(published)) return true;
+  return created <= published;
+}
+
+
 export interface MemberBillItem { name: string; qty: number; unitPrice?: number; lineTotal?: number }
 export interface MemberBillEntry {
   date: string;
@@ -28,6 +45,7 @@ export interface MemberBillPdfOrder {
   status?: string;
   orderSource?: string;
   guestName?: string;
+  createdAt?: string;
   items?: Record<string, boolean>;
   itemNames?: Record<string, string>;
   itemQuantities?: Record<string, number>;
@@ -37,7 +55,7 @@ export interface MemberBillPdfOrder {
   guestItemQuantities?: Record<string, number>;
   guestItemPrices?: Record<string, number>;
 }
-export interface MemberBillPdfAdjustment { adjustment_date: string; amount: number; description?: string }
+export interface MemberBillPdfAdjustment { adjustment_date: string; amount: number; description?: string; created_at?: string }
 export interface MemberBillPdfBill {
   bill_year: number;
   bill_month: number;
@@ -48,6 +66,9 @@ export interface MemberBillPdfBill {
   total: number;
   member_name_snapshot?: string | null;
   published?: boolean;
+  published_at?: string | null;
+  billing_start_date?: string | null;
+  billing_end_date?: string | null;
 }
 export type MemberBillRowKind = 'item' | 'day_subtotal' | 'adjustment' | 'grand_total';
 export interface MemberBillTableRow {
@@ -102,12 +123,11 @@ export function buildMemberBillPdfModel(
   billingModel: 'standard' | 'pooling',
 ): MemberBillPdfModel {
   const year = bill.bill_year, month = bill.bill_month;
-  const key = `${year}-${String(month).padStart(2, '0')}`;
   const withMoney = billingModel === 'standard';
   const resolvedName = memberName || bill.member_name_snapshot || 'Member';
   const entries: MemberBillEntry[] = [];
   let computed = 0;
-  for (const o of orders.filter(o => String(o.date).startsWith(key) && o.status !== 'cancelled')) {
+  for (const o of orders.filter(o => o.status !== 'cancelled' && includedInPublishedBill(o.date, o.createdAt, bill, year, month))) {
     const memberItems = catalog(o.items, o.itemNames, o.itemQuantities, o.itemPrices, withMoney);
     const guestItems = catalog(o.guestItems, o.guestItemNames, o.guestItemQuantities, o.guestItemPrices, withMoney);
     if (memberItems.length) {
@@ -121,7 +141,7 @@ export function buildMemberBillPdfModel(
       if (withMoney) computed += guestItems.reduce((s, i) => s + money(i.lineTotal || 0), 0);
     }
   }
-  for (const a of adjustments.filter(a => String(a.adjustment_date).startsWith(key))) {
+  for (const a of adjustments.filter(a => includedInPublishedBill(a.adjustment_date, a.created_at, bill, year, month))) {
     const amount = money(a.amount);
     entries.push({
       date: a.adjustment_date,
@@ -139,7 +159,7 @@ export function buildMemberBillPdfModel(
   computed = money(computed);
   const publishedTotal = money(bill.total);
   const rows: MemberBillTableRow[] = [];
-  let sno = 0;
+  let dateSno = 0;
   const byDate = new Map<string, MemberBillEntry[]>();
   for (const e of entries) {
     const list = byDate.get(e.date) || [];
@@ -147,14 +167,14 @@ export function buildMemberBillPdfModel(
     byDate.set(e.date, list);
   }
   for (const date of [...byDate.keys()].sort()) {
+    dateSno += 1;
     let dayTotal = 0;
     for (const e of byDate.get(date)!) {
       if (e.kind === 'admin_amount') {
-        sno += 1;
         const amt = money(e.amount || 0);
         rows.push({
           kind: 'item',
-          sno,
+          sno: dateSno,
           date: displayDate(date),
           name: e.displayName || resolvedName,
           orderType: e.label,
@@ -166,11 +186,10 @@ export function buildMemberBillPdfModel(
         continue;
       }
       for (const item of e.items) {
-        sno += 1;
         const amt = withMoney ? money(item.lineTotal || 0) : null;
         rows.push({
           kind: 'item',
-          sno,
+          sno: dateSno,
           date: displayDate(date),
           name: e.displayName || resolvedName,
           orderType: e.label,
@@ -181,9 +200,7 @@ export function buildMemberBillPdfModel(
         if (withMoney) dayTotal += money(item.lineTotal || 0);
       }
     }
-    if (withMoney) {
-      rows.push({ kind: 'day_subtotal', date: displayDate(date), item: 'Day subtotal', amount: money(dayTotal) });
-    }
+    rows.push({ kind: 'day_subtotal', sno: dateSno, date: displayDate(date), item: 'Day subtotal', amount: withMoney ? money(dayTotal) : null });
   }
   const roundingAdjustment = withMoney ? money(publishedTotal - computed) : 0;
   if (withMoney && Math.abs(roundingAdjustment) >= 0.015) {
@@ -251,60 +268,62 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
     return 50;
   };
 
-  const drawTableHeader = (y: number) => {
+  const drawTableHeader = (yy: number) => {
     const h = 8;
     doc.setFillColor(209, 250, 229);
     doc.setDrawColor(167, 243, 208);
     doc.setLineWidth(0.25);
-    doc.rect(M, y, width, h, 'FD');
+    doc.rect(M, yy, width, h, 'FD');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(6, 95, 70);
     headers.forEach((label, i) => {
-      const right = showAmount && i === headers.length - 1;
-      doc.text(label, right ? xs[i] + cols[i] - 2 : xs[i] + 1.4, y + 5.4, right ? { align: 'right' } : undefined);
+      doc.text(label, xs[i] + cols[i] / 2, yy + 5.4, { align: 'center' });
     });
     doc.setTextColor(0, 0, 0);
     doc.setFont('helvetica', 'normal');
-    return y + h;
+    return yy + h;
   };
 
   let y = drawTableHeader(drawTitle());
   let itemBand = 0;
+  const newPage = () => { doc.addPage(); y = drawTableHeader(drawTitle()); };
 
-  const newPage = () => {
-    doc.addPage();
-    y = drawTableHeader(drawTitle());
+  const detailValues = (row: MemberBillTableRow) => {
+    const amount = row.amount == null ? '' : pdfMoney(row.amount);
+    return showAmount
+      ? [row.name || '', row.orderType || '', row.item || '', row.qty || '', amount]
+      : [row.name || '', row.orderType || '', row.item || '', row.qty || ''];
   };
 
   const rowHeight = (row: MemberBillTableRow) => {
-    const values = showAmount
-      ? [row.sno ? String(row.sno) : '', row.date || '', row.name || '', row.orderType || '', row.item || '', row.qty || '', row.amount == null ? '' : pdfMoney(row.amount)]
-      : [row.sno ? String(row.sno) : '', row.date || '', row.name || '', row.orderType || '', row.item || '', row.qty || ''];
+    const values = [row.sno ? String(row.sno) : '', row.date || '', ...detailValues(row)];
     const maxLines = Math.max(1, ...values.map((value, i) => linesOf(doc, value, cols[i]).length));
     return Math.max(7.2, maxLines * ROW_LINE + 3);
   };
 
-  const drawRow = (row: MemberBillTableRow) => {
-    const h = rowHeight(row);
-    if (y + h > PAGE_BOTTOM) newPage();
-    const special = row.kind !== 'item';
+  const fillFor = (row: MemberBillTableRow) => {
     if (row.kind === 'grand_total') doc.setFillColor(209, 250, 229);
     else if (row.kind === 'day_subtotal' || row.kind === 'adjustment') doc.setFillColor(243, 244, 246);
     else if (itemBand % 2 === 1) doc.setFillColor(249, 250, 251);
     else doc.setFillColor(255, 255, 255);
+  };
+
+  const drawDetailRow = (row: MemberBillTableRow) => {
+    const h = rowHeight(row);
+    fillFor(row);
     if (row.kind === 'item') itemBand += 1;
     doc.setDrawColor(229, 231, 235);
     doc.setLineWidth(0.2);
-    doc.rect(M, y, width, h, 'FD');
-    const values = showAmount
-      ? [row.sno ? String(row.sno) : '', row.date || '', row.name || '', row.orderType || '', row.item || '', row.qty || '', row.amount == null ? '' : pdfMoney(row.amount)]
-      : [row.sno ? String(row.sno) : '', row.date || '', row.name || '', row.orderType || '', row.item || '', row.qty || ''];
-    doc.setFont('helvetica', special ? 'bold' : 'normal');
-    doc.setFontSize(special ? 7.6 : 7.2);
-    values.forEach((value, i) => {
+    const values = detailValues(row);
+    const special = row.kind !== 'item';
+    values.forEach((value, vi) => {
+      const i = vi + 2;
+      doc.rect(xs[i], y, cols[i], h, 'FD');
+      const right = showAmount && i === cols.length - 1 && value !== '';
       const cellLines = linesOf(doc, value, cols[i]);
-      const right = showAmount && i === values.length - 1;
       const totalH = cellLines.length * ROW_LINE;
       const startY = y + (h - totalH) / 2 + 3.3;
+      doc.setFont('helvetica', special ? 'bold' : 'normal');
+      doc.setFontSize(special ? 7.6 : 7.2);
       cellLines.forEach((line, li) => {
         doc.text(line, right ? xs[i] + cols[i] - 2 : xs[i] + 1.4, startY + li * ROW_LINE, right ? { align: 'right' } : undefined);
       });
@@ -312,7 +331,88 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
     y += h;
   };
 
-  for (const row of model.rows) drawRow(row);
+  const drawMerge = (top: number, h: number, sno?: number, date?: string) => {
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(229, 231, 235);
+    doc.setLineWidth(0.2);
+    doc.rect(xs[0], top, cols[0], h, 'FD');
+    doc.rect(xs[1], top, cols[1], h, 'FD');
+    const write = (text: string, col: number, size: number) => {
+      const cellLines = linesOf(doc, text, cols[col]);
+      const totalH = cellLines.length * ROW_LINE;
+      const startY = top + (h - totalH) / 2 + 3.3;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(size);
+      cellLines.forEach((line, li) => {
+        doc.text(line, xs[col] + cols[col] / 2, startY + li * ROW_LINE, { align: 'center' });
+      });
+    };
+    write(sno ? String(sno) : '', 0, 8);
+    write(date || '', 1, 7.6);
+  };
+
+  const drawStandalone = (row: MemberBillTableRow) => {
+    const h = rowHeight(row);
+    if (y + h > PAGE_BOTTOM) newPage();
+    fillFor(row);
+    doc.setDrawColor(229, 231, 235);
+    doc.setLineWidth(0.2);
+    doc.rect(M, y, width, h, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+    doc.text(row.item || '', M + 2, y + h / 2 + 1.2);
+    if (showAmount && row.amount != null) doc.text(pdfMoney(row.amount), M + width - 2, y + h / 2 + 1.2, { align: 'right' });
+    y += h;
+  };
+
+  const drawDateGroup = (items: MemberBillTableRow[], subtotal?: MemberBillTableRow) => {
+    let queue = items.slice();
+    let sub = subtotal;
+    while (queue.length || sub) {
+      const heights = queue.map(rowHeight);
+      let fit = 0, used = 0;
+      for (let i = 0; i < queue.length; i++) {
+        if (y + used + heights[i] > PAGE_BOTTOM) break;
+        used += heights[i];
+        fit += 1;
+      }
+      if (fit === 0 && queue.length) { newPage(); continue; }
+      if (!queue.length && sub) {
+        const sh = rowHeight(sub);
+        if (y + sh > PAGE_BOTTOM) { newPage(); continue; }
+        const top = y;
+        drawDetailRow(sub);
+        drawMerge(top, y - top, sub.sno, sub.date);
+        sub = undefined;
+        continue;
+      }
+      let takeSub = false;
+      if (fit === queue.length && sub) {
+        takeSub = y + used + rowHeight(sub) <= PAGE_BOTTOM;
+      }
+      const chunk = queue.slice(0, fit);
+      queue = queue.slice(fit);
+      const top = y;
+      chunk.forEach(row => drawDetailRow(row));
+      if (takeSub && sub) { drawDetailRow(sub); sub = undefined; }
+      drawMerge(top, y - top, chunk[0].sno, chunk[0].date);
+    }
+  };
+
+  let current: { items: MemberBillTableRow[]; subtotal?: MemberBillTableRow } | null = null;
+  const flush = () => { if (current) { drawDateGroup(current.items, current.subtotal); current = null; } };
+  for (const row of model.rows) {
+    if (row.kind === 'item') {
+      if (!current) current = { items: [] };
+      current.items.push(row);
+    } else if (row.kind === 'day_subtotal') {
+      if (!current) current = { items: [] };
+      current.subtotal = row;
+      flush();
+    } else {
+      flush();
+      drawStandalone(row);
+    }
+  }
+  flush();
 
   if (model.billingModel === 'pooling') {
     const boxH = 28 + (model.breakdown.specials ? 5 : 0) + (model.breakdown.guestFood ? 5 : 0);
