@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { jsPDF } from 'jspdf';
+import { buildPollResultsPdfModel, pollResultsPdfAdapter } from '../../utils/pollResultsPdf';
 import { useAuth } from '../../context/AuthContext';
 import { loadRecentPolls, loadPollResponses, savePoll, setPollEnabled, deletePoll, cleanupOldPolls, isPollOpen, isPollEnded, Poll, PollQuestion } from '../../services/polls';
 
 const PollSettings: React.FC = () => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('payments') || hasPermission('menu');
   const [polls, setPolls] = useState<Poll[]>([]);
   const [title, setTitle] = useState('');
@@ -14,10 +14,12 @@ const PollSettings: React.FC = () => {
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [downloading, setDownloading] = useState<string | null>(null);
 
   const refresh = async () => {
-    await cleanupOldPolls(10);
-    setPolls(await loadRecentPolls(10));
+    try { await cleanupOldPolls(10); } catch { /* best effort */ }
+    try { setPolls(await loadRecentPolls(10)); }
+    catch (e: any) { setMsg(e?.message || 'Could not load polls.'); }
   };
 
   useEffect(() => { void refresh(); }, []);
@@ -49,26 +51,15 @@ const PollSettings: React.FC = () => {
   };
 
   const downloadPdf = async (poll: Poll) => {
-    if (!isPollEnded(poll)) return;
-    const rows = await loadPollResponses(poll.id);
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text(poll.title, 14, 20);
-    let y = 30;
-    doc.setFontSize(11);
-    if (!rows.length) doc.text('No responses.', 14, y);
-    rows.forEach((r, i) => {
-      if (y > 260) { doc.addPage(); y = 20; }
-      doc.text(`${i + 1}. ${r.memberName}`, 14, y);
-      y += 6;
-      poll.questions.forEach(q => {
-        const ans = (r.answers[q.id] || []).join(', ') || '—';
-        doc.text(`   ${q.text}: ${ans}`, 14, y);
-        y += 5;
-      });
-      y += 4;
-    });
-    doc.save(`poll-${poll.id.slice(0, 8)}.pdf`);
+    if (!isPollEnded(poll) || downloading) return;
+    setDownloading(poll.id); setMsg('');
+    try {
+      const rows = await loadPollResponses(poll.id);
+      const canteenName = String((user as any)?.canteenName || '').trim();
+      await pollResultsPdfAdapter.download(buildPollResultsPdfModel(poll, rows, canteenName));
+    } catch (e: any) {
+      setMsg(`Could not download poll results: ${e?.message || 'unknown error'}`);
+    } finally { setDownloading(null); }
   };
 
   const remove = async (id: string) => {
@@ -149,11 +140,12 @@ const PollSettings: React.FC = () => {
                   {!live && !ended && <span className="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700">Scheduled</span>}
                   <button
                     type="button"
-                    disabled={!ended}
+                    disabled={!ended || downloading === p.id}
+                    data-testid={`poll-download-${p.id}`}
                     onClick={() => void downloadPdf(p)}
-                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${ended ? 'animate-pulse bg-primary-50 text-primary-700' : 'cursor-not-allowed opacity-40'}`}
+                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${ended ? `${downloading === p.id ? '' : 'animate-pulse '}bg-primary-50 text-primary-700` : 'cursor-not-allowed opacity-40'}`}
                   >
-                    Download Results PDF
+                    {downloading === p.id ? 'Preparing PDF…' : 'Download Results PDF'}
                   </button>
                   {canEdit && <button type="button" onClick={() => void remove(p.id)} className="rounded-lg border border-red-200 px-3 py-1.5 text-sm text-red-600">Delete</button>}
                 </div>
