@@ -616,7 +616,7 @@ test('member published-bill PDF is offered only for published months and uses th
   data.orders = [{
     date: '2026-10-07', status: 'active', orderSource: 'admin',
     items: { rice: true }, itemNames: { rice: 'Rice' }, itemQuantities: { rice: 1 }, itemPrices: { rice: 80 },
-    guestItems: { tea: true }, guestItemNames: { tea: 'Tea' }, guestItemQuantities: { tea: 1 }, guestItemPrices: { tea: 20 },
+    guestName: 'Ravi', guestItems: { tea: true }, guestItemNames: { tea: 'Tea' }, guestItemQuantities: { tea: 1 }, guestItemPrices: { tea: 20 },
   }];
   fakeDb.db.profiles = [{ id: 'mid-1', employee_code: 'M001' }];
   fakeDb.db.employee_adjustments = [{ id: 'adj1', employee_id: 'mid-1', adjustment_date: '2026-10-07', amount: -20, description: 'Less rice' }];
@@ -638,9 +638,12 @@ test('member published-bill PDF is offered only for published months and uses th
     assert.equal(captured.length, 1);
     assert.equal(captured[0].publishedTotal, 80);
     assert.equal(captured[0].billingModel, 'standard');
-    assert.ok(captured[0].entries.some((e: any) => e.label === 'Admin-placed order'));
+    assert.ok(captured[0].entries.some((e: any) => e.label === 'Admin order'));
     assert.ok(captured[0].entries.some((e: any) => e.label === 'Guest order'));
     assert.ok(captured[0].entries.some((e: any) => e.label === 'Admin deduction' && e.amount === -20));
+    assert.ok(captured[0].rows.some((r: any) => r.kind === 'grand_total' && r.amount === 80));
+    assert.ok(captured[0].rows.some((r: any) => r.orderType === 'Guest order' && r.name === 'Ravi' && r.item === 'Tea'));
+    assert.ok(captured[0].rows.some((r: any) => r.kind === 'day_subtotal' && r.amount === 80));
     const mismatch = M.buildMemberBillPdfModel(
       { bill_year: 2026, bill_month: 10, food_total: 100, guest_food_total: 0, admin_added_total: 0, total: 250 },
       [{ date: '2026-10-01', status: 'active', items: { x: true }, itemNames: { x: 'X' }, itemQuantities: { x: 1 }, itemPrices: { x: 100 } }],
@@ -649,9 +652,74 @@ test('member published-bill PDF is offered only for published months and uses th
     assert.equal(mismatch.computedTotal, 100);
     assert.equal(mismatch.publishedTotal, 250);
     assert.equal(mismatch.reconciled, false);
+    assert.equal(mismatch.roundingAdjustment, 150);
+    assert.equal(mismatch.rows.find((r: any) => r.kind === 'adjustment')?.amount, 150);
+    assert.equal(mismatch.rows.find((r: any) => r.kind === 'grand_total')?.amount, 250);
   } finally {
     M.memberBillPdfAdapter.download = prev;
   }
+});
+
+
+test('member bill PDF table rows cover serial numbers, day subtotals, pooling (no item prices) and page chrome', () => {
+  const bill = {
+    bill_year: 2026, bill_month: 10,
+    food_total: 80, guest_food_total: 20, admin_added_total: -20, special_items_total: 0,
+    total: 80, member_name_snapshot: 'Anu', published: true,
+  };
+  const orders = [{
+    date: '2026-10-07', status: 'active', orderSource: 'admin', guestName: 'Ravi',
+    items: { rice: true }, itemNames: { rice: 'Rice' }, itemQuantities: { rice: 1 }, itemPrices: { rice: 80 },
+    guestItems: { tea: true }, guestItemNames: { tea: 'Tea' }, guestItemQuantities: { tea: 2 }, guestItemPrices: { tea: 20 },
+  }];
+  const adjs = [{ adjustment_date: '2026-10-07', amount: -20, description: 'Less rice' }];
+  const model = M.buildMemberBillPdfModel(bill, orders, adjs, 'Test Canteen', 'Anu', 'standard');
+  const items = model.rows.filter((r: any) => r.kind === 'item');
+  assert.deepEqual(items.map((r: any) => r.sno), [1, 2, 3]);
+  assert.equal(items[0].orderType, 'Admin order');
+  assert.equal(items[0].name, 'Anu');
+  assert.equal(items[1].orderType, 'Guest order');
+  assert.equal(items[1].name, 'Ravi');
+  assert.equal(items[1].amount, 40);
+  assert.equal(items[2].orderType, 'Admin deduction');
+  assert.equal(model.rows.find((r: any) => r.kind === 'day_subtotal')?.amount, 100);
+  assert.equal(model.rows.find((r: any) => r.kind === 'grand_total')?.amount, 80);
+  assert.equal(model.billStatus, 'Published');
+  const unnamed = M.buildMemberBillPdfModel(bill, [{ ...orders[0], guestName: '' }], [], 'Test Canteen', 'Anu', 'standard');
+  assert.equal(unnamed.rows.find((r: any) => r.orderType === 'Guest order')?.name, 'Guest');
+  const pooling = M.buildMemberBillPdfModel(
+    { ...bill, food_total: 400, guest_food_total: 0, admin_added_total: -20, special_items_total: 30, total: 410 },
+    orders, adjs, 'Test Canteen', 'Anu', 'pooling'
+  );
+  assert.ok(pooling.rows.filter((r: any) => r.kind === 'item').every((r: any) => r.amount == null));
+  assert.equal(pooling.rows.some((r: any) => r.kind === 'day_subtotal'), false);
+  assert.equal(pooling.rows.find((r: any) => r.kind === 'grand_total')?.amount, 410);
+  assert.equal(pooling.breakdown.memberFood, 400);
+  const days = M.buildMemberBillPdfModel(
+    { bill_year: 2026, bill_month: 10, food_total: 150, guest_food_total: 0, admin_added_total: 0, total: 150 },
+    [
+      { date: '2026-10-01', status: 'active', items: { a: true }, itemNames: { a: 'A' }, itemQuantities: { a: 1 }, itemPrices: { a: 50 } },
+      { date: '2026-10-02', status: 'active', items: { b: true }, itemNames: { b: 'B' }, itemQuantities: { b: 1 }, itemPrices: { b: 100 } },
+    ],
+    [], 'Test Canteen', 'Anu', 'standard'
+  );
+  assert.deepEqual(days.rows.filter((r: any) => r.kind === 'day_subtotal').map((r: any) => r.amount), [50, 100]);
+  assert.equal(days.reconciled, true);
+  const texts: string[] = [];
+  const fakeDoc = {
+    setTextColor() {}, setFont() {}, setFontSize() {}, setFillColor() {}, setDrawColor() {}, setLineWidth() {},
+    rect() {}, line() {}, addPage() {}, setPage() {}, getNumberOfPages() { return 1; },
+    splitTextToSize(s: string) { return [String(s ?? '')]; },
+    text(s: any) { texts.push(Array.isArray(s) ? s.join(' ') : String(s)); },
+  };
+  M.renderMemberBillPdf(fakeDoc, model, '11 Nov 2026, 7:00 am');
+  const joined = texts.join('\n');
+  assert.match(joined, /Test Canteen/);
+  assert.match(joined, /Member: Anu/);
+  assert.match(joined, /Status: Published/);
+  assert.match(joined, /S\.No/);
+  assert.match(joined, /Order type/);
+  assert.match(joined, /Page 1 of 1/);
 });
 
 test('Admin extra amount accepts a minus within unbilled room and rejects published or oversize minuses', async () => {
