@@ -274,11 +274,13 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
     doc.setDrawColor(167, 243, 208);
     doc.setLineWidth(0.25);
     doc.rect(M, yy, width, h, 'FD');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(6, 95, 70);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5);
+    doc.setTextColor(6, 95, 70);
     headers.forEach((label, i) => {
+      doc.setTextColor(6, 95, 70);
       doc.text(label, xs[i] + cols[i] / 2, yy + 5.4, { align: 'center' });
     });
-    doc.setTextColor(0, 0, 0);
+    doc.setTextColor(17, 24, 39);
     doc.setFont('helvetica', 'normal');
     return yy + h;
   };
@@ -300,30 +302,41 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
     return Math.max(7.2, maxLines * ROW_LINE + 3);
   };
 
-  const fillFor = (row: MemberBillTableRow) => {
-    if (row.kind === 'grand_total') doc.setFillColor(209, 250, 229);
-    else if (row.kind === 'day_subtotal' || row.kind === 'adjustment') doc.setFillColor(243, 244, 246);
-    else if (itemBand % 2 === 1) doc.setFillColor(249, 250, 251);
-    else doc.setFillColor(255, 255, 255);
+  // Android PDF viewers (PdfRenderer / many share previews) drop the current
+  // non-stroking color after a text operator. The next rect then fills black.
+  // Set fill + stroke + text color immediately before every painted cell.
+  const BORDER = [209, 213, 219] as const;
+  const INK = [17, 24, 39] as const;
+  const fillFor = (row: MemberBillTableRow): [number, number, number] => {
+    if (row.kind === 'grand_total') return [209, 250, 229];
+    if (row.kind === 'day_subtotal' || row.kind === 'adjustment') return [243, 244, 246];
+    if (itemBand % 2 === 1) return [249, 250, 251];
+    return [255, 255, 255];
+  };
+  const paintCell = (x: number, yy: number, w: number, h: number, fill: readonly [number, number, number]) => {
+    doc.setFillColor(fill[0], fill[1], fill[2]);
+    doc.setDrawColor(BORDER[0], BORDER[1], BORDER[2]);
+    doc.setLineWidth(0.2);
+    doc.rect(x, yy, w, h, 'FD');
+    doc.setTextColor(INK[0], INK[1], INK[2]);
   };
 
   const drawDetailRow = (row: MemberBillTableRow) => {
     const h = rowHeight(row);
-    fillFor(row);
+    const fill = fillFor(row);
     if (row.kind === 'item') itemBand += 1;
-    doc.setDrawColor(229, 231, 235);
-    doc.setLineWidth(0.2);
     const values = detailValues(row);
     const special = row.kind !== 'item';
     values.forEach((value, vi) => {
       const i = vi + 2;
-      doc.rect(xs[i], y, cols[i], h, 'FD');
+      paintCell(xs[i], y, cols[i], h, fill);
       const right = showAmount && i === cols.length - 1 && value !== '';
       const cellLines = linesOf(doc, value, cols[i]);
       const totalH = cellLines.length * ROW_LINE;
       const startY = y + (h - totalH) / 2 + 3.3;
       doc.setFont('helvetica', special ? 'bold' : 'normal');
       doc.setFontSize(special ? 7.6 : 7.2);
+      doc.setTextColor(INK[0], INK[1], INK[2]);
       cellLines.forEach((line, li) => {
         doc.text(line, right ? xs[i] + cols[i] - 2 : xs[i] + 1.4, startY + li * ROW_LINE, right ? { align: 'right' } : undefined);
       });
@@ -332,16 +345,15 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
   };
 
   const drawMerge = (top: number, h: number, sno?: number, date?: string) => {
-    doc.setFillColor(255, 255, 255);
-    doc.setDrawColor(229, 231, 235);
-    doc.setLineWidth(0.2);
-    doc.rect(xs[0], top, cols[0], h, 'FD');
-    doc.rect(xs[1], top, cols[1], h, 'FD');
+    const fill: [number, number, number] = [255, 255, 255];
+    paintCell(xs[0], top, cols[0], h, fill);
+    paintCell(xs[1], top, cols[1], h, fill);
     const write = (text: string, col: number, size: number) => {
       const cellLines = linesOf(doc, text, cols[col]);
       const totalH = cellLines.length * ROW_LINE;
       const startY = top + (h - totalH) / 2 + 3.3;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(size);
+      doc.setTextColor(INK[0], INK[1], INK[2]);
       cellLines.forEach((line, li) => {
         doc.text(line, xs[col] + cols[col] / 2, startY + li * ROW_LINE, { align: 'center' });
       });
@@ -353,11 +365,9 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
   const drawStandalone = (row: MemberBillTableRow) => {
     const h = rowHeight(row);
     if (y + h > PAGE_BOTTOM) newPage();
-    fillFor(row);
-    doc.setDrawColor(229, 231, 235);
-    doc.setLineWidth(0.2);
-    doc.rect(M, y, width, h, 'FD');
+    paintCell(M, y, width, h, fillFor(row));
     doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+    doc.setTextColor(INK[0], INK[1], INK[2]);
     doc.text(row.item || '', M + 2, y + h / 2 + 1.2);
     if (showAmount && row.amount != null) doc.text(pdfMoney(row.amount), M + width - 2, y + h / 2 + 1.2, { align: 'right' });
     y += h;
