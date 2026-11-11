@@ -1006,3 +1006,44 @@ test('Super Admin canteen Members and Menu load only on click and are read-only'
   assert.doesNotMatch(snap.replace(/--.*$/gm, ''), /update public\.poll|delete from public\.poll/i);
 });
 
+
+test('member Bills: optional UPI reference before I Have Paid; sent only when filled; admin sees it with Copy', async () => {
+  const setup = async () => {
+    fakeDb.reset();
+    fakeDb.setAuthUid('mid-1');
+    auth.user = { id: 'M001', identityId: 'mid-1', name: 'Anu', role: 'employee', canteenName: 'Test Canteen' };
+    data.orders = [];
+    fakeDb.db.profiles = [{ id: 'mid-1', employee_code: 'M001' }];
+    fakeDb.db.monthly_bills = [{ id: 'b1', employee_id: 'mid-1', bill_year: 2026, bill_month: 11, published: true, food_total: 100, guest_food_total: 0, admin_added_total: 0, total: 100, upi_id: 'canteen@upi', upi_name: 'Canteen' }];
+    fakeDb.db.bill_payments = [{ id: 'p1', bill_id: 'b1', employee_id: 'mid-1', amount: 100, status: 'unpaid', created_at: '2026-11-11T10:00:00Z', payment_reference: 'GoCanteen-2026-11-x-B1', request_sequence: 1 }];
+    fakeDb.rpcHandlers.confirm_bill_payment = (args: any) => ({ data: { ...fakeDb.db.bill_payments[0], status: 'pending_verification', member_upi_reference: args.p_member_upi_reference ?? null } });
+    standard();
+    return (await mount(createElement(M.Bills, { openBillId: 'b1' }))).host;
+  };
+  let h = await setup();
+  const input = h.querySelector('#upi-ref-p1') as any;
+  assert.ok(input, 'optional UPI reference field is shown');
+  assert.equal(input.value, '', 'blank by default');
+  assert.match(h.textContent || '', /UPI Reference Number \(optional\)/);
+  const btns = [...h.querySelectorAll('button')] as any[];
+  const paid = btns.find(b => /I Have Paid/.test(b.textContent || ''));
+  assert.ok(input.compareDocumentPosition(paid) & 4, 'field comes before I Have Paid');
+  // invalid when filled -> blocked, no RPC
+  await type(input, 'ab#');
+  await click(paid);
+  assert.equal(rpcs('confirm_bill_payment').length, 0, 'invalid reference blocks submit');
+  // valid with spaces (paste-friendly) -> normalized and sent
+  await type(input, ' 4123 5678 9012 ');
+  await click([...h.querySelectorAll('button')].find((b: any) => /I Have Paid/.test(b.textContent || '')));
+  assert.deepEqual(rpcs('confirm_bill_payment'), [{ p_payment_id: 'p1', p_member_upi_reference: '412356789012' }]);
+  // blank -> old call shape (backward compatible)
+  h = await setup();
+  await click([...h.querySelectorAll('button')].find((b: any) => /I Have Paid/.test(b.textContent || '')));
+  assert.deepEqual(rpcs('confirm_bill_payment'), [{ p_payment_id: 'p1' }]);
+  const fs = await import('node:fs');
+  const sql = fs.readFileSync(path.join(path.resolve(here, '..'), 'supabase/migrations/20261111210000_member_upi_reference.sql'), 'utf8');
+  assert.match(sql, /p_member_upi_reference text default null/);
+  assert.match(sql, /p\.employee_id=auth\.uid\(\) and b\.employee_id=auth\.uid\(\)/);
+  const pv = fs.readFileSync(path.join(path.resolve(here, '..'), 'components/admin/PaymentVerification.tsx'), 'utf8');
+  assert.match(pv, /Member UPI ref:/); assert.match(pv, /clipboard\.writeText\(p\.member_upi_reference\)/);
+});
