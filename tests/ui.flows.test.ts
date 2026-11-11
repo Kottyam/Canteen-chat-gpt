@@ -556,6 +556,14 @@ test('admin can download an ended poll results PDF through the shared deliverPdf
     { poll_id: 'ended', member_id: 'E1', member_name: 'Asha', answers: { q1: ['Yes'] }, submitted_at: new Date(Date.now() - 2e6).toISOString() },
     { poll_id: 'ended', member_id: 'E2', member_name: 'Biju', answers: { q1: ['No'] }, submitted_at: new Date(Date.now() - 1e6).toISOString() },
   ];
+  let snapCalls = 0;
+  fakeDb.rpcHandlers.admin_poll_result_snapshot = (a: any) => {
+    snapCalls += 1;
+    const pl = fakeDb.db.polls.find((x: any) => x.id === a.p_poll_id);
+    const rs = fakeDb.db.poll_responses.filter((r: any) => r.poll_id === a.p_poll_id);
+    return { data: { pollId: pl.id, title: pl.title, questions: pl.questions, startsAt: pl.starts_at, endsAt: pl.ends_at, responseCount: rs.length,
+      responses: rs.map((r: any) => ({ memberId: r.member_id, memberName: r.member_name, answers: r.answers, submittedAt: r.submitted_at })), snapshotAt: new Date().toISOString() } };
+  };
   const before = JSON.stringify({ polls: fakeDb.db.polls, responses: fakeDb.db.poll_responses });
   const captured: any[] = [];
   const prev = M.pollResultsPdfAdapter.download;
@@ -580,6 +588,10 @@ test('admin can download an ended poll results PDF through the shared deliverPdf
     M.pollResultsPdfAdapter.download = async () => { throw new Error('share cancelled'); };
     await click(h.querySelector('[data-testid="poll-download-ended"]'));
     assert.match(h.textContent, /Could not download poll results: share cancelled/);
+    // Final results are fetched once per ended poll and reused; raw responses are not re-queried.
+    assert.equal(snapCalls, 1);
+    assert.equal(fakeDb.calls.filter((c: any) => c.table === 'poll_responses').length, 0);
+    assert.equal(h.querySelector('[data-testid="poll-download-ended"]').className.includes('animate-pulse'), false);
   } finally { M.pollResultsPdfAdapter.download = prev; }
   const fs = await import('node:fs');
   const src = fs.readFileSync(path.join(path.resolve(here, '..'), 'components/admin/PollSettings.tsx'), 'utf8');
@@ -922,5 +934,75 @@ test('Super Admin canteen details show a read-only billing summary with month sw
   assert.match(sql, /if not public\.is_super_admin\(\) then\s+raise exception 'Super Admin authorization required'/);
   assert.doesNotMatch(sql.replace(/--.*$/gm, ''), /\b(insert into|update public\.|delete from)\b/i);
   assert.match(sql, /revoke all on function public\.super_admin_canteen_summary\(uuid, integer, integer\) from public, anon/);
+});
+
+test('Poll page has no periodic refresh: loads once, manual Refresh reloads, no blinking download button', async () => {
+  seedPolls(); auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments'];
+  const loads = () => fakeDb.calls.filter((c: any) => c.table === 'polls' && !(c.ops || []).some((o: any) => o[0] === 'delete')).length;
+  const h = (await mount(createElement(M.PollSettings))).host;
+  const first = loads();
+  assert.ok(first >= 1);
+  await tick(10);
+  assert.equal(loads(), first, 'no automatic re-fetch');
+  assert.doesNotMatch(h.innerHTML, /animate-pulse/);
+  await click(h.querySelector('[data-testid="poll-refresh"]'));
+  assert.ok(loads() > first, 'manual refresh reloads');
+  const src = (await import('node:fs')).readFileSync(path.join(path.resolve(here, '..'), 'components/admin/PollSettings.tsx'), 'utf8');
+  assert.doesNotMatch(src, /setInterval|postgres_changes/);
+});
+
+test('member poll: no 20s polling and the stable poll object does not re-fetch responses', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(path.join(path.resolve(here, '..'), 'hooks/usePoll.ts'), 'utf8');
+  assert.doesNotMatch(src, /setInterval\(load, 20000\)/);
+  assert.match(src, /5 \* 60_000/);
+  assert.match(src, /visibilitychange/);
+  const mp = fs.readFileSync(path.join(path.resolve(here, '..'), 'components/employee/MemberPoll.tsx'), 'utf8');
+  assert.match(mp, /\[pollId, meId\]/);
+  seedPolls(); auth.user = { id: 'M001', name: 'Member', role: 'employee' };
+  const h = (await mount(createElement(M.MemberPoll))).host;
+  assert.match(h.textContent, /Live Dinner Poll/);
+  const respLoads = () => fakeDb.calls.filter((c: any) => c.table === 'poll_responses').length;
+  const n = respLoads();
+  await tick(10);
+  assert.equal(respLoads(), n);
+});
+
+test('Super Admin canteen Members and Menu load only on click and are read-only', async () => {
+  fakeDb.reset(); auth.user = { id: 'SA', name: 'Super', role: 'admin' };
+  fakeDb.rpcHandlers.super_admin_canteen_members = () => ({ data: [
+    { id: 'a1', name: 'Owner A', employee_code: 'GOOGLE-x', sr_number: null, mobile: null, email: 'owner@gmail.com', role: 'admin', admin_role: 'owner', status: 'active', joined_at: '2026-10-29T05:00:00Z' },
+    { id: 'm1', name: 'Asha', employee_code: 'E1', sr_number: 'S1', mobile: '9876543210', email: null, role: 'employee', admin_role: null, status: 'active', joined_at: '2026-11-01T05:00:00Z' },
+    { id: 'm2', name: 'Gone', employee_code: 'E2', sr_number: null, mobile: '9000000000', email: null, role: 'employee', admin_role: null, status: 'deleted', joined_at: '2026-11-01T05:00:00Z' },
+  ] });
+  fakeDb.rpcHandlers.super_admin_canteen_menu = () => ({ data: {
+    items: [{ item_code: 'cb', item_name: 'Chicken biryani', unit_price: 200, active: true, archived: false, category: 'Lunch' }],
+    today: '2026-11-11', today_menu: [], weekly: [{ weekday: 1, item_code: 'rf', item_name: 'Rice with fish', unit_price: 80, active: true }],
+  } });
+  const h = (await mount(createElement(M.SuperAdminCanteenLists, { canteenId: 'C1' }))).host;
+  assert.equal(fakeDb.calls.length, 0, 'nothing loaded until clicked');
+  await click(h.querySelector('[data-testid="sa-view-members"]'));
+  const mt = h.querySelector('[data-testid="sa-members"]')?.textContent || '';
+  assert.match(mt, /Owner A/); assert.match(mt, /owner@gmail\.com/); assert.match(mt, /Admin \(owner\)/);
+  assert.match(mt, /Asha/); assert.match(mt, /9876543210/); assert.match(mt, /Member/);
+  assert.doesNotMatch(mt, /Gone/); assert.match(mt, /Show deleted \(1\)/);
+  await click(h.querySelector('[data-testid="sa-view-menu"]'));
+  const menu = h.querySelector('[data-testid="sa-menu"]')?.textContent || '';
+  assert.match(menu, /Chicken biryani/); assert.match(menu, /Lunch/); assert.match(menu, /200/); assert.match(menu, /Available/);
+  assert.match(menu, /Monday/); assert.match(menu, /Rice with fish/);
+  await click(h.querySelector('[data-testid="sa-view-members"]'));
+  assert.deepEqual(fakeDb.calls.map((c: any) => c.rpc), ['super_admin_canteen_members', 'super_admin_canteen_menu'], 'cached after first load; only read RPCs');
+  fakeDb.rpcHandlers.super_admin_canteen_members = () => ({ error: { message: 'Super Admin authorization required' } });
+  const h2 = (await mount(createElement(M.SuperAdminCanteenLists, { canteenId: 'C2' }))).host;
+  await click(h2.querySelector('[data-testid="sa-view-members"]'));
+  assert.match(h2.textContent, /Super Admin authorization required/);
+  const fs = await import('node:fs');
+  const sql = fs.readFileSync(path.join(path.resolve(here, '..'), 'supabase/migrations/20261111170100_super_admin_canteen_members_menu.sql'), 'utf8');
+  assert.equal((sql.match(/if not public\.is_super_admin\(\) then raise exception 'Super Admin authorization required'/g) || []).length, 2);
+  assert.doesNotMatch(sql.replace(/--.*$/gm, ''), /\b(insert into|update public\.|delete from)\b/i);
+  const snap = fs.readFileSync(path.join(path.resolve(here, '..'), 'supabase/migrations/20261111170000_poll_result_snapshots.sql'), 'utf8');
+  assert.match(snap, /on conflict \(poll_id\) do nothing/);
+  assert.match(snap, /references public\.polls\(id\) on delete cascade/);
+  assert.doesNotMatch(snap.replace(/--.*$/gm, ''), /update public\.poll|delete from public\.poll/i);
 });
 
