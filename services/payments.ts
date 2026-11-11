@@ -21,6 +21,7 @@ export interface BillPayment {
   upi_name?: string | null;
   upi_id?: string | null;
   upi_number?: string | null;
+  member_upi_reference?: string | null;
 }
 
 export interface BillPaymentSummary {
@@ -46,9 +47,20 @@ export async function loadBillPaymentSummary(billId: string): Promise<BillPaymen
   return { current_total: Number(row?.current_total || 0), confirmed_received: Number(row?.confirmed_received || 0), pending_amount: Number(row?.pending_amount || 0), outstanding_balance: Number(row?.outstanding_balance || 0), current_payment_id: row?.current_payment_id || null };
 }
 
-export async function confirmBillPayment(paymentId: string) {
+export function normalizeMemberUpiReference(value: string | null | undefined) {
+  return (value || '').replace(/\s+/g, '');
+}
+
+export function memberUpiReferenceError(value: string | null | undefined) {
+  const v = normalizeMemberUpiReference(value);
+  if (!v) return '';
+  return /^[A-Za-z0-9]{6,35}$/.test(v) ? '' : 'UPI reference must be 6 to 35 letters or numbers.';
+}
+
+export async function confirmBillPayment(paymentId: string, memberUpiReference?: string | null) {
   if (!supabaseEnabled || !supabase) throw new Error('Supabase is not enabled.');
-  const { data, error } = await supabase.rpc('confirm_bill_payment', { p_payment_id: paymentId });
+  const ref = normalizeMemberUpiReference(memberUpiReference);
+  const { data, error } = await supabase.rpc('confirm_bill_payment', ref ? { p_payment_id: paymentId, p_member_upi_reference: ref } : { p_payment_id: paymentId });
   if (error) throw error;
   return data as BillPayment;
 }

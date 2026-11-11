@@ -164,6 +164,7 @@ const PaymentVerification: React.FC = () => {
                             <div className="font-bold">Payment Batch #{p.request_sequence || i + 1}</div>
                             <div className="text-xs text-gray-600">{p.covered_through ? `Covered through ${new Date(`${p.covered_through}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}` : ''}</div>
                             {p.payment_reference && <div className="mt-1 break-all text-xs text-gray-600">Ref: {p.payment_reference}</div>}
+                            {p.member_upi_reference && <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-700"><span className="break-all">Member UPI ref: <span className="font-semibold">{p.member_upi_reference}</span></span><button type="button" onClick={async () => { try { await navigator.clipboard.writeText(p.member_upi_reference); alert('Copied.'); } catch { alert('Could not copy. Please copy it manually.'); } }} className="rounded border border-gray-300 px-2 py-0.5 font-semibold text-primary-700" aria-label="Copy member UPI reference">Copy</button></div>}
                           </div>
                           <div className="text-right">
                             <div className="text-lg font-bold">₹{Number(p.amount || 0).toFixed(2)}</div>
