@@ -33,3 +33,4 @@ export { default as AdminEmployeeOrder } from '../../components/admin/AdminEmplo
 export { memberBillPdfAdapter, buildMemberBillPdfModel, renderMemberBillPdf } from '../../utils/memberBillPdf';
 export { parseAdminAdjustmentAmount, negativeAdjustmentBlocked } from '../../utils/adminAdjustmentValidation';
 export { pollResultsPdfAdapter, buildPollResultsPdfModel, renderPollResultsPdf } from '../../utils/pollResultsPdf';
+export { default as SuperAdminCanteenSummary } from '../../components/admin/SuperAdminCanteenSummary';

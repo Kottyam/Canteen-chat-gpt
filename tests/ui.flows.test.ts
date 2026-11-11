@@ -877,3 +877,50 @@ test('Admin extra amount accepts a minus within unbilled room and rejects publis
   assert.equal(M.negativeAdjustmentBlocked(-20, { published: false, available: 0 }), "Minus amount can't exceed this member's unbilled amount (₹0.00)");
   assert.equal(M.parseAdminAdjustmentAmount('25').ok, true);
 });
+
+test('Super Admin canteen details show a read-only billing summary with month switching', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'SA', name: 'Super', role: 'admin' };
+  const mk = (y: number, m: number) => ({
+    canteen: { id: 'C1', name: 'K', created_at: '2026-11-11T01:28:06Z', archived: false, member_login_mode: 'mobile' },
+    settings: { billing_model: 'standard', bill_send_mode: 'automatic', mess_cut_min_days: 6 },
+    members: { active: 4, total: 5, admins: 1 },
+    period: { year: y, month: m, start: '', end: '', is_current: m === 11, today: '2026-11-11' },
+    month: { published_bills: m === 11 ? 1 : 0, billed_total: m === 11 ? 200 : 0, paid: m === 11 ? 50 : 0, pending_verification: 0, outstanding: m === 11 ? 150 : 0,
+      fully_paid_bills: 0, last_published_at: m === 11 ? '2026-11-11T01:29:47Z' : null, orders: m === 11 ? 2 : 0, cancelled_orders: 0, admin_orders: 2, members_ordered: 1,
+      admin_added: 0, expenses: 0, unbilled: m === 11 ? 530 : null },
+    all_time: { published_bills: 1, billed_total: 200, paid: 50, pending_verification: 0, outstanding: 150, first_bill_month: '2026-11-01', last_published_at: '2026-11-11T01:29:47Z', orders: 2 },
+    months: [{ key: '2026-11', year: 2026, month: 11, bills: 1, billed_total: 200, paid: 50, outstanding: 150, last_published_at: '2026-11-11T01:29:47Z' }],
+  });
+  fakeDb.rpcHandlers.super_admin_canteen_summary = (a: any) => ({ data: mk(a.p_year, a.p_month) });
+  const h = (await mount(createElement(M.SuperAdminCanteenSummary, { canteenId: 'C1' }))).host;
+  const q = (id: string) => h.querySelector(`[data-testid="${id}"]`)?.textContent || '';
+  assert.match(q('summary-billing-mode'), /Standard/);
+  assert.match(q('summary-send-mode'), /Automatic/);
+  assert.match(q('summary-members'), /4 \/ 5/);
+  assert.match(q('summary-month-billed'), /200/);
+  assert.match(q('summary-month-paid'), /50/);
+  assert.match(q('summary-month-outstanding'), /150/);
+  assert.match(q('summary-month-unbilled'), /530/);
+  assert.match(q('summary-all-billed'), /200/);
+  const call = fakeDb.calls.find((c: any) => c.rpc === 'super_admin_canteen_summary');
+  assert.equal(call.args.p_canteen_id, 'C1');
+  const sel: any = h.querySelector('[data-testid="summary-month"]');
+  const setSel = Object.getOwnPropertyDescriptor((win as any).HTMLSelectElement.prototype, 'value')!.set!;
+  const older = [...sel.options].map((o: any) => o.value).find((v: string) => v !== sel.value);
+  await act(async () => { setSel.call(sel, older); sel.dispatchEvent(new (win as any).Event('change', { bubbles: true })); });
+  await tick(4);
+  assert.match(q('summary-month-unbilled'), /—/);
+  assert.match(h.textContent, /current month only/);
+  // read-only: only the summary RPC was called, no table writes
+  assert.ok(fakeDb.calls.every((c: any) => c.rpc === 'super_admin_canteen_summary'), JSON.stringify(fakeDb.calls));
+  fakeDb.rpcHandlers.super_admin_canteen_summary = () => ({ error: { message: 'Super Admin authorization required' } });
+  const h2 = (await mount(createElement(M.SuperAdminCanteenSummary, { canteenId: 'C2' }))).host;
+  assert.match(h2.textContent, /Super Admin authorization required/);
+  const fs = await import('node:fs');
+  const sql = fs.readFileSync(path.join(path.resolve(here, '..'), 'supabase/migrations/20261111160000_super_admin_canteen_summary.sql'), 'utf8');
+  assert.match(sql, /if not public\.is_super_admin\(\) then\s+raise exception 'Super Admin authorization required'/);
+  assert.doesNotMatch(sql.replace(/--.*$/gm, ''), /\b(insert into|update public\.|delete from)\b/i);
+  assert.match(sql, /revoke all on function public\.super_admin_canteen_summary\(uuid, integer, integer\) from public, anon/);
+});
+
