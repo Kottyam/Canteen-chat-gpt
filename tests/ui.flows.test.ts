@@ -742,6 +742,43 @@ test('member bill PDF table rows cover serial numbers, day subtotals, pooling (n
   assert.equal(published.rows.find((r: any) => r.kind === 'grand_total')?.amount, 200);
 });
 
+test('member bill PDF sets fill color immediately before every rect so cells do not inherit text color', () => {
+  const bill = {
+    bill_year: 2026, bill_month: 11, food_total: 200, guest_food_total: 0, admin_added_total: 0, total: 200,
+    published: true, published_at: '2026-11-11T01:29:47.660Z',
+    billing_start_date: '2026-11-01', billing_end_date: '2026-11-11',
+  };
+  const orders = [{
+    date: '2026-11-11', status: 'active', orderSource: 'admin', createdAt: '2026-11-11T01:29:11.000Z',
+    items: { chicken: true }, itemNames: { chicken: 'Chicken biryani' }, itemQuantities: { chicken: 1 }, itemPrices: { chicken: 200 },
+  }];
+  const model = M.buildMemberBillPdfModel(bill, orders, [], 'K', 'Amal', 'standard');
+  const ops: string[] = [];
+  const fakeDoc = {
+    setTextColor(...a: number[]) { ops.push(`textColor:${a.join(',')}`); },
+    setFont() {}, setFontSize() {},
+    setFillColor(...a: number[]) { ops.push(`fill:${a.join(',')}`); },
+    setDrawColor() {}, setLineWidth() {},
+    rect(_x: number, _y: number, _w: number, _h: number, style?: string) { ops.push(`rect:${style || ''}`); },
+    line() {}, addPage() {}, setPage() {}, getNumberOfPages() { return 1; },
+    splitTextToSize(s: string) { return [String(s ?? '')]; },
+    text(s: any) { ops.push(`text:${Array.isArray(s) ? s.join(' ') : String(s)}`); },
+  };
+  M.renderMemberBillPdf(fakeDoc, model, '11/11/2026, 7:25:00 am');
+  const rects = ops.map((op, i) => ({ op, i })).filter(x => x.op.startsWith('rect:'));
+  assert.ok(rects.length >= 8, 'table paints multiple cells');
+  for (const { op, i } of rects) {
+    const prev = [...ops.slice(0, i)].reverse().find(x => x.startsWith('fill:') || x.startsWith('textColor:') || x.startsWith('text:'));
+    assert.equal(prev?.startsWith('fill:'), true, `rect at ${i} (${op}) must follow setFillColor, got ${prev}`);
+    const rgb = (prev || '').slice(5).split(',').map(Number);
+    assert.ok(rgb.length >= 3 && rgb.every(n => Number.isFinite(n)), prev);
+    assert.ok(rgb[0] + rgb[1] + rgb[2] > 80, `fill ${prev} is too dark for a cell background`);
+  }
+  const joined = ops.filter(o => o.startsWith('text:')).join('|');
+  assert.match(joined, /Admin order/);
+  assert.match(joined, /Chicken biryani/);
+});
+
 test('Admin extra amount accepts a minus within unbilled room and rejects published or oversize minuses', async () => {
   fakeDb.reset();
   auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments'];
