@@ -675,7 +675,7 @@ test('member bill PDF table rows cover serial numbers, day subtotals, pooling (n
   const adjs = [{ adjustment_date: '2026-10-07', amount: -20, description: 'Less rice' }];
   const model = M.buildMemberBillPdfModel(bill, orders, adjs, 'Test Canteen', 'Anu', 'standard');
   const items = model.rows.filter((r: any) => r.kind === 'item');
-  assert.deepEqual(items.map((r: any) => r.sno), [1, 2, 3]);
+  assert.deepEqual(items.map((r: any) => r.sno), [1, 1, 1]);
   assert.equal(items[0].orderType, 'Admin order');
   assert.equal(items[0].name, 'Anu');
   assert.equal(items[1].orderType, 'Guest order');
@@ -692,7 +692,8 @@ test('member bill PDF table rows cover serial numbers, day subtotals, pooling (n
     orders, adjs, 'Test Canteen', 'Anu', 'pooling'
   );
   assert.ok(pooling.rows.filter((r: any) => r.kind === 'item').every((r: any) => r.amount == null));
-  assert.equal(pooling.rows.some((r: any) => r.kind === 'day_subtotal'), false);
+  assert.equal(pooling.rows.filter((r: any) => r.kind === 'day_subtotal').length, 1);
+  assert.deepEqual(pooling.rows.filter((r: any) => r.kind === 'item').map((r: any) => r.sno), [1, 1, 1]);
   assert.equal(pooling.rows.find((r: any) => r.kind === 'grand_total')?.amount, 410);
   assert.equal(pooling.breakdown.memberFood, 400);
   const days = M.buildMemberBillPdfModel(
@@ -704,6 +705,7 @@ test('member bill PDF table rows cover serial numbers, day subtotals, pooling (n
     [], 'Test Canteen', 'Anu', 'standard'
   );
   assert.deepEqual(days.rows.filter((r: any) => r.kind === 'day_subtotal').map((r: any) => r.amount), [50, 100]);
+  assert.deepEqual(days.rows.filter((r: any) => r.kind === 'item').map((r: any) => r.sno), [1, 2]);
   assert.equal(days.reconciled, true);
   const texts: string[] = [];
   const fakeDoc = {
@@ -720,6 +722,24 @@ test('member bill PDF table rows cover serial numbers, day subtotals, pooling (n
   assert.match(joined, /S\.No/);
   assert.match(joined, /Order type/);
   assert.match(joined, /Page 1 of 1/);
+  const published = M.buildMemberBillPdfModel(
+    { bill_year: 2026, bill_month: 11, food_total: 200, guest_food_total: 0, admin_added_total: 0, total: 200,
+      billing_start_date: '2026-11-01', billing_end_date: '2026-11-11', published_at: '2026-11-11T01:29:47.660Z' },
+    [
+      { date: '2026-11-10', status: 'active', orderSource: 'admin', createdAt: '2026-11-11T01:54:55.396Z',
+        items: { salad: true, mutton: true }, itemNames: { salad: 'Chicken salad', mutton: 'Mutton biryani' },
+        itemQuantities: { salad: 1, mutton: 1 }, itemPrices: { salad: 180, mutton: 350 } },
+      { date: '2026-11-11', status: 'active', orderSource: 'admin', createdAt: '2026-11-11T01:29:11.185Z',
+        items: { chicken: true }, itemNames: { chicken: 'Chicken biryani' }, itemQuantities: { chicken: 1 }, itemPrices: { chicken: 200 } },
+    ],
+    [], 'K', 'Amal', 'standard'
+  );
+  assert.deepEqual(published.rows.filter((r: any) => r.kind === 'item').map((r: any) => r.item), ['Chicken biryani']);
+  assert.equal(published.computedTotal, 200);
+  assert.equal(published.publishedTotal, 200);
+  assert.equal(published.reconciled, true);
+  assert.equal(published.rows.some((r: any) => r.kind === 'adjustment'), false);
+  assert.equal(published.rows.find((r: any) => r.kind === 'grand_total')?.amount, 200);
 });
 
 test('Admin extra amount accepts a minus within unbilled room and rejects published or oversize minuses', async () => {
