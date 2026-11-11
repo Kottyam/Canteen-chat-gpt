@@ -13,16 +13,20 @@ const MemberPoll: React.FC = () => {
 
   const open = isPollOpen(poll);
 
+  const pollId = poll?.id;
+  const meId = user ? (user.id || user.identityId) : undefined;
+  // Load the member's own answer once per poll (not on every re-render / token refresh).
   useEffect(() => {
     if (!poll || !user) return;
     let alive = true;
     loadPollResponses(poll.id).then(rows => {
       if (!alive) return;
-      const mine = rows.find(r => r.memberId === (user.id || user.identityId));
+      const mine = rows.find(r => r.memberId === meId);
       if (mine) { setAnswers(mine.answers); setSubmitted(true); }
     }).catch(() => {});
     return () => { alive = false; };
-  }, [poll, user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollId, meId]);
 
   // Members see only a currently live poll — never ended history/results or a pre-start preview.
   if (!poll || !open) return null;

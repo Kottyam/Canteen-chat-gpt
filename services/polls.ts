@@ -135,3 +135,33 @@ export function isPollOpen(poll: Poll | null): boolean {
 export function isPollEnded(poll: Poll): boolean {
   return Date.now() > new Date(poll.endsAt).getTime();
 }
+
+export interface PollResultSnapshot { poll: Poll; responses: PollResponse[]; snapshotAt: string }
+
+/**
+ * Final results of an ENDED poll. The server computes them once (first admin request after the
+ * poll ends), stores them in poll_result_snapshots, and returns the same stored snapshot afterwards.
+ */
+export async function loadPollResultSnapshot(pollId: string): Promise<PollResultSnapshot> {
+  if (!supabaseEnabled || !supabase) throw new Error('Not connected');
+  const { data, error } = await supabase.rpc('admin_poll_result_snapshot', { p_poll_id: pollId });
+  if (error) throw error;
+  const d: any = data || {};
+  return {
+    poll: {
+      id: d.pollId || pollId,
+      title: d.title || 'Poll',
+      questions: Array.isArray(d.questions) ? d.questions : [],
+      startsAt: d.startsAt,
+      endsAt: d.endsAt,
+      enabled: true,
+    },
+    responses: (Array.isArray(d.responses) ? d.responses : []).map((r: any) => ({
+      memberId: r.memberId,
+      memberName: r.memberName || r.memberId,
+      answers: r.answers || {},
+      submittedAt: r.submittedAt,
+    })),
+    snapshotAt: d.snapshotAt,
+  };
+}

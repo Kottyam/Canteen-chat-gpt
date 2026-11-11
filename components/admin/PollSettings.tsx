@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { buildPollResultsPdfModel, pollResultsPdfAdapter } from '../../utils/pollResultsPdf';
 import { useAuth } from '../../context/AuthContext';
-import { loadRecentPolls, loadPollResponses, savePoll, setPollEnabled, deletePoll, cleanupOldPolls, isPollOpen, isPollEnded, Poll, PollQuestion } from '../../services/polls';
+import { loadRecentPolls, loadPollResultSnapshot, PollResultSnapshot, savePoll, setPollEnabled, deletePoll, cleanupOldPolls, isPollOpen, isPollEnded, Poll, PollQuestion } from '../../services/polls';
 
 const PollSettings: React.FC = () => {
   const { hasPermission, user } = useAuth();
@@ -15,11 +15,18 @@ const PollSettings: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // Final results of ended polls, fetched once per poll and reused for every later download.
+  const snapshots = useRef(new Map<string, PollResultSnapshot>());
 
+  // Loaded when the Poll page opens, after admin actions, and on the manual Refresh button only
+  // (no timers or realtime subscriptions).
   const refresh = async () => {
+    setRefreshing(true);
     try { await cleanupOldPolls(10); } catch { /* best effort */ }
     try { setPolls(await loadRecentPolls(10)); }
     catch (e: any) { setMsg(e?.message || 'Could not load polls.'); }
+    finally { setRefreshing(false); }
   };
 
   useEffect(() => { void refresh(); }, []);
@@ -54,9 +61,10 @@ const PollSettings: React.FC = () => {
     if (!isPollEnded(poll) || downloading) return;
     setDownloading(poll.id); setMsg('');
     try {
-      const rows = await loadPollResponses(poll.id);
+      let snap = snapshots.current.get(poll.id);
+      if (!snap) { snap = await loadPollResultSnapshot(poll.id); snapshots.current.set(poll.id, snap); }
       const canteenName = String((user as any)?.canteenName || '').trim();
-      await pollResultsPdfAdapter.download(buildPollResultsPdfModel(poll, rows, canteenName));
+      await pollResultsPdfAdapter.download(buildPollResultsPdfModel(snap.poll, snap.responses, canteenName));
     } catch (e: any) {
       setMsg(`Could not download poll results: ${e?.message || 'unknown error'}`);
     } finally { setDownloading(null); }
@@ -121,7 +129,10 @@ const PollSettings: React.FC = () => {
       </div>
 
       <div className="rounded-xl border bg-white p-4">
-        <div className="text-sm font-semibold text-gray-800">Recent Polls (last 10 days)</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-semibold text-gray-800">Recent Polls (last 10 days)</div>
+          <button type="button" data-testid="poll-refresh" disabled={refreshing} onClick={() => void refresh()} className="rounded-lg border px-3 py-1 text-xs font-semibold text-primary-700 disabled:opacity-50">{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+        </div>
         <p className="text-xs text-gray-500">Older polls are auto-deleted.</p>
         <div className="mt-3 space-y-2">
           {polls.length === 0 && <p className="text-sm text-gray-500">No polls yet.</p>}
@@ -143,7 +154,7 @@ const PollSettings: React.FC = () => {
                     disabled={!ended || downloading === p.id}
                     data-testid={`poll-download-${p.id}`}
                     onClick={() => void downloadPdf(p)}
-                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${ended ? `${downloading === p.id ? '' : 'animate-pulse '}bg-primary-50 text-primary-700` : 'cursor-not-allowed opacity-40'}`}
+                    className={`rounded-lg border px-3 py-1.5 text-sm font-semibold ${ended ? 'bg-primary-50 text-primary-700' : 'cursor-not-allowed opacity-40'}`}
                   >
                     {downloading === p.id ? 'Preparing PDF…' : 'Download Results PDF'}
                   </button>

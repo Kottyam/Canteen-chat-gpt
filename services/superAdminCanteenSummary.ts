@@ -21,3 +21,32 @@ export async function loadSuperAdminCanteenSummary(canteenId: string, year?: num
   if (error) throw error;
   return data as SuperAdminCanteenSummary;
 }
+
+export interface SuperAdminCanteenMember {
+  id: string; name: string | null; employee_code: string | null; sr_number: string | null;
+  mobile: string | null; email: string | null; role: string; admin_role: string | null; status: string | null; joined_at: string | null;
+}
+export interface SuperAdminMenuItem { item_code: string; item_name: string; unit_price: number; active: boolean; archived?: boolean; category?: string | null; updated_at?: string | null }
+export interface SuperAdminCanteenMenu {
+  items: SuperAdminMenuItem[];
+  today: string;
+  today_menu: (SuperAdminMenuItem & { pooling_special?: boolean })[];
+  weekly: (SuperAdminMenuItem & { weekday: number })[];
+}
+
+/** Read-only, loaded only when the Super Admin opens the Members view. */
+export async function loadSuperAdminCanteenMembers(canteenId: string): Promise<SuperAdminCanteenMember[]> {
+  if (!supabase) throw new Error('Not connected');
+  const { data, error } = await supabase.rpc('super_admin_canteen_members', { p_canteen_id: canteenId });
+  if (error) throw error;
+  return Array.isArray(data) ? data as SuperAdminCanteenMember[] : [];
+}
+
+/** Read-only, loaded only when the Super Admin opens the Menu view. */
+export async function loadSuperAdminCanteenMenu(canteenId: string): Promise<SuperAdminCanteenMenu> {
+  if (!supabase) throw new Error('Not connected');
+  const { data, error } = await supabase.rpc('super_admin_canteen_menu', { p_canteen_id: canteenId });
+  if (error) throw error;
+  const d: any = data || {};
+  return { items: d.items || [], today: d.today || '', today_menu: d.today_menu || [], weekly: d.weekly || [] };
+}
