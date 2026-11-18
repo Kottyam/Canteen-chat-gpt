@@ -36,3 +36,4 @@ export { pollResultsPdfAdapter, buildPollResultsPdfModel, renderPollResultsPdf }
 export { default as SuperAdminCanteenSummary } from '../../components/admin/SuperAdminCanteenSummary';
 export { default as SuperAdminCanteenLists } from '../../components/admin/SuperAdminCanteenLists';
 export { useActivePoll } from '../../hooks/usePoll';
+export { default as InstallPrompt } from '../../components/common/InstallPrompt';

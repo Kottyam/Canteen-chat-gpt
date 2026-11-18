@@ -1,4 +1,5 @@
 export const ANDROID_PACKAGE_ID='com.gocanteen.app';
+export const PLAY_STORE_URL=`https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE_ID}`;
 export const APK_DOWNLOADED_KEY='gocanteen-apk-downloaded';
 
 export type RelatedAppsStatus='installed'|'not_installed'|'unknown';
