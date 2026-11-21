@@ -3,7 +3,7 @@
 // browser client (RLS-scoped admin) and the service-role client in the Edge
 // Function; canteen_id is ALWAYS filtered explicitly so service-role reads stay
 // tenant scoped.
-import { POOLING_ENGINE_VERSION, type PoolingInput, type PoolingMember, monthStart, monthEnd, toPaise, istBusinessDate } from './poolingBilling.ts';
+import { POOLING_ENGINE_VERSION, type PoolingInput, type PoolingMember, monthStart, monthEnd, toPaise, istBusinessDate, expenseSplitModeOrDefault } from './poolingBilling.ts';
 
 export interface PoolingSource { canteenId: string; year: number; month: number; messCutMinDays: number; messCutMode?: import('./poolingBilling.ts').MessCutMode; /** running-month draft cutoff (inclusive) */ asOf?: string }
 
@@ -16,7 +16,7 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
   const end = src.asOf && src.asOf < fullEnd ? src.asOf : fullEnd;
   const inWin = (d: any) => { const x = String(d ?? '').slice(0, 10); return x >= start && x <= end; };
   const [expenses0, orders0, profiles, holidays0, holidaySettings, adjustments0] = await Promise.all([
-    q(db.from('expenses').select('id,expense_date,amount').eq('canteen_id', src.canteenId).gte('expense_date', start).lte('expense_date', end)),
+    q(db.from('expenses').select('id,expense_date,amount,split_mode').eq('canteen_id', src.canteenId).gte('expense_date', start).lte('expense_date', end)),
     q(db.from('orders').select('id,employee_id,ordered_for,status,order_items(item_source,quantity,pooling_special,pooling_special_unit_paise)').eq('canteen_id', src.canteenId).gte('ordered_for', start).lte('ordered_for', end)),
     q(db.from('profiles').select('id,full_name,role,status,created_at').eq('canteen_id', src.canteenId).eq('role', 'employee')),
     q(db.from('holiday_dates').select('holiday_date').eq('canteen_id', src.canteenId).gte('holiday_date', start).lte('holiday_date', end)),
@@ -56,7 +56,7 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
   });
   return {
     year: src.year, month: src.month, messCutMinDays: src.messCutMinDays, messCutMode: src.messCutMode, ...(src.asOf ? { asOf: src.asOf } : {}),
-    expenses: (expenses as any[]).map(e => ({ id: e.id, date: String(e.expense_date).slice(0, 10), amountPaise: toPaise(e.amount) })).filter(e => e.amountPaise > 0),
+    expenses: (expenses as any[]).map(e => ({ id: e.id, date: String(e.expense_date).slice(0, 10), amountPaise: toPaise(e.amount), splitMode: expenseSplitModeOrDefault(e.split_mode) })).filter(e => e.amountPaise > 0),
     orders: (orders as any[]).map(o => {
       const items = Array.isArray(o.order_items) ? o.order_items : [];
       return { memberId: o.employee_id, date: String(o.ordered_for).slice(0, 10), status: o.status || 'active', guestOnly: items.length === 0 || items.every((i: any) => i.item_source === 'guest') };

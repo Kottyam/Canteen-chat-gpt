@@ -698,6 +698,30 @@ test('Pooling Expenses shows Download PDF and generates a monthly report; Standa
   assert.equal(s.host.querySelector('[data-testid="expense-pdf-download"]'), null, 'Standard hides expense PDF download');
 });
 
+test('Pooling Expenses Share among: People who eat / Common bill; Standard hides it; save stores split_mode', async () => {
+  fakeDb.reset(); asAdmin(); pooling();
+  const r = await mount(createElement(M.Expenses));
+  const group = r.host.querySelector('[data-testid="expense-split-mode"]');
+  assert.ok(group, 'Pooling Expenses shows Share among');
+  const buttons = [...group.querySelectorAll('button')].map((b: any) => b.textContent.trim());
+  assert.deepEqual(buttons, ['People who eat', 'Common bill (all members)']);
+  const active = [...group.querySelectorAll('button')].find((b: any) => /bg-white/.test(b.className));
+  assert.equal(active?.textContent.trim(), 'People who eat');
+  await click([...group.querySelectorAll('button')].find((b: any) => b.textContent.includes('Common bill')));
+  await type(r.host.querySelector('input[type="date"]'), '2026-11-10');
+  await type(r.host.querySelector('input[placeholder="Amount"]'), '900');
+  await type(r.host.querySelector('input[placeholder="Description"]'), 'Union');
+  await click(byText(r.host, 'button', /^Add Expense$/)); await tick();
+  const saved = fakeDb.db.expenses.find((e: any) => e.description === 'Union');
+  assert.equal(saved?.split_mode, 'all_members');
+  assert.equal(Number(saved?.amount), 900);
+
+  fakeDb.reset(); asAdmin(); // standard default
+  const s = await mount(createElement(M.Expenses));
+  assert.equal(s.host.querySelector('[data-testid="expense-split-mode"]'), null, 'Standard hides Share among');
+});
+
+
 test('member published-bill PDF is offered only for published months and uses the stored total when lines differ', async () => {
   fakeDb.reset();
   fakeDb.setAuthUid('mid-1');

@@ -413,3 +413,113 @@ test('consecutive asOf draft: a run is only counted on days up to asOf', () => {
     orders: [...orders('A', range(1, 6)), ...orders('B', [1, 2])] }));
   assert.equal(line(early, 'B').absentDays, 4); assert.equal(line(early, 'B').messCutApplied, false); assert.equal(line(early, 'B').chargeableDays, 6);
 });
+
+test('eaters-only expenses leave Common bill at zero (existing split unchanged)', () => {
+  const r = computePoolingBills(base({ expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))] }));
+  assert.equal(r.allMembersExpensePaise, 0); assert.equal(r.allMembersUnallocatedPaise, 0);
+  assert.equal(line(r, 'A').allMembersSharePaise, 0); assert.equal(line(r, 'B').allMembersSharePaise, 0);
+  assert.equal(line(r, 'A').sharePaise, 45000);
+});
+
+test('Common bill: equal split includes a zero-order member; food pool is unchanged', () => {
+  const r = computePoolingBills(base({
+    members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }],
+    expenses: [
+      { date: d(1), amountPaise: 90000, splitMode: 'eaters' },
+      { date: d(2), amountPaise: 30000, splitMode: 'all_members' },
+    ],
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))],
+  }));
+  assert.equal(r.expenseTotalPaise, 90000); assert.equal(r.allMembersExpensePaise, 30000);
+  assert.equal(line(r, 'A').sharePaise, 45000); assert.equal(line(r, 'B').sharePaise, 45000); assert.equal(line(r, 'C').sharePaise, 0);
+  assert.equal(line(r, 'A').allMembersSharePaise, 10000);
+  assert.equal(line(r, 'B').allMembersSharePaise, 10000);
+  assert.equal(line(r, 'C').allMembersSharePaise, 10000);
+  assert.equal(line(r, 'C').attendedDays, 0); assert.equal(line(r, 'C').messCutApplied, true);
+  assert.equal(line(r, 'C').totalPaise, 10000);
+});
+
+test('Common bill is not reduced by mess cut', () => {
+  const r = computePoolingBills(base({
+    messCutMinDays: 6,
+    expenses: [
+      { date: d(1), amountPaise: 10000, splitMode: 'eaters' },
+      { date: d(2), amountPaise: 3000, splitMode: 'all_members' },
+    ],
+    orders: orders('A', range(1, 30)), // B never eats -> mess cut, food share 0
+  }));
+  assert.equal(line(r, 'B').messCutApplied, true); assert.equal(line(r, 'B').sharePaise, 0);
+  assert.equal(line(r, 'A').sharePaise, 10000);
+  assert.equal(line(r, 'A').allMembersSharePaise, 1500); assert.equal(line(r, 'B').allMembersSharePaise, 1500);
+  assert.equal(line(r, 'B').totalPaise, 1500);
+});
+
+test('all-cut month still allocates Common bill; food pool stays unallocated', () => {
+  const r = computePoolingBills(base({
+    messCutMinDays: 6,
+    expenses: [
+      { date: d(10), amountPaise: 500, splitMode: 'eaters' },
+      { date: d(11), amountPaise: 900, splitMode: 'all_members' },
+    ],
+    orders: [],
+  }));
+  assert.equal(r.unallocatedPaise, 500); assert.equal(sum(r), 0);
+  assert.equal(r.allMembersExpensePaise, 900); assert.equal(r.allMembersUnallocatedPaise, 0);
+  assert.equal(line(r, 'A').allMembersSharePaise, 450); assert.equal(line(r, 'B').allMembersSharePaise, 450);
+  assert.equal(line(r, 'A').totalPaise, 450);
+});
+
+test('Common bill rounding: shares sum exactly (largest remainder by member id)', () => {
+  const r = computePoolingBills(base({
+    members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }],
+    expenses: [{ date: d(1), amountPaise: 1000, splitMode: 'all_members' }],
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30)), ...orders('C', range(1, 30))],
+  }));
+  assert.deepEqual([line(r, 'A').allMembersSharePaise, line(r, 'B').allMembersSharePaise, line(r, 'C').allMembersSharePaise], [334, 333, 333]);
+  assert.equal(r.lines.reduce((s: number, l: any) => s + l.allMembersSharePaise, 0), 1000);
+});
+
+test('Common bill asOf draft only includes expenses dated on or before asOf', () => {
+  const r = computePoolingBills(base({
+    asOf: d(7),
+    expenses: [
+      { date: d(5), amountPaise: 3000, splitMode: 'all_members' },
+      { date: d(10), amountPaise: 9000, splitMode: 'all_members' },
+    ],
+    orders: [...orders('A', range(1, 7)), ...orders('B', range(1, 7))],
+  }));
+  assert.equal(r.allMembersExpensePaise, 3000);
+  assert.equal(line(r, 'A').allMembersSharePaise + line(r, 'B').allMembersSharePaise, 3000);
+});
+
+test('never-eater with only Common bill is publishable (total > 0, food share 0)', () => {
+  const r = computePoolingBills(base({
+    messCutMinDays: 6,
+    expenses: [
+      { date: d(1), amountPaise: 400, splitMode: 'all_members' },
+      { date: d(2), amountPaise: 200, splitMode: 'all_members' }, // combined
+    ],
+    orders: orders('A', range(1, 30)),
+  }));
+  const b = line(r, 'B');
+  assert.equal(b.sharePaise, 0); assert.equal(b.messCutApplied, true);
+  assert.equal(r.allMembersExpensePaise, 600); assert.equal(b.allMembersSharePaise, 300);
+  assert.equal(b.totalPaise, 300); assert.ok(b.totalPaise > 0);
+  // mid-month joiner gets the same equal share (no pro-rata)
+  const mid = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 900, splitMode: 'all_members' }],
+    members: [{ memberId: 'A' }, { memberId: 'B', periods: [{ from: d(21) }] }],
+    orders: orders('A', range(1, 30)),
+  }));
+  assert.equal(line(mid, 'A').allMembersSharePaise, 450);
+  assert.equal(line(mid, 'B').allMembersSharePaise, 450);
+});
+
+test('missing splitMode defaults to eaters', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 1000 }],
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))],
+  }));
+  assert.equal(r.expenseTotalPaise, 1000); assert.equal(r.allMembersExpensePaise, 0);
+  assert.equal(line(r, 'A').sharePaise, 500);
+});
