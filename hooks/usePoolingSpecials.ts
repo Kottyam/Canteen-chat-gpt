@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CurrentSpecials, loadCurrentSpecials, loadGuestOrdersEnabled, loadOrderSpecialSnapshots, OrderSpecialSnapshots, specialsForDate } from '../services/poolingSpecials';
+import { CurrentSpecials, loadCurrentSpecials, loadGuestOrdersEnabled, loadOrderSpecialSnapshots, OrderSpecialSnapshots, SpecialFlag, specialFlagsForDate } from '../services/poolingSpecials';
+export { rupees, menuSpecialLabel, recordedSpecialLabel, recordedFixedTotal, hasSharedSpecial } from '../services/poolingSpecials';
+export type { SpecialFlag, OrderSpecialSnapshots };
 
 type L<T> = (v: T) => void;
 function shared<T>(initial: T, loader: () => Promise<T>) {
@@ -19,9 +21,9 @@ const guest = shared<boolean>(true, loadGuestOrdersEnabled);
 /** CURRENT menu specials. Use only for choosing NEW items (menu lists), never for already placed orders. */
 export const useCurrentSpecials = current.use;
 export const refreshCurrentSpecials = current.refresh;
-export function useMenuSpecialsForDate(date: string | null | undefined): Record<string, number> {
+export function useMenuSpecialsForDate(date: string | null | undefined): Record<string, SpecialFlag> {
   const s = current.use();
-  return useMemo(() => (date ? specialsForDate(s, date) : {}), [s, date]);
+  return useMemo(() => (date ? specialFlagsForDate(s, date) : {}), [s, date]);
 }
 
 /** Server-RECORDED special prices for placed orders (history/calendar/today). */
@@ -39,4 +41,3 @@ export function useOrderSpecialSnapshots(orderIds: string[], refreshKey: unknown
 /** Guest orders On/Off for this canteen; defaults to On. */
 export const useGuestOrdersEnabled = guest.use;
 export const publishGuestOrdersEnabled = guest.set;
-export const rupees = (paise: number) => `₹${(paise / 100).toFixed(2)}`;

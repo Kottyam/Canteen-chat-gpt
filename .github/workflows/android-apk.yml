@@ -73,11 +73,11 @@ jobs:
           text = path.read_text()
           if 'versionCode 1' not in text:
               raise SystemExit('Expected generated Android versionCode 1 was not found in android/app/build.gradle')
-          text = text.replace('versionCode 1', 'versionCode 361', 1)
+          text = text.replace('versionCode 1', 'versionCode 362', 1)
           path.write_text(text)
           print('Android versionCode set to 361')
           PY
-          grep -F 'versionCode 361' android/app/build.gradle
+          grep -F 'versionCode 362' android/app/build.gradle
       - name: Add Android Developer Verification registration
         run: |
           set -euo pipefail

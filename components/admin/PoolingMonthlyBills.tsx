@@ -3,15 +3,61 @@ import AsyncActionButton from '../common/AsyncActionButton';
 import { useBillingSettings } from '../../hooks/useBillingSettings';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../supabase';
-import { PoolingResult, istBusinessDate, previousBillingPeriod, messCutAppliedLabel, MessCutMode, COMMON_BILL_LABEL, poolingExpenseGrandTotalPaise } from '../../supabase/functions/_shared/poolingBilling';
+import { PoolingResult, SharedSpecialSummary, istBusinessDate, previousBillingPeriod, messCutAppliedLabel, MessCutMode, COMMON_BILL_LABEL, poolingExpenseGrandTotalPaise, sharedSpecialLineLabel } from '../../supabase/functions/_shared/poolingBilling';
 import { loadPoolingRun, previewPoolingBills, publishPoolingBill, savePoolingRun } from '../../services/poolingBills';
+import { parsePriceToPaise, savePoolingSpecialSharedCost } from '../../services/poolingSpecials';
 import { buildPoolingDraftPdfModel, displayBusinessDate, monthLabel, poolingDraftPdfAdapter } from '../../utils/poolingDraftPdf';
 
 /** Fired by in-app edits that change pooling inputs (e.g. Expenses add/edit/delete). */
 export const POOLING_INPUTS_CHANGED = 'gocanteen:pooling-inputs-changed';
-const DRAFT_TABLES = ['expenses', 'employee_adjustments', 'orders', 'order_items', 'holiday_dates'] as const;
+const DRAFT_TABLES = ['expenses', 'employee_adjustments', 'orders', 'order_items', 'holiday_dates', 'pooling_special_shared_costs'] as const;
 
 const rs = (p: number) => `₹${(p / 100).toFixed(2)}`;
+
+
+const SharedSpecialCostsEditor: React.FC<{ summaries: SharedSpecialSummary[]; onChanged: () => void; disabled?: boolean }> = ({ summaries, onChanged, disabled }) => {
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  if (!summaries.length) return null;
+  const keyOf = (s: SharedSpecialSummary) => `${s.date}::${s.itemCode}`;
+  const save = async (s: SharedSpecialSummary) => {
+    const k = keyOf(s);
+    if (disabled || busyKey) return;
+    setBusyKey(k); setError('');
+    try {
+      const raw = draft[k];
+      const paise = raw == null || raw === '' ? (s.pending ? null : s.totalPaise) : parsePriceToPaise(raw);
+      if (paise == null) throw new Error('Enter the total cost.');
+      await savePoolingSpecialSharedCost(s.date, s.itemCode, paise);
+      setDraft(p => { const n = { ...p }; delete n[k]; return n; });
+      window.dispatchEvent(new Event(POOLING_INPUTS_CHANGED));
+      onChanged();
+    } catch (e: any) { setError(e?.message || 'Could not save the total.'); }
+    finally { setBusyKey(null); }
+  };
+  return <section aria-label="Shared cost specials" className="rounded-2xl border bg-white p-4 shadow-sm space-y-3">
+    <div className="font-bold text-primary-900">Shared cost specials</div>
+    <p className="text-xs text-gray-600">Enter the total after buying. It is split equally among the members who ordered that special (one share each, not by quantity).</p>
+    {error && <div className="text-sm text-red-700">{error}</div>}
+    <div className="space-y-3">{summaries.map(s => {
+      const k = keyOf(s);
+      const who = s.memberCount === 1 ? '1 member' : `${s.memberCount} members`;
+      return <div key={k} className="grid gap-2 rounded-xl border p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <div className="min-w-0">
+          <div className="font-semibold text-gray-800">{sharedSpecialLineLabel(s.itemName, s.date)}</div>
+          <div className="text-sm text-gray-600">{who}{s.pending ? ' · amount pending' : (s.totalPaise != null ? ` · ${rs(s.totalPaise)}` : '')}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-[8rem] flex-1"><span className="flex min-h-11 items-center rounded-l-lg border border-r-0 bg-gray-50 px-2 text-gray-600">₹</span>
+            <input type="text" inputMode="decimal" aria-label={`Total for ${s.itemName} on ${s.date}`} disabled={disabled || busyKey === k} value={draft[k] ?? (s.pending || s.totalPaise == null ? '' : String((s.totalPaise || 0) / 100))} onChange={e => setDraft(p => ({ ...p, [k]: e.target.value }))} placeholder="Total" className="min-h-11 w-full rounded-r-lg border px-3 text-sm text-right"/></div>
+          <AsyncActionButton type="button" loading={busyKey === k} loadingLabel="Saving…" disabled={Boolean(disabled || (busyKey && busyKey !== k))} onClick={() => void save(s)} className="min-h-11 rounded-lg border border-primary-600 px-3 text-sm font-semibold text-primary-700">Save total</AsyncActionButton>
+        </div>
+      </div>;
+    })}</div>
+  </section>;
+};
+
 
 /** Running month, 1st..today (IST): admin-only, read-only. Never saves, publishes or notifies. */
 const CurrentMonthDraft: React.FC<{ threshold: number; mode?: MessCutMode; canteenName: string }> = ({ threshold, mode, canteenName }) => {
@@ -58,11 +104,13 @@ const CurrentMonthDraft: React.FC<{ threshold: number; mode?: MessCutMode; cante
     {!r && loading && <div className="text-sm text-gray-600">Calculating…</div>}
     {r && <>
       <div className="flex justify-between text-sm"><span>Expenses so far</span><b>{rs(poolingExpenseGrandTotalPaise(r))}</b></div>
+      {(r.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700">{w}</div>)}
       <div className="divide-y text-sm">{r.lines.map(l => <div key={l.memberId} data-draft-member={l.memberId} className="grid gap-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{draft!.names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, r.messCutMode || 'any', 'short')}` : ''}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, r.messCutMode || 'any', 'short')}` : ''}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{(l.specialLines || []).map(s => ` · ${s.label} ${rs(s.paise)}`).join('')}{l.specialPending ? ' · amount pending' : ''}</div></div>
         <div className="text-right font-bold">{rs(l.totalPaise)}</div>
       </div>)}</div>
+      <SharedSpecialCostsEditor summaries={r.sharedSpecialSummaries || []} onChanged={() => void load()} disabled={loading}/>
     </>}
   </section>;
 };
@@ -104,6 +152,7 @@ const PoolingMonthlyBills: React.FC = () => {
     setBusy('publish'); const errors: string[] = [];
     for (const l of result.lines) {
       if (sentFor(l.memberId) || l.totalPaise <= 0) continue;
+      if (l.specialPending) { errors.push(`${names[l.memberId] || l.memberId}: Shared cost amount pending. Enter the total before publishing this bill.`); continue; }
       try { await publishPoolingBill(run.id, l.memberId); } catch (e: any) { errors.push(`${names[l.memberId] || l.memberId}: ${e?.message || e}`); }
     }
     setRun(await loadPoolingRun(month, year)); setBusy(null);
@@ -135,15 +184,16 @@ const PoolingMonthlyBills: React.FC = () => {
         {result.unallocatedPaise > 0 && <div className="flex justify-between text-red-700 sm:col-span-2"><span>Unallocated (needs review)</span><b>{rs(result.unallocatedPaise)}</b></div>}
         {(result.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700 sm:col-span-2">{w}</div>)}
       </div>
+      <SharedSpecialCostsEditor summaries={result.sharedSpecialSummaries || []} onChanged={() => void refresh()} disabled={Boolean(busy) || run?.status === 'published'}/>
       <div className="space-y-2">{result.lines.map(l => <div key={l.memberId} className="grid gap-1 rounded-xl border bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, result.messCutMode || 'any', 'long')}` : ''} · Charged days {l.chargeableDays}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}</div></div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, result.messCutMode || 'any', 'long')}` : ''} · Charged days {l.chargeableDays}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}{(l.specialLines || []).map(s => ` · ${s.label} ${rs(s.paise)}`).join('')}{l.specialPending ? ' · amount pending' : ''}</div></div>
         <div className="text-right"><div className="text-lg font-bold">{rs(publishedTotal(l.memberId) ?? l.totalPaise)}</div>{sentFor(l.memberId) && <div className="text-xs font-semibold text-primary-700">Published</div>}</div>
       </div>)}</div>
       <div className="flex flex-wrap gap-2">
         <AsyncActionButton type="button" loading={busy === 'load'} loadingLabel="Calculating…" disabled={Boolean(busy)} onClick={() => void refresh()} className="rounded-lg border px-4 py-2.5 text-sm font-medium">Recalculate</AsyncActionButton>
         {run?.status !== 'published' && <AsyncActionButton type="button" loading={busy === 'save'} loadingLabel="Saving…" disabled={Boolean(busy)} onClick={() => void lock()} className="rounded-lg border border-primary-600 px-4 py-2.5 text-sm font-semibold text-primary-700">Save Calculation</AsyncActionButton>}
-        <AsyncActionButton type="button" loading={busy === 'publish'} loadingLabel="Publishing…" disabled={Boolean(busy) || !run} onClick={() => void publishAll()} className="rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm">Publish Bills</AsyncActionButton>
+        <AsyncActionButton type="button" loading={busy === 'publish'} loadingLabel="Publishing…" disabled={Boolean(busy) || !run || Boolean((result.pendingSharedSpecials || []).length)} onClick={() => void publishAll()} className="rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm">Publish Bills</AsyncActionButton>
         <AsyncActionButton type="button" loading={pdfBusy} loadingLabel="Generating PDF…" disabled={!result || Boolean(busy) || pdfBusy} onClick={() => void downloadPdf()} className="rounded-lg border px-4 py-2.5 text-sm font-medium">Download PDF</AsyncActionButton>
       </div>
     </>}
