@@ -42,15 +42,17 @@ export default defineConfig(({ mode }) => {
             ]
           },
           workbox: {
-            globPatterns: ['**/*.{js,css,html,png,svg,ico}'],
+            // Do not precache index.html: a stale HTML shell would keep serving an old JS bundle
+            // after a deploy until the next SW cycle. Navigations use NetworkFirst instead.
+            globPatterns: ['**/*.{js,css,png,svg,ico}'],
             maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
             navigateFallback: '/index.html',
             navigateFallbackDenylist: [/^\/api\//, /^\/privacy-policy/, /^\/account-deletion/],
             cleanupOutdatedCaches: true,
             clientsClaim: true,
             skipWaiting: true,
-            // API / Supabase calls are never cached by the service worker (network only).
             runtimeCaching: [
+              { urlPattern: ({ request }) => request.mode === 'navigate' || request.destination === 'document', handler: 'NetworkFirst', options: { cacheName: 'gocanteen-pages', networkTimeoutSeconds: 3 } },
               { urlPattern: ({ url }) => url.hostname.endsWith('supabase.co') || url.pathname.startsWith('/api/'), handler: 'NetworkOnly' }
             ]
           }

@@ -236,9 +236,22 @@ export function toPaise(rupees: number | string | null | undefined): number {
   return Math.round(n * 100);
 }
 export const paiseToRupees = (p: number) => Math.round(p) / 100;
-/** Food-pool expenses plus Common bill expenses (for Total expenses display). */
+/** Food-pool expenses plus Common bill expenses (not including specials). */
 export const poolingExpenseGrandTotalPaise = (r: { expenseTotalPaise: number; allMembersExpensePaise?: number }) =>
   Math.round(Number(r.expenseTotalPaise) || 0) + Math.round(Number(r.allMembersExpensePaise) || 0);
+
+/** Sum of the Special column: shared-cost totals billed + fixed-price special amounts (member + guest). */
+export function poolingSpecialExpensesPaise(r: { lines?: Array<{ specialMemberPaise?: number; specialGuestPaise?: number; sharedSpecialPaise?: number }> }): number {
+  return (r.lines || []).reduce((s, l) => s + (Number(l.specialMemberPaise) || 0) + (Number(l.specialGuestPaise) || 0) + (Number(l.sharedSpecialPaise) || 0), 0);
+}
+
+/** Canteen expense breakdown: food-pool + Common bill + specials. Total is X+Y+Z (admin-added is not an expense). */
+export function poolingExpenseSummaryPaise(r: { expenseTotalPaise: number; allMembersExpensePaise?: number; lines?: Array<{ specialMemberPaise?: number; specialGuestPaise?: number; sharedSpecialPaise?: number }> }) {
+  const foodPaise = Math.round(Number(r.expenseTotalPaise) || 0);
+  const commonPaise = Math.round(Number(r.allMembersExpensePaise) || 0);
+  const specialPaise = poolingSpecialExpensesPaise(r);
+  return { foodPaise, commonPaise, specialPaise, totalPaise: foodPaise + commonPaise + specialPaise };
+}
 
 /** Distribute `total` paise by exact weights; returns integers summing to total. */
 export function apportion(total: number, weights: Array<{ key: string; weight: number }>): Map<string, number> {
