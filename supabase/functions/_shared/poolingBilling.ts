@@ -14,8 +14,13 @@
 //  * absentDays = window operating days without any consumed order of that member
 //    (pre-join + post-exit + ordinary no-order days, cumulative, need not be
 //    consecutive). Many orders on one date = 1 day.
-//  * Mess cut (threshold 0..31, default 6): absentDays >= threshold and > 0 -> every absent day is non-chargeable (0 = any no-order day).
-//              absentDays <  threshold  -> no exclusion; all window days chargeable.
+//  * Mess cut (threshold 0..31, default 6) and mode 'any' | 'consecutive' (default 'any' = today's behaviour):
+//      any: absentDays >= threshold and > 0 -> every absent day is non-chargeable (0 = any no-order day).
+//           absentDays < threshold -> no exclusion; all window days chargeable. Days need not be consecutive.
+//      consecutive (threshold > 0): only no-order *runs* of length >= threshold (on operating days) are excluded.
+//           Shorter / scattered runs stay chargeable. Multiple qualifying runs each count.
+//           Holidays and weekly offs are skipped: they neither count as leave nor break a run.
+//           Threshold 0: same as 'any' (every no-order day is dropped).
 //  * Expense allocation (updated): the month's TOTAL expense is shared proportionally
 //    across members by their chargeable days (after mess cut). Total expense /
 //    total chargeable days * each member's chargeable days. No unallocated leftover
@@ -31,16 +36,20 @@ export const POOLING_ENGINE_VERSION = 3;
 
 export type BillingModel = 'standard' | 'pooling';
 export type BillSendMode = 'manual' | 'automatic';
+/** 'any' = scattered no-order days count (historical default). 'consecutive' = only runs of length >= threshold. */
+export type MessCutMode = 'any' | 'consecutive';
 
 export interface CanteenBillingSettings {
   billingModel: BillingModel;
   messCutMinDays: number;
+  messCutMode: MessCutMode;
   billSendMode: BillSendMode;
 }
 
 export const DEFAULT_BILLING_SETTINGS: CanteenBillingSettings = Object.freeze({
   billingModel: 'standard',
   messCutMinDays: 6,
+  messCutMode: 'any',
   billSendMode: 'manual',
 }) as CanteenBillingSettings;
 
@@ -57,6 +66,15 @@ export function parseMessCutDays(text: string): number | null {
   const t = String(text ?? '').trim();
   return /^\d{1,2}$/.test(t) && isValidMessCutDays(Number(t)) ? Number(t) : null;
 }
+export const isValidMessCutMode = (v: unknown): v is MessCutMode => v === 'any' || v === 'consecutive';
+export function messCutModeOrDefault(v: unknown): MessCutMode {
+  return isValidMessCutMode(v) ? v : DEFAULT_BILLING_SETTINGS.messCutMode;
+}
+/** Admin bill-line / PDF label for an applied mess cut. */
+export function messCutAppliedLabel(excludedDays: number, mode: MessCutMode, style: 'short' | 'long' = 'long'): string {
+  if (mode === 'consecutive') return style === 'short' ? `Mess cut (${excludedDays} consecutive)` : `Mess cut (${excludedDays} consecutive days not charged)`;
+  return style === 'short' ? `Mess cut (${excludedDays})` : `Mess cut (${excludedDays} days not charged)`;
+}
 
 /** Absent / partial rows always resolve to the existing standard behaviour. */
 export function normalizeBillingSettings(row: any): CanteenBillingSettings {
@@ -64,7 +82,8 @@ export function normalizeBillingSettings(row: any): CanteenBillingSettings {
   const model: BillingModel = row.billing_model === 'pooling' || row.billingModel === 'pooling' ? 'pooling' : 'standard';
   const send: BillSendMode = row.bill_send_mode === 'automatic' || row.billSendMode === 'automatic' ? 'automatic' : 'manual';
   const days = messCutDaysOrDefault(row.mess_cut_min_days ?? row.messCutMinDays);
-  return { billingModel: model, messCutMinDays: days, billSendMode: send };
+  const mode = messCutModeOrDefault(row.mess_cut_mode ?? row.messCutMode);
+  return { billingModel: model, messCutMinDays: days, messCutMode: mode, billSendMode: send };
 }
 
 export interface PoolingExpense { id?: string; date: string; amountPaise: number }
@@ -87,6 +106,7 @@ export interface PoolingInput {
   year: number;
   month: number; // 1-12
   messCutMinDays: number;
+  messCutMode?: MessCutMode;
   expenses: PoolingExpense[];
   orders: PoolingOrder[];
   members: PoolingMember[];
@@ -123,6 +143,7 @@ export interface PoolingResult {
   periodStart: string;
   periodEnd: string;
   messCutMinDays: number;
+  messCutMode: MessCutMode;
   operatingDays: string[];
   expenseTotalPaise: number;
   dailyExpensePaise: number;
@@ -186,10 +207,23 @@ function largestRemainder(total: number, exact: Array<{ key: string; v: number }
   return out;
 }
 
+
+/** Operating-day no-order runs with length >= threshold. Holidays/weekly offs are already absent from `window`, so they bridge a run. Threshold 0 = every no-order day. */
+export function qualifyingConsecutiveAbsentDates(window: string[], attended: Set<string>, threshold: number): Set<string> {
+  const out = new Set<string>();
+  if (threshold <= 0) { for (const d of window) if (!attended.has(d)) out.add(d); return out; }
+  let run: string[] = [];
+  const flush = () => { if (run.length >= threshold) for (const d of run) out.add(d); run = []; };
+  for (const d of window) { if (!attended.has(d)) run.push(d); else flush(); }
+  flush();
+  return out;
+}
+
 export function computePoolingBills(input: PoolingInput): PoolingResult {
   const { year, month } = input;
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) throw new Error('Invalid billing month');
   const threshold = messCutDaysOrDefault(input.messCutMinDays);
+  const mode = messCutModeOrDefault(input.messCutMode);
   const start = monthStart(year, month), fullEnd = monthEnd(year, month);
   if (input.asOf != null && !(typeof input.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.asOf) && input.asOf >= start)) throw new Error('Invalid as-of date');
   const end = input.asOf && input.asOf < fullEnd ? input.asOf : fullEnd;
@@ -232,12 +266,22 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     const mine = attended.get(m.memberId) || new Set<string>();
     const att = window.filter(d => mine.has(d));
     const absent = window.length - att.length;
-    const cut = absent > 0 && absent >= threshold; // threshold 0: any actual no-order day is cut
-    const charge = new Set(cut ? att : window);
+    let cut = false, excluded = 0;
+    let charge: Set<string>;
+    if (mode === 'consecutive') {
+      const dropped = qualifyingConsecutiveAbsentDates(window, mine, threshold);
+      excluded = dropped.size;
+      cut = excluded > 0;
+      charge = new Set(window.filter(d => !dropped.has(d)));
+    } else {
+      cut = absent > 0 && absent >= threshold; // threshold 0: any actual no-order day is cut
+      excluded = cut ? absent : 0;
+      charge = new Set(cut ? att : window);
+    }
     chargeable.set(m.memberId, charge);
     lines.set(m.memberId, {
       memberId: m.memberId, windowDays: window.length, attendedDays: att.length, absentDays: absent,
-      messCutApplied: cut, excludedDays: cut ? absent : 0, chargeableDays: charge.size,
+      messCutApplied: cut, excludedDays: excluded, chargeableDays: charge.size,
       dailySharePaise: 0, overheadSharePaise: 0, sharePaise: 0,
       adminAddedPaise: Math.round(Number(m.adminAddedPaise) || 0), totalPaise: 0,
       specialMemberPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.memberPaise) || 0)),
@@ -288,7 +332,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
   const emptyDays = operating.filter(date => !members.some(m => attended.get(m.memberId)?.has(date)));
   if (emptyDays.length) warnings.push(`No orders on ${emptyDays.length} day${emptyDays.length > 1 ? 's' : ''} (${emptyDays.map(x => Number(x.slice(8))).join(', ')}). If the mess was closed, mark them as holidays.`);
   return {
-    year, month, periodStart: start, periodEnd: end, messCutMinDays: threshold, operatingDays: operating,
+    year, month, periodStart: start, periodEnd: end, messCutMinDays: threshold, messCutMode: mode, operatingDays: operating,
     expenseTotalPaise: total, dailyExpensePaise: daily, overheadExpensePaise: overhead,
     allocatedPaise: allocatable, unallocatedPaise: unallocated,
     lines: members.map(m => lines.get(m.memberId)!), warnings, issues,

@@ -18,7 +18,7 @@ export function buildPoolingDraftPdfModel(result: PoolingResult, names: Record<s
   const rows = result.lines.map(l => ({
     name: names[l.memberId] || 'Member',
     days: `${l.attendedDays}/${l.windowDays}`,
-    messCut: l.messCutApplied ? `Yes (${l.excludedDays})` : 'No',
+    messCut: l.messCutApplied ? (result.messCutMode === 'consecutive' ? `Yes (${l.excludedDays} consecutive)` : `Yes (${l.excludedDays})`) : 'No',
     share: l.sharePaise, special: (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0), adminAdded: l.adminAddedPaise, total: l.totalPaise,
   }));
   return {

@@ -36,7 +36,7 @@ export async function runAutoSend(deps: AutoSendDeps, period?: { year: number; m
     };
     try {
       if (s.billingModel === 'pooling') {
-        const input = await loadPoolingInput(db, { canteenId, year, month, messCutMinDays: s.messCutMinDays });
+        const input = await loadPoolingInput(db, { canteenId, year, month, messCutMinDays: s.messCutMinDays, messCutMode: s.messCutMode });
         const result = computePoolingBills(input);
         if (result.unallocatedPaise > 0) await record(null, 'skipped', `Unallocated expense ${result.unallocatedPaise} paise needs admin review`);
         const pending = result.lines.filter(l => !alreadySent.has(l.memberId));

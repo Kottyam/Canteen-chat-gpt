@@ -12,7 +12,10 @@ const sum = (r: any) => r.lines.reduce((s: number, l: any) => s + l.sharePaise, 
 
 test('defaults: absent settings row = exact standard/manual behaviour', () => {
   assert.deepEqual(normalizeBillingSettings(null), DEFAULT_BILLING_SETTINGS);
-  assert.deepEqual(normalizeBillingSettings({}), { billingModel: 'standard', messCutMinDays: 6, billSendMode: 'manual' });
+  assert.deepEqual(normalizeBillingSettings({}), { billingModel: 'standard', messCutMinDays: 6, messCutMode: 'any', billSendMode: 'manual' });
+  assert.equal(normalizeBillingSettings({ mess_cut_mode: 'consecutive' }).messCutMode, 'consecutive');
+  assert.equal(normalizeBillingSettings({ messCutMode: 'consecutive' }).messCutMode, 'consecutive');
+  for (const bad of ['random', 'continuous', '', null, undefined]) assert.equal(normalizeBillingSettings({ mess_cut_mode: bad }).messCutMode, 'any', String(bad));
   assert.equal(normalizeBillingSettings({ billing_model: 'weird', bill_send_mode: 'x' }).billingModel, 'standard');
   assert.equal(normalizeBillingSettings({ billing_model: 'pooling', mess_cut_min_days: 4 }).messCutMinDays, 4);
   assert.equal(normalizeBillingSettings({ mess_cut_min_days: 0 }).messCutMinDays, 0); // 0 = no minimum (valid)
@@ -24,6 +27,7 @@ const daily = range(1, 30).map(n => ({ date: d(n), amountPaise: 3000 }));
 
 test('below threshold (5 absent, nonconsecutive) -> no exclusion, full equal share', () => {
   const r = computePoolingBills(base({ expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30).filter(n => ![2, 9, 15, 21, 28].includes(n)))] }));
+  assert.equal(r.messCutMode, 'any');
   assert.equal(line(r, 'B').absentDays, 5);
   assert.equal(line(r, 'B').messCutApplied, false);
   assert.equal(line(r, 'A').sharePaise, 45000); assert.equal(line(r, 'B').sharePaise, 45000);
@@ -335,3 +339,77 @@ test('admin deduction larger than the member share clamps the bill total at 0', 
   assert.equal(line(r, 'B').totalPaise, line(r, 'B').sharePaise);
 });
 
+
+
+// ---- mess cut mode: consecutive vs any days ----
+test('any days (default) with a 5-day run + scattered days: all no-order days cut when threshold is 5', () => {
+  const absent = [5, 6, 7, 8, 9, 15, 22];
+  const r = computePoolingBills(base({ messCutMinDays: 5, messCutMode: 'any', expenses: daily,
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30).filter(n => !absent.includes(n)))] }));
+  assert.equal(r.messCutMode, 'any');
+  assert.equal(line(r, 'B').absentDays, 7); assert.equal(line(r, 'B').messCutApplied, true);
+  assert.equal(line(r, 'B').excludedDays, 7); assert.equal(line(r, 'B').chargeableDays, 23);
+});
+
+test('consecutive N=5: a 5-day run is cut; a 4-day run is not', () => {
+  const five = computePoolingBills(base({ messCutMinDays: 5, messCutMode: 'consecutive', expenses: daily,
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30).filter(n => ![5, 6, 7, 8, 9].includes(n)))] }));
+  assert.equal(line(five, 'B').absentDays, 5); assert.equal(line(five, 'B').messCutApplied, true);
+  assert.equal(line(five, 'B').excludedDays, 5); assert.equal(line(five, 'B').chargeableDays, 25);
+  const four = computePoolingBills(base({ messCutMinDays: 5, messCutMode: 'consecutive', expenses: daily,
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30).filter(n => ![5, 6, 7, 8].includes(n)))] }));
+  assert.equal(line(four, 'B').absentDays, 4); assert.equal(line(four, 'B').messCutApplied, false);
+  assert.equal(line(four, 'B').excludedDays, 0); assert.equal(line(four, 'B').chargeableDays, 30);
+});
+
+test('consecutive: 5-day run plus later scattered days -> only the run is dropped', () => {
+  const absent = [5, 6, 7, 8, 9, 15, 22];
+  const r = computePoolingBills(base({ messCutMinDays: 5, messCutMode: 'consecutive', expenses: daily,
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30).filter(n => !absent.includes(n)))] }));
+  assert.equal(line(r, 'B').absentDays, 7); assert.equal(line(r, 'B').messCutApplied, true);
+  assert.equal(line(r, 'B').excludedDays, 5); assert.equal(line(r, 'B').chargeableDays, 25); // 23 eaten + 15 + 22
+});
+
+test('consecutive: two qualifying runs in one month are both dropped', () => {
+  const absent = [...range(1, 5), ...range(15, 20)];
+  const r = computePoolingBills(base({ messCutMinDays: 5, messCutMode: 'consecutive', expenses: daily,
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30).filter(n => !absent.includes(n)))] }));
+  assert.equal(line(r, 'B').absentDays, 11); assert.equal(line(r, 'B').excludedDays, 11);
+  assert.equal(line(r, 'B').messCutApplied, true); assert.equal(line(r, 'B').chargeableDays, 19);
+});
+
+test('consecutive: a holiday or weekly off inside a run is skipped and does not break it', () => {
+  // Sept 2026: day 6 is Sunday. Days 4,5,7,8,9 are 5 consecutive *operating* absences if Sunday is a weekly off.
+  const weekly = computePoolingBills(base({ messCutMinDays: 5, messCutMode: 'consecutive', recurringWeekdays: [0], expenses: daily.filter(e => e.date !== d(6)),
+    orders: [...orders('A', range(1, 30).filter(n => n !== 6)), ...orders('B', range(1, 30).filter(n => ![4, 5, 6, 7, 8, 9].includes(n)))] }));
+  assert.equal(weekly.operatingDays.includes(d(6)), false);
+  assert.equal(line(weekly, 'B').absentDays, 5); assert.equal(line(weekly, 'B').excludedDays, 5); assert.equal(line(weekly, 'B').messCutApplied, true);
+  // Holiday on day 7 between 5-6 and 8-9-10: five operating absences 5,6,8,9,10.
+  const hol = computePoolingBills(base({ messCutMinDays: 5, messCutMode: 'consecutive', holidayDates: [d(7)], expenses: daily.filter(e => e.date !== d(7)),
+    orders: [...orders('A', range(1, 30).filter(n => n !== 7)), ...orders('B', range(1, 30).filter(n => ![5, 6, 7, 8, 9, 10].includes(n)))] }));
+  assert.equal(hol.operatingDays.includes(d(7)), false);
+  assert.equal(line(hol, 'B').absentDays, 5); assert.equal(line(hol, 'B').excludedDays, 5); assert.equal(line(hol, 'B').messCutApplied, true);
+});
+
+test('consecutive threshold 0: every no-order day is dropped, same as any days', () => {
+  const absent = [2, 9, 15];
+  const inp = { messCutMinDays: 0, expenses: daily, orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30).filter(n => !absent.includes(n)))] };
+  const any = computePoolingBills(base({ ...inp, messCutMode: 'any' }));
+  const cons = computePoolingBills(base({ ...inp, messCutMode: 'consecutive' }));
+  assert.equal(line(any, 'B').excludedDays, 3); assert.equal(line(cons, 'B').excludedDays, 3);
+  assert.equal(line(cons, 'B').chargeableDays, line(any, 'B').chargeableDays);
+  assert.equal(line(cons, 'B').sharePaise, line(any, 'B').sharePaise);
+});
+
+test('consecutive asOf draft: a run is only counted on days up to asOf', () => {
+  // Absent 3-10 (8 calendar days). At asOf day 7 the run is 3..7 = 5 days -> cut those 5. Future days are not in the window.
+  const r = computePoolingBills(base({ asOf: d(7), messCutMinDays: 5, messCutMode: 'consecutive', expenses: daily.filter(e => Number(e.date.slice(8)) <= 7),
+    orders: [...orders('A', range(1, 7)), ...orders('B', [1, 2])] }));
+  assert.equal(r.operatingDays.length, 7);
+  assert.equal(line(r, 'B').absentDays, 5); assert.equal(line(r, 'B').excludedDays, 5); assert.equal(line(r, 'B').messCutApplied, true);
+  assert.equal(line(r, 'B').chargeableDays, 2);
+  // Same absences but asOf day 6: run is only 4 days -> no cut yet.
+  const early = computePoolingBills(base({ asOf: d(6), messCutMinDays: 5, messCutMode: 'consecutive', expenses: daily.filter(e => Number(e.date.slice(8)) <= 6),
+    orders: [...orders('A', range(1, 6)), ...orders('B', [1, 2])] }));
+  assert.equal(line(early, 'B').absentDays, 4); assert.equal(line(early, 'B').messCutApplied, false); assert.equal(line(early, 'B').chargeableDays, 6);
+});

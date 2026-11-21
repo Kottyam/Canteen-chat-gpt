@@ -61,7 +61,7 @@ const SuperAdminCanteenSummary: React.FC<{ canteenId: string }> = ({ canteenId }
           <Stat label="Bill send mode" value={data.settings.bill_send_mode === 'automatic' ? 'Automatic' : 'Manual'} testId="summary-send-mode" />
           <Stat label="Members (active / total)" value={`${data.members.active} / ${data.members.total}`} testId="summary-members" />
           <Stat label="Admins" value={data.members.admins} />
-          {pooling && <Stat label="Mess cut min days" value={data.settings.mess_cut_min_days ?? '—'} />}
+          {pooling && <Stat label="Mess cut min days" value={data.settings.mess_cut_min_days ?? '—'} />}{pooling && <Stat label="Mess cut mode" value={data.settings.mess_cut_mode === 'consecutive' ? 'Consecutive' : 'Any days'} testId="summary-mess-cut-mode" />}
           <Stat label="Member login" value={data.canteen.member_login_mode || '—'} />
           <Stat label="Created" value={when(data.canteen.created_at)} />
         </div>

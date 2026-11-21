@@ -6,7 +6,7 @@ export interface CanteenSummaryMoney {
 export interface CanteenSummaryMonth { key: string; year: number; month: number; bills: number; billed_total: number; paid: number; outstanding: number; last_published_at: string | null }
 export interface SuperAdminCanteenSummary {
   canteen: { id: string; name: string; created_at: string; archived: boolean; member_login_mode?: string | null };
-  settings: { billing_model: 'standard' | 'pooling' | string; bill_send_mode: string; mess_cut_min_days: number | null };
+  settings: { billing_model: 'standard' | 'pooling' | string; bill_send_mode: string; mess_cut_min_days: number | null; mess_cut_mode?: 'any' | 'consecutive' | null };
   members: { active: number; total: number; admins: number };
   period: { year: number; month: number; start: string; end: string; is_current: boolean; today: string };
   month: CanteenSummaryMoney & { fully_paid_bills: number; orders: number; cancelled_orders: number; admin_orders: number; members_ordered: number; admin_added: number; expenses: number; unbilled: number | null };

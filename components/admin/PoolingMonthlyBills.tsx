@@ -3,7 +3,7 @@ import AsyncActionButton from '../common/AsyncActionButton';
 import { useBillingSettings } from '../../hooks/useBillingSettings';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../supabase';
-import { PoolingResult, istBusinessDate, previousBillingPeriod } from '../../supabase/functions/_shared/poolingBilling';
+import { PoolingResult, istBusinessDate, previousBillingPeriod, messCutAppliedLabel, MessCutMode } from '../../supabase/functions/_shared/poolingBilling';
 import { loadPoolingRun, previewPoolingBills, publishPoolingBill, savePoolingRun } from '../../services/poolingBills';
 import { buildPoolingDraftPdfModel, displayBusinessDate, monthLabel, poolingDraftPdfAdapter } from '../../utils/poolingDraftPdf';
 
@@ -14,7 +14,7 @@ const DRAFT_TABLES = ['expenses', 'employee_adjustments', 'orders', 'order_items
 const rs = (p: number) => `₹${(p / 100).toFixed(2)}`;
 
 /** Running month, 1st..today (IST): admin-only, read-only. Never saves, publishes or notifies. */
-const CurrentMonthDraft: React.FC<{ threshold: number; canteenName: string }> = ({ threshold, canteenName }) => {
+const CurrentMonthDraft: React.FC<{ threshold: number; mode?: MessCutMode; canteenName: string }> = ({ threshold, mode, canteenName }) => {
   const [draft, setDraft] = useState<{ asOf: string; result: PoolingResult; names: Record<string, string> } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -24,11 +24,11 @@ const CurrentMonthDraft: React.FC<{ threshold: number; canteenName: string }> = 
     const g = ++gen.current; const asOf = istBusinessDate(new Date()); const [y, m] = asOf.split('-').map(Number);
     setLoading(true);
     try {
-      const p = await previewPoolingBills(m, y, threshold, asOf);
+      const p = await previewPoolingBills(m, y, threshold, asOf, mode);
       if (g === gen.current) { setDraft({ asOf, result: p.result, names: p.memberNames }); setError(''); }
     } catch (e: any) { if (g === gen.current) setError(e?.message || 'Could not calculate.'); }
     finally { if (g === gen.current) setLoading(false); }
-  }, [threshold]);
+  }, [threshold, mode]);
   useEffect(() => {
     let timer: number | undefined;
     const schedule = () => { window.clearTimeout(timer); timer = window.setTimeout(() => void load(), 300); }; // coalesce bursts
@@ -60,7 +60,7 @@ const CurrentMonthDraft: React.FC<{ threshold: number; canteenName: string }> = 
       <div className="flex justify-between text-sm"><span>Expenses so far</span><b>{rs(r.expenseTotalPaise)}</b></div>
       <div className="divide-y text-sm">{r.lines.map(l => <div key={l.memberId} data-draft-member={l.memberId} className="grid gap-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{draft!.names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · Mess cut (${l.excludedDays})` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, r.messCutMode || 'any', 'short')}` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
         <div className="text-right font-bold">{rs(l.totalPaise)}</div>
       </div>)}</div>
     </>}
@@ -84,12 +84,12 @@ const PoolingMonthlyBills: React.FC = () => {
   const refresh = async () => {
     setBusy('load'); setMessage('');
     try {
-      const p = await previewPoolingBills(month, year, settings.messCutMinDays);
+      const p = await previewPoolingBills(month, year, settings.messCutMinDays, undefined, settings.messCutMode);
       setResult(p.result); setNames(p.memberNames); setRun(await loadPoolingRun(month, year));
     } catch (e: any) { setMessage(e?.message || 'Could not calculate pooling bills.'); }
     finally { setBusy(null); }
   };
-  useEffect(() => { void refresh(); }, [settings.messCutMinDays]);
+  useEffect(() => { void refresh(); }, [settings.messCutMinDays, settings.messCutMode]);
   // a published member shows the amount actually billed (saved snapshot), not the live recalculation
   const publishedTotal = (id: string): number | undefined => { const l = run?.pooling_bill_lines?.find((x: any) => x.employee_id === id); return l?.monthly_bill_id ? Number(l.total_paise) : undefined; };
   const sentFor = (id: string) => run?.pooling_bill_lines?.find((l: any) => l.employee_id === id)?.monthly_bill_id;
@@ -124,7 +124,7 @@ const PoolingMonthlyBills: React.FC = () => {
       <button type="button" onClick={() => setView('current')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold ${view === 'current' ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>Current Month</button>
       <button type="button" onClick={() => setView('previous')} className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold ${view === 'previous' ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600'}`}>Previous Month</button>
     </div>
-    {view === 'current' && isAdmin && <CurrentMonthDraft threshold={settings.messCutMinDays} canteenName={user?.canteenName || ''} />}
+    {view === 'current' && isAdmin && <CurrentMonthDraft threshold={settings.messCutMinDays} mode={settings.messCutMode} canteenName={user?.canteenName || ''} />}
     {view === 'previous' && <>
     <p className="text-sm font-semibold text-gray-700">{label}</p>
     {message && <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{message}</div>}
@@ -137,7 +137,7 @@ const PoolingMonthlyBills: React.FC = () => {
       </div>
       <div className="space-y-2">{result.lines.map(l => <div key={l.memberId} className="grid gap-1 rounded-xl border bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · Mess cut (${l.excludedDays} days not charged)` : ''} · Charged days {l.chargeableDays}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}</div></div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, result.messCutMode || 'any', 'long')}` : ''} · Charged days {l.chargeableDays}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}</div></div>
         <div className="text-right"><div className="text-lg font-bold">{rs(publishedTotal(l.memberId) ?? l.totalPaise)}</div>{sentFor(l.memberId) && <div className="text-xs font-semibold text-primary-700">Published</div>}</div>
       </div>)}</div>
       <div className="flex flex-wrap gap-2">
