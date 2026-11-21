@@ -7,6 +7,7 @@
 |---|---|---|
 | billing_model | `standard` (current behaviour, unchanged) | `standard`, `pooling` |
 | mess_cut_min_days | 6 (also used for a missing/invalid value) | whole number 0–31; 0 = no minimum (every actual no-order day is not charged). Out-of-range values are rejected, never clamped. |
+| mess_cut_mode | `any` (today's behaviour) | `any` = scattered no-order days count toward the threshold and, if met, all of them are not charged. `consecutive` = only operating-day runs of length ≥ threshold are not charged; shorter or scattered days stay charged. Holidays and weekly offs are skipped and do not break a run. Threshold 0 is the same in both modes. |
 | bill_send_mode | `manual` (current behaviour) | `manual`, `automatic` |
 
 If the table/row does not exist the app behaves exactly as today.
@@ -21,7 +22,7 @@ Source of money = the canteen's existing **Expenses** records for the month (`ex
 1. **Operating day** = every day of the month that is not an admin-declared holiday or recurring weekly off (Holiday Management). Closure is **never inferred** from "nobody ordered": such a day is a no-order day for every member (the pooling screen warns, so the admin can mark it as a holiday if the mess was closed).
 2. **Member window** = operating days from the member's join date (`profiles.created_at`, IST) to month end. Deleted members are excluded.
 3. **No-order days** = window operating days without a consumed order (cumulative, not continuous; several orders on a date = 1 day; cancelled and guest-only orders don't count).
-4. **Mess cut**: no-order days ≥ threshold (and at least one) → all those days are not charged. Below threshold → no exclusion (full share). Threshold 0 → any no-order day is not charged; 31 → practically never cut.
+4. **Mess cut**: mode `any` (default): no-order days ≥ threshold (and at least one) → all those days are not charged, even if scattered. Mode `consecutive`: only a run of that many no-order *operating* days in a row is not charged (longer runs too; several such runs each count). Shorter or scattered days stay charged. Holidays and weekly offs are skipped and do not break a run. Threshold 0 → any no-order day is not charged, in both modes; 31 → practically never cut.
 5. **Expense split (owner-approved method, t74s334, engine v2):** the month's **total** expenses are divided equally across the month's operating days; each day's amount is shared equally among the members chargeable that day (a cut member's no-order days are borne by the others). The date of an expense inside the month does not change anyone's share. Example: ₹3000, 30 operating days (₹100/day): A ate 1 day, B 30 days → A ₹50, B ₹2950; A ate 10 days → A ₹500, B ₹2500.
 6. A running-month draft (as of today, IST) uses only the elapsed operating days and the expenses dated up to today.
 7. A day where nobody is chargeable, or a month without operating days, is **not** moved to other members: that amount is shown as **Unallocated** for admin review.

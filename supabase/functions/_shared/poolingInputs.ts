@@ -5,7 +5,7 @@
 // tenant scoped.
 import { POOLING_ENGINE_VERSION, type PoolingInput, type PoolingMember, monthStart, monthEnd, toPaise, istBusinessDate } from './poolingBilling.ts';
 
-export interface PoolingSource { canteenId: string; year: number; month: number; messCutMinDays: number; /** running-month draft cutoff (inclusive) */ asOf?: string }
+export interface PoolingSource { canteenId: string; year: number; month: number; messCutMinDays: number; messCutMode?: import('./poolingBilling.ts').MessCutMode; /** running-month draft cutoff (inclusive) */ asOf?: string }
 
 async function q<T = any>(p: PromiseLike<{ data: T[] | null; error: any }>): Promise<T[]> {
   const { data, error } = await p; if (error) throw error; return data || [];
@@ -55,7 +55,7 @@ export async function loadPoolingInput(db: any, src: PoolingSource): Promise<Poo
     return [{ memberId: p.id, activeFrom: p.created_at ? istBusinessDate(new Date(p.created_at)) : null, activeTo: null, adminAddedPaise: adminAdded.get(p.id) || 0 }];
   });
   return {
-    year: src.year, month: src.month, messCutMinDays: src.messCutMinDays, ...(src.asOf ? { asOf: src.asOf } : {}),
+    year: src.year, month: src.month, messCutMinDays: src.messCutMinDays, messCutMode: src.messCutMode, ...(src.asOf ? { asOf: src.asOf } : {}),
     expenses: (expenses as any[]).map(e => ({ id: e.id, date: String(e.expense_date).slice(0, 10), amountPaise: toPaise(e.amount) })).filter(e => e.amountPaise > 0),
     orders: (orders as any[]).map(o => {
       const items = Array.isArray(o.order_items) ? o.order_items : [];

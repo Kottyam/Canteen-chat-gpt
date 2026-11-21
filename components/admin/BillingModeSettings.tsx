@@ -36,12 +36,24 @@ const BillingModeSettings: React.FC = () => {
         <button type="button" disabled={busy || !loaded} className={opt(draft.billingModel === 'standard')} onClick={() => setDraft({ ...draft, billingModel: 'standard' })}>Standard</button>
         <button type="button" disabled={busy || !loaded} className={opt(draft.billingModel === 'pooling')} onClick={() => setDraft({ ...draft, billingModel: 'pooling' })}>Pooling</button>
       </div>
-      {draft.billingModel === 'pooling' && <label className="mt-4 block text-sm font-medium text-gray-700">Mess cut: minimum no-order days in a month
-        <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2} aria-label="Mess cut days" disabled={busy || !loaded} value={daysText}
-          onChange={e => { daysDirty.current = true; setDaysText(e.target.value); }}
-          className="mt-1 block w-32 rounded-lg border p-2.5" />
-        <span className="mt-1 block text-xs text-gray-500">0 to 31. If a member has this many or more no-order days, those days are not charged and are shared by the others. 0: every no-order day is not charged.</span>
-      </label>}
+      {draft.billingModel === 'pooling' && <div className="mt-4 space-y-4">
+        <label className="block text-sm font-medium text-gray-700">Mess cut: minimum no-order days in a month
+          <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2} aria-label="Mess cut days" disabled={busy || !loaded} value={daysText}
+            onChange={e => { daysDirty.current = true; setDaysText(e.target.value); }}
+            className="mt-1 block w-32 rounded-lg border p-2.5" />
+          <span className="mt-1 block text-xs text-gray-500">0 to 31. 0: every no-order day is not charged.</span>
+        </label>
+        <div>
+          <div className="text-sm font-medium text-gray-700">Mess cut applies to</div>
+          <div className="mt-2 flex gap-2 rounded-xl bg-gray-100 p-1" role="group" aria-label="Mess cut mode">
+            <button type="button" disabled={busy || !loaded} className={opt((draft.messCutMode || 'any') === 'consecutive')} onClick={() => setDraft({ ...draft, messCutMode: 'consecutive' })}>Consecutive</button>
+            <button type="button" disabled={busy || !loaded} className={opt((draft.messCutMode || 'any') === 'any')} onClick={() => setDraft({ ...draft, messCutMode: 'any' })}>Any days</button>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">{(draft.messCutMode || 'any') === 'consecutive'
+            ? 'Only a run of this many no-order days in a row is not charged (longer runs are also not charged). Shorter or scattered days stay charged. Holidays and weekly offs are skipped and do not break the run.'
+            : 'If a member has this many or more no-order days in the month, those days are not charged, even if they are scattered.'}</p>
+        </div>
+      </div>}
     </div>
     <div className="rounded-2xl border bg-white p-4 shadow-sm">
       <h4 className="font-bold text-gray-800">Monthly Bill Sending</h4>

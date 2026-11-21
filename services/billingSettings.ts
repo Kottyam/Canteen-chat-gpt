@@ -19,7 +19,7 @@ export async function loadBillingSettings(): Promise<BillingSettingsLoad> {
     catch { return { settings: { ...DEFAULT_BILLING_SETTINGS }, error: null }; }
   }
   try {
-    const { data, error } = await supabase.from('canteen_billing_settings').select('billing_model,mess_cut_min_days,bill_send_mode').maybeSingle();
+    const { data, error } = await supabase.from('canteen_billing_settings').select('billing_model,mess_cut_min_days,mess_cut_mode,bill_send_mode').maybeSingle();
     if (error) return isMissingBillingTable(error) ? { settings: { ...DEFAULT_BILLING_SETTINGS }, error: null } : { settings: { ...DEFAULT_BILLING_SETTINGS }, error: error.message || 'Could not load billing settings.' };
     return { settings: normalizeBillingSettings(data), error: null };
   } catch (e: any) { return { settings: { ...DEFAULT_BILLING_SETTINGS }, error: e?.message || 'Could not load billing settings.' }; }
@@ -30,7 +30,7 @@ export async function saveBillingSettings(next: CanteenBillingSettings): Promise
   if (!isValidMessCutDays(next.messCutMinDays)) throw new Error(MESS_CUT_RANGE_MESSAGE); // never silently replaced
   const clean = normalizeBillingSettings(next);
   if (!supabaseEnabled || !supabase) { localStorage.setItem(LOCAL_KEY, JSON.stringify(clean)); return clean; }
-  const { data, error } = await supabase.rpc('set_canteen_billing_settings', { p_billing_model: clean.billingModel, p_mess_cut_min_days: clean.messCutMinDays, p_bill_send_mode: clean.billSendMode });
+  const { data, error } = await supabase.rpc('set_canteen_billing_settings', { p_billing_model: clean.billingModel, p_mess_cut_min_days: clean.messCutMinDays, p_bill_send_mode: clean.billSendMode, p_mess_cut_mode: clean.messCutMode });
   if (error) throw error;
   return normalizeBillingSettings(data);
 }

@@ -429,7 +429,7 @@ test('pre-JS paint: index.html html/body/#root are plain #ffffff, light color-sc
 function billingDb(days: number) {
   fakeDb.reset(); auth.user = { id: 'O1', name: 'Owner', role: 'admin' }; auth.perms = ['payments'];
   fakeDb.db.canteen_billing_settings = [{ billing_model: 'pooling', mess_cut_min_days: days, bill_send_mode: 'manual' }];
-  fakeDb.rpcHandlers.set_canteen_billing_settings = (a: any) => { const row = { billing_model: a.p_billing_model, mess_cut_min_days: a.p_mess_cut_min_days, bill_send_mode: a.p_bill_send_mode }; fakeDb.db.canteen_billing_settings = [row]; return { data: row }; };
+  fakeDb.rpcHandlers.set_canteen_billing_settings = (a: any) => { const row = { billing_model: a.p_billing_model, mess_cut_min_days: a.p_mess_cut_min_days, mess_cut_mode: a.p_mess_cut_mode || 'any', bill_send_mode: a.p_bill_send_mode }; fakeDb.db.canteen_billing_settings = [row]; return { data: row }; };
 }
 async function openBilling() { await act(async () => { await M.refreshBillingSettings(); }); const r = await mount(createElement(M.BillingModeSettings)); await tick(); return r.host; }
 const daysInput = (h: any) => h.querySelector('input[aria-label="Mess cut days"]');
@@ -465,12 +465,28 @@ test('mess cut days: an in-progress edit is not reset by a settings reload; othe
   await act(async () => { M.publishBillingSettings({ billingModel: 'pooling', messCutMinDays: 6, billSendMode: 'manual' }); }); await tick();
   assert.equal(daysInput(h).value, '1');
   await saveSettings(h);
-  assert.deepEqual(rpcs('set_canteen_billing_settings'), [{ p_billing_model: 'pooling', p_mess_cut_min_days: 1, p_bill_send_mode: 'manual' }]);
+  assert.deepEqual(rpcs('set_canteen_billing_settings'), [{ p_billing_model: 'pooling', p_mess_cut_min_days: 1, p_bill_send_mode: 'manual', p_mess_cut_mode: 'any' }]);
 });
 test('service: saveBillingSettings refuses out-of-range days instead of defaulting', async () => {
   billingDb(6);
   for (const bad of [-1, 32, 1.5, NaN]) await assert.rejects(M.saveBillingSettings({ billingModel: 'pooling', messCutMinDays: bad, billSendMode: 'manual' }), /whole number from 0 to 31/);
   assert.equal(rpcs('set_canteen_billing_settings').length, 0);
+});
+test('mess cut mode: Consecutive / Any days is next to the days box, defaults to Any days, and is saved', async () => {
+  billingDb(6); const h = await openBilling();
+  const group = h.querySelector('[aria-label="Mess cut mode"]');
+  assert.ok(group, 'mode control is shown for Pooling');
+  const buttons = [...group.querySelectorAll('button')].map((b: any) => b.textContent.trim());
+  assert.deepEqual(buttons, ['Consecutive', 'Any days']);
+  const days = daysInput(h);
+  assert.ok(days.compareDocumentPosition(group) & 4, 'mode control is next to / after the days box');
+  await click([...group.querySelectorAll('button')].find((b: any) => b.textContent.trim() === 'Consecutive'));
+  await saveSettings(h);
+  assert.deepEqual(rpcs('set_canteen_billing_settings'), [{ p_billing_model: 'pooling', p_mess_cut_min_days: 6, p_bill_send_mode: 'manual', p_mess_cut_mode: 'consecutive' }]);
+  for (const r of mounted.splice(0)) await act(async () => r.unmount());
+  const h2 = await openBilling();
+  const active = [...h2.querySelectorAll('[aria-label="Mess cut mode"] button')].find((b: any) => /text-primary-700/.test(b.className) || /bg-white/.test(b.className));
+  assert.equal(active?.textContent.trim(), 'Consecutive');
 });
 
 test('auth restore, logout, OAuth, and later gaps all show only the green wordmark', async () => {
