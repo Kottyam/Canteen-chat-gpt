@@ -523,3 +523,160 @@ test('missing splitMode defaults to eaters', () => {
   assert.equal(r.expenseTotalPaise, 1000); assert.equal(r.allMembersExpensePaise, 0);
   assert.equal(line(r, 'A').sharePaise, 500);
 });
+
+test('fixed-price specials are unchanged when shared-cost fields are empty', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 1000 }],
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))],
+    specials: { A: { memberPaise: 200, guestPaise: 50 } },
+  }));
+  assert.equal(line(r, 'A').specialMemberPaise, 200);
+  assert.equal(line(r, 'A').specialGuestPaise, 50);
+  assert.equal(line(r, 'A').sharedSpecialPaise, 0);
+  assert.equal(line(r, 'A').specialPending, false);
+  assert.equal(line(r, 'A').totalPaise, line(r, 'A').sharePaise + 250);
+  assert.deepEqual(r.pendingSharedSpecials, []);
+});
+
+test('shared cost splits equally among 2 members and among 5 members', () => {
+  const two = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 0 }].filter(() => false),
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+    sharedSpecialCosts: [{ date: d(1), itemCode: 'biryani', totalPaise: 1000 }],
+  }));
+  assert.equal(line(two, 'A').sharedSpecialPaise, 500);
+  assert.equal(line(two, 'B').sharedSpecialPaise, 500);
+  assert.equal(line(two, 'A').totalPaise, 500);
+  assert.equal(line(two, 'B').totalPaise, 500);
+  assert.equal(line(two, 'A').specialPending, false);
+  assert.match(line(two, 'A').specialLines[0].label, /Biryani/);
+
+  const five = computePoolingBills(base({
+    members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }, { memberId: 'D' }, { memberId: 'E' }],
+    orders: ['A', 'B', 'C', 'D', 'E'].flatMap(id => orders(id, [1])),
+    sharedSpecialOrders: ['A', 'B', 'C', 'D', 'E'].map(id => ({ memberId: id, date: d(1), itemCode: 'fish', itemName: 'Fish' })),
+    sharedSpecialCosts: [{ date: d(1), itemCode: 'fish', totalPaise: 1000 }],
+  }));
+  assert.deepEqual(['A', 'B', 'C', 'D', 'E'].map(id => line(five, id).sharedSpecialPaise), [200, 200, 200, 200, 200]);
+  assert.equal(five.lines.reduce((s: number, l: any) => s + l.sharedSpecialPaise, 0), 1000);
+});
+
+test('quantity greater than 1 and a member plus their guests still count as one share', () => {
+  const r = computePoolingBills(base({
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    // two rows for A (member item + guest item, or qty>1 represented twice) must still be one share
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+    sharedSpecialCosts: [{ date: d(1), itemCode: 'biryani', totalPaise: 1000 }],
+  }));
+  assert.equal(line(r, 'A').sharedSpecialPaise, 500);
+  assert.equal(line(r, 'B').sharedSpecialPaise, 500);
+});
+
+test('cancelled or omitted shared-cost orders are excluded from the split', () => {
+  const r = computePoolingBills(base({
+    orders: [...orders('A', [1]), ...orders('B', [1], { status: 'cancelled' })],
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+    sharedSpecialCosts: [{ date: d(1), itemCode: 'biryani', totalPaise: 1000 }],
+  }));
+  assert.equal(line(r, 'A').sharedSpecialPaise, 1000);
+  assert.equal(line(r, 'B').sharedSpecialPaise, 0);
+  assert.equal(line(r, 'B').specialPending, false);
+});
+
+test('pending shared-cost total marks amount pending and does not add a share', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 1000 }],
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+  }));
+  assert.equal(line(r, 'A').specialPending, true);
+  assert.equal(line(r, 'B').specialPending, true);
+  assert.equal(line(r, 'A').sharedSpecialPaise, 0);
+  assert.equal(line(r, 'A').totalPaise, line(r, 'A').sharePaise);
+  assert.equal(r.pendingSharedSpecials.length, 1);
+  assert.equal(r.pendingSharedSpecials[0].memberCount, 2);
+  assert.ok(r.issues.some((i: string) => /amount pending|Shared cost pending/i.test(i)));
+  // Entering 0 is a real total, not pending
+  const zero = computePoolingBills(base({
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+    sharedSpecialCosts: [{ date: d(1), itemCode: 'biryani', totalPaise: 0 }],
+  }));
+  assert.equal(line(zero, 'A').specialPending, false);
+  assert.equal(line(zero, 'A').sharedSpecialPaise, 0);
+  assert.deepEqual(zero.pendingSharedSpecials, []);
+});
+
+test('shared cost uses largest-remainder paise rounding', () => {
+  const r = computePoolingBills(base({
+    members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }],
+    orders: [...orders('A', [1]), ...orders('B', [1]), ...orders('C', [1])],
+    sharedSpecialOrders: ['A', 'B', 'C'].map(id => ({ memberId: id, date: d(1), itemCode: 'fish', itemName: 'Fish' })),
+    sharedSpecialCosts: [{ date: d(1), itemCode: 'fish', totalPaise: 1000 }],
+  }));
+  assert.deepEqual([line(r, 'A').sharedSpecialPaise, line(r, 'B').sharedSpecialPaise, line(r, 'C').sharedSpecialPaise], [334, 333, 333]);
+  assert.equal(r.lines.reduce((s: number, l: any) => s + l.sharedSpecialPaise, 0), 1000);
+});
+
+test('shared cost asOf ignores later orders and later totals; mess cut does not reduce the share', () => {
+  const input = base({
+    messCutMinDays: 1,
+    expenses: [{ date: d(1), amountPaise: 3000 }],
+    orders: [...orders('A', range(1, 30)), ...orders('B', [1])], // B mess-cut for the rest of the month
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'A', date: d(20), itemCode: 'fish', itemName: 'Fish' },
+    ],
+    sharedSpecialCosts: [
+      { date: d(1), itemCode: 'biryani', totalPaise: 1000 },
+      { date: d(20), itemCode: 'fish', totalPaise: 800 },
+    ],
+  });
+  const mid = computePoolingBills({ ...input, asOf: d(5) });
+  assert.equal(line(mid, 'A').sharedSpecialPaise, 500);
+  assert.equal(line(mid, 'B').sharedSpecialPaise, 500);
+  assert.equal((line(mid, 'A').specialLines || []).length, 1);
+  const full = computePoolingBills(input);
+  assert.equal(line(full, 'A').sharedSpecialPaise, 500 + 800);
+  assert.equal(line(full, 'B').sharedSpecialPaise, 500);
+  assert.equal(line(full, 'B').messCutApplied, true);
+  assert.ok(line(full, 'B').sharePaise < line(full, 'A').sharePaise);
+  // B still pays the full biryani share despite mess cut
+  assert.equal(line(full, 'B').specialLines[0].paise, 500);
+});
+
+test('shared cost is separate from Common bill and the food pool', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 1000, splitMode: 'eaters' }, { date: d(1), amountPaise: 600, splitMode: 'all_members' }],
+    orders: [...orders('A', [1]), ...orders('B', [1])],
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(1), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+    sharedSpecialCosts: [{ date: d(1), itemCode: 'biryani', totalPaise: 400 }],
+  }));
+  assert.equal(r.expenseTotalPaise, 1000);
+  assert.equal(r.allMembersExpensePaise, 600);
+  assert.equal(line(r, 'A').sharePaise, 500);
+  assert.equal(line(r, 'A').allMembersSharePaise, 300);
+  assert.equal(line(r, 'A').sharedSpecialPaise, 200);
+  assert.equal(line(r, 'A').totalPaise, 500 + 300 + 200);
+  assert.equal(r.unallocatedPaise, 0);
+});

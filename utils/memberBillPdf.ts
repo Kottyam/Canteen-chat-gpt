@@ -65,6 +65,7 @@ export interface MemberBillPdfBill {
   admin_added_total: number;
   special_items_total?: number;
   common_bill_total?: number;
+  special_lines?: { label: string; paise: number }[];
   total: number;
   member_name_snapshot?: string | null;
   published?: boolean;
@@ -97,7 +98,7 @@ export interface MemberBillPdfModel {
   publishedTotal: number;
   reconciled: boolean;
   roundingAdjustment: number;
-  breakdown: { memberFood: number; guestFood: number; adminAdded: number; specials: number; commonBill: number };
+  breakdown: { memberFood: number; guestFood: number; adminAdded: number; specials: number; commonBill: number; specialLines: { label: string; amount: number }[] };
   filename: string;
 }
 
@@ -232,6 +233,7 @@ export function buildMemberBillPdfModel(
       adminAdded: money(bill.admin_added_total || 0),
       specials: money(bill.special_items_total || 0),
       commonBill: money(bill.common_bill_total || 0),
+      specialLines: (bill.special_lines || []).map(l => ({ label: l.label, amount: money((Number(l.paise) || 0) / 100) })),
     },
     filename: `GoCanteen-Bill-${year}-${String(month).padStart(2, '0')}.pdf`,
   };
@@ -428,7 +430,7 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
   flush();
 
   if (model.billingModel === 'pooling') {
-    const boxH = 28 + (model.breakdown.specials ? 5 : 0) + (model.breakdown.guestFood ? 5 : 0) + (model.breakdown.commonBill ? 5 : 0);
+    const boxH = 28 + (model.breakdown.specials ? 5 : 0) + (model.breakdown.guestFood ? 5 : 0) + (model.breakdown.commonBill ? 5 : 0) + 5 * (model.breakdown.specialLines?.length || 0);
     if (y + boxH > PAGE_BOTTOM) newPage();
     y += 6;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
@@ -437,6 +439,7 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
     doc.text(`Pool share: ${pdfMoney(model.breakdown.memberFood)}`, M, y); y += 5;
     if (model.breakdown.guestFood) { doc.text(`Guest share: ${pdfMoney(model.breakdown.guestFood)}`, M, y); y += 5; }
     if (model.breakdown.specials) { doc.text(`Special items: ${pdfMoney(model.breakdown.specials)}`, M, y); y += 5; }
+    for (const sl of model.breakdown.specialLines || []) { doc.text(`${sl.label}: ${pdfMoney(sl.amount)}`, M, y); y += 5; }
     if (model.breakdown.commonBill) { doc.text(`${COMMON_BILL_LABEL}: ${pdfMoney(model.breakdown.commonBill)}`, M, y); y += 5; }
     doc.text(`Admin added: ${pdfMoney(model.breakdown.adminAdded)}`, M, y); y += 5;
     doc.setFont('helvetica', 'bold');

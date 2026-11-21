@@ -102,6 +102,13 @@ Missing table/row (migration not applied) => standard, silently (exact current b
   save_pooling_run verifies specials per member against the server and that every line total adds up; published months
   stay locked.
 
+
+## Shared cost specials (owner pt132u)
+- Pooling only. Each weekly special is **Fixed price** (default; existing specials unchanged) or **Shared cost**. Standard hides the mode.
+- Shared cost: no upfront price. Members order normally. After buying, the admin enters that day's total (`pooling_special_shared_costs`). It is split equally among the **distinct members** who ordered it that day (quantity ignored). A member and their guests count as **one share**. Cancelled or empty orders are excluded. Largest-remainder paise rounding. Not mess-cut; separate from the food pool and Common bill.
+- The member's share is a named Special line on their bill. Until the total is entered, admin views and the draft PDF show **amount pending**, and `publish_pooling_line` **blocks** those members' bills. Drafts can still be saved. Entering `0` is a valid total (not pending).
+- Snapshot: `order_items.pooling_special_pricing_mode='shared'` and null unit price. Fixed-price snapshots and `special_items_total` are unchanged.
+
 ## Guest orders On/Off (owner t58u/t59u) — implemented in PR47
 - One per-canteen setting, in Employee Food Arrangement, applies to ALL modes. Default On (no row).
 - Off: guest option hidden for members; the server rejects new guest orders/items, switching items/orders to guest,

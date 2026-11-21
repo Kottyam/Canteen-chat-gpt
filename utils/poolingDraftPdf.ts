@@ -10,8 +10,8 @@ export const rsPdf = (p: number) => `Rs.${(Math.round(p) / 100).toFixed(2)}`;
 export const displayBusinessDate = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }); };
 export const monthLabel = (year: number, month: number) => new Date(Date.UTC(year, month - 1, 1)).toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
-export interface DraftPdfRow { name: string; days: string; messCut: string; share: number; commonBill: number; special: number; adminAdded: number; total: number }
-export interface DraftPdfModel { canteenName: string; month: string; asOf: string; title: string; subtitle: string; rows: DraftPdfRow[]; expenseTotal: number; billTotal: number; unallocated: number; filename: string }
+export interface DraftPdfRow { name: string; days: string; messCut: string; share: number; commonBill: number; special: number; adminAdded: number; total: number; specialPending?: boolean; specialDetails?: string[] }
+export interface DraftPdfModel { canteenName: string; month: string; asOf: string; title: string; subtitle: string; rows: DraftPdfRow[]; expenseTotal: number; billTotal: number; unallocated: number; pendingNotes: string[]; filename: string }
 
 /** Pure: the exact values shown on screen for the draft. */
 export function buildPoolingDraftPdfModel(result: PoolingResult, names: Record<string, string>, canteenName: string, asOf: string): DraftPdfModel {
@@ -20,12 +20,17 @@ export function buildPoolingDraftPdfModel(result: PoolingResult, names: Record<s
     name: names[l.memberId] || 'Member',
     days: `${l.attendedDays}/${l.windowDays}`,
     messCut: l.messCutApplied ? (result.messCutMode === 'consecutive' ? `Yes (${l.excludedDays} consecutive)` : `Yes (${l.excludedDays})`) : 'No',
-    share: l.sharePaise, commonBill: l.allMembersSharePaise || 0, special: (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0), adminAdded: l.adminAddedPaise, total: l.totalPaise,
+    share: l.sharePaise, commonBill: l.allMembersSharePaise || 0,
+    special: (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) + (l.sharedSpecialPaise || 0),
+    adminAdded: l.adminAddedPaise, total: l.totalPaise,
+    specialPending: Boolean(l.specialPending),
+    specialDetails: (l.specialLines || []).map(s => `${s.label}: Rs.${(s.paise/100).toFixed(2)}`),
   }));
   return {
     canteenName: canteenName || 'GoCanteen', month, asOf,
     title: 'POOLING BILL — DRAFT (NOT PUBLISHED)', subtitle: `${month} · Draft as of ${displayBusinessDate(asOf)}`,
     rows, expenseTotal: poolingExpenseGrandTotalPaise(result), billTotal: rows.reduce((s, r) => s + r.total, 0), unallocated: result.unallocatedPaise,
+    pendingNotes: (result.pendingSharedSpecials || []).map(p => `amount pending: ${p.itemName} (${p.date})`),
     filename: `GoCanteen-Pooling-Draft-${result.year}-${String(result.month).padStart(2, '0')}-asof-${asOf}.pdf`,
   };
 }
@@ -61,9 +66,10 @@ export function renderPoolingDraftPdf(doc: any, m: DraftPdfModel, generatedAt: s
     const nameLines: string[] = doc.splitTextToSize(r.name, cols[1] - 2);
     const h = Math.max(1, nameLines.length) * LINE + 2;
     if (y + h > BOTTOM) { doc.addPage(); y = header(); }
+    const specialTxt = r.specialPending && !(r.special) ? 'amount pending' : (r.specialPending ? `${rsPdf(r.special)} pending` : rsPdf(r.special));
     const money = showCommon
-      ? [rsPdf(r.share), rsPdf(r.commonBill || 0), rsPdf(r.special), rsPdf(r.adminAdded), rsPdf(r.total)]
-      : [rsPdf(r.share), rsPdf(r.special), rsPdf(r.adminAdded), rsPdf(r.total)];
+      ? [rsPdf(r.share), rsPdf(r.commonBill || 0), specialTxt, rsPdf(r.adminAdded), rsPdf(r.total)]
+      : [rsPdf(r.share), specialTxt, rsPdf(r.adminAdded), rsPdf(r.total)];
     const cells = [String(i + 1), nameLines, r.days, r.messCut, ...money];
     cells.forEach((c, j) => doc.text(c, xs[j] + 1, y + 3.5));
     doc.setDrawColor(220, 220, 220); doc.line(M, y + h, M + W, y + h); y += h;
@@ -72,6 +78,7 @@ export function renderPoolingDraftPdf(doc: any, m: DraftPdfModel, generatedAt: s
   doc.setFont('helvetica', 'bold'); doc.setFontSize(9); y += 6;
   doc.text(`Total expenses: ${rsPdf(m.expenseTotal)}`, M, y); doc.text(`Bill total: ${rsPdf(m.billTotal)}`, M + W, y, { align: 'right' });
   if (m.unallocated > 0) { y += 5; doc.text(`Unallocated: ${rsPdf(m.unallocated)}`, M, y); }
+  for (const note of m.pendingNotes || []) { y += 5; if (y > BOTTOM) { doc.addPage(); y = header(); } doc.setTextColor(153, 27, 27); doc.text(note, M, y); doc.setTextColor(0, 0, 0); }
   y += 6; doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text('Draft — not published.', M, y);
   return doc;
 }

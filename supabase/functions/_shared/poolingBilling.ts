@@ -96,6 +96,33 @@ export function expenseSplitModeOrDefault(v: unknown): ExpenseSplitMode {
   return isValidExpenseSplitMode(v) ? v : 'eaters';
 }
 
+export type SpecialPricingMode = 'fixed' | 'shared';
+export const SPECIAL_PRICING_FIXED = 'fixed' as const;
+export const SPECIAL_PRICING_SHARED = 'shared' as const;
+export const isValidSpecialPricingMode = (v: unknown): v is SpecialPricingMode => v === 'fixed' || v === 'shared';
+export function specialPricingModeOrDefault(v: unknown): SpecialPricingMode {
+  return isValidSpecialPricingMode(v) ? v : 'fixed';
+}
+/** Short bill-line label: "Chicken biryani · 10 Nov". */
+export function sharedSpecialLineLabel(itemName: string, date: string): string {
+  const name = (itemName || 'Special').trim() || 'Special';
+  const [y, m, d] = String(date).split('-').map(Number);
+  if (!y || !m || !d) return name;
+  const pretty = new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return `${name} · ${pretty}`;
+}
+
+export interface SharedSpecialCost { date: string; itemCode: string; itemName?: string; totalPaise: number }
+/** One row per member who ordered a shared-cost special (qty ignored; guest items count as that member). */
+export interface SharedSpecialOrder { memberId: string; date: string; itemCode: string; itemName?: string }
+export interface SharedSpecialPending { date: string; itemCode: string; itemName: string; memberIds: string[]; memberCount: number }
+export interface SharedSpecialSummary {
+  date: string; itemCode: string; itemName: string;
+  memberIds: string[]; memberCount: number;
+  totalPaise: number | null; pending: boolean;
+}
+export interface SpecialLine { label: string; paise: number; itemCode?: string; date?: string }
+
 export interface PoolingExpense { id?: string; date: string; amountPaise: number; splitMode?: ExpenseSplitMode }
 export interface PoolingOrder {
   memberId: string;
@@ -127,6 +154,9 @@ export interface PoolingInput {
   /** Special priced items (server snapshot, integer paise) per member: own items + guest items they ordered.
    *  Added on top of the pool share; never deducted from expenses (owner t57u/t57s265). */
   specials?: Record<string, { memberPaise: number; guestPaise: number }>;
+  /** Shared-cost specials: totals entered by the admin (per date + item) and the members who ordered them. */
+  sharedSpecialCosts?: SharedSpecialCost[];
+  sharedSpecialOrders?: SharedSpecialOrder[];
   /** Optional as-of business date (running month draft). Caps the window at this date: later days,
    *  orders, expenses and memberships are not counted. Omitted => the full completed-month result. */
   asOf?: string;
@@ -146,6 +176,10 @@ export interface PoolingLine {
   sharePaise: number;
   adminAddedPaise: number;
   allMembersSharePaise: number;
+  /** Named Shared cost special lines (allocated only). Not mess-cut, not Common bill, not the food pool. */
+  specialLines?: SpecialLine[];
+  sharedSpecialPaise?: number;
+  specialPending?: boolean;
   totalPaise: number;
 }
 export interface PoolingResult {
@@ -168,6 +202,9 @@ export interface PoolingResult {
   warnings: string[];
   /** Actionable money problems the admin must see (short). Unallocated is reported separately. */
   issues: string[];
+  /** Shared-cost specials ordered this month that still have no total entered. Blocks publish for those members. */
+  pendingSharedSpecials: SharedSpecialPending[];
+  sharedSpecialSummaries: SharedSpecialSummary[];
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -233,6 +270,77 @@ export function qualifyingConsecutiveAbsentDates(window: string[], attended: Set
   for (const d of window) { if (!attended.has(d)) run.push(d); else flush(); }
   flush();
   return out;
+}
+
+export function allocateSharedSpecials(
+  costs: SharedSpecialCost[] | undefined,
+  orders: SharedSpecialOrder[] | undefined,
+  inMonth: (d: string) => boolean,
+  cohortIds: Set<string>,
+): { byMember: Map<string, SpecialLine[]>; pending: SharedSpecialPending[]; summaries: SharedSpecialSummary[]; unallocatedPaise: number; warnings: string[]; issues: string[] } {
+  const byMember = new Map<string, SpecialLine[]>();
+  const pending: SharedSpecialPending[] = [];
+  const summaries: SharedSpecialSummary[] = [];
+  const warnings: string[] = [];
+  const issues: string[] = [];
+  let unallocatedPaise = 0;
+  const costMap = new Map<string, SharedSpecialCost>();
+  for (const c of costs || []) {
+    if (!inMonth(c.date)) continue;
+    const a = Math.round(Number(c.totalPaise) || 0);
+    if (a < 0) { warnings.push(`Negative shared-cost special ${c.itemCode} on ${c.date} ignored.`); continue; }
+    costMap.set(`${c.date}::${c.itemCode}`, { ...c, totalPaise: a });
+  }
+  const groups = new Map<string, { date: string; itemCode: string; itemName: string; members: Set<string> }>();
+  for (const o of orders || []) {
+    if (!inMonth(o.date) || !o.memberId || !o.itemCode) continue;
+    const key = `${o.date}::${o.itemCode}`;
+    const g = groups.get(key) || { date: o.date, itemCode: o.itemCode, itemName: (o.itemName || '').trim(), members: new Set() };
+    if (o.itemName && !g.itemName) g.itemName = o.itemName.trim();
+    g.members.add(o.memberId);
+    groups.set(key, g);
+  }
+  const keys = [...groups.keys()].sort();
+  for (const key of keys) {
+    const g = groups.get(key)!;
+    const name = g.itemName || g.itemCode || 'Special';
+    const participants = [...g.members].filter(id => cohortIds.has(id)).sort();
+    const unknown = [...g.members].filter(id => !cohortIds.has(id)).length;
+    if (unknown) warnings.push(`Shared cost special ${name} on ${g.date}: ${unknown} order(s) from members without a membership record were ignored.`);
+    const cost = costMap.get(key);
+    if (!cost) {
+      pending.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length });
+      summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length, totalPaise: null, pending: true });
+      const who = participants.length === 1 ? '1 member' : `${participants.length} members`;
+      const msg = `Shared cost pending for ${sharedSpecialLineLabel(name, g.date)} (${who}). Enter the total before publishing those bills.`;
+      issues.push(msg);
+      continue;
+    }
+    if (!participants.length) {
+      unallocatedPaise += cost.totalPaise;
+      summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: [], memberCount: 0, totalPaise: cost.totalPaise, pending: false });
+      warnings.push(`Shared cost for ${sharedSpecialLineLabel(name, g.date)} has no members to charge; left unallocated.`);
+      continue;
+    }
+    summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length, totalPaise: cost.totalPaise, pending: false });
+    const shares = apportion(cost.totalPaise, participants.map(id => ({ key: id, weight: 1 })));
+    const label = sharedSpecialLineLabel(name, g.date);
+    for (const id of participants) {
+      const paise = shares.get(id) || 0;
+      const list = byMember.get(id) || [];
+      list.push({ label, paise, itemCode: g.itemCode, date: g.date });
+      byMember.set(id, list);
+    }
+    costMap.delete(key);
+  }
+  for (const leftover of [...costMap.values()].sort((a, b) => a.date < b.date ? -1 : a.date === b.date ? a.itemCode.localeCompare(b.itemCode) : 1)) {
+    unallocatedPaise += leftover.totalPaise;
+    const name = leftover.itemName || leftover.itemCode;
+    summaries.push({ date: leftover.date, itemCode: leftover.itemCode, itemName: name, memberIds: [], memberCount: 0, totalPaise: leftover.totalPaise, pending: false });
+    warnings.push(`Shared cost for ${sharedSpecialLineLabel(name, leftover.date)} has no members to charge; left unallocated.`);
+  }
+  summaries.sort((a, b) => a.date.localeCompare(b.date) || a.itemCode.localeCompare(b.itemCode) || a.itemName.localeCompare(b.itemName));
+  return { byMember, pending, summaries, unallocatedPaise, warnings, issues };
 }
 
 export function computePoolingBills(input: PoolingInput): PoolingResult {
@@ -333,13 +441,23 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
   const commonShares = members.length ? apportion(commonTotal, members.map(m => ({ key: m.memberId, weight: 1 }))) : new Map<string, number>();
   const commonUnallocated = members.length ? 0 : commonTotal;
   if (commonUnallocated > 0) warnings.push('No members this month: Common bill left unallocated for admin review.');
+  const shared = allocateSharedSpecials(input.sharedSpecialCosts, input.sharedSpecialOrders, inMonth, new Set(members.map(m => m.memberId)));
+  warnings.push(...shared.warnings);
+  issues.push(...shared.issues);
+  // Shared leftover is reported in warnings/issues, not mixed into the food-pool unallocated total
+  // (save_pooling_run checks food-pool allocation separately).
+  if (shared.unallocatedPaise > 0) issues.push(`Shared cost of ₹${(shared.unallocatedPaise/100).toFixed(2)} could not be charged to any member.`);
   for (const m of members) {
     const l = lines.get(m.memberId)!;
     l.sharePaise = rounded.get(m.memberId) || 0;
     l.dailySharePaise = l.sharePaise;
     l.overheadSharePaise = 0;
     l.allMembersSharePaise = commonShares.get(m.memberId) || 0;
-    const rawTotal = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) + l.allMembersSharePaise;
+    const specialLines = shared.byMember.get(m.memberId) || [];
+    l.specialLines = specialLines.length ? specialLines : undefined;
+    l.sharedSpecialPaise = specialLines.reduce((s, x) => s + x.paise, 0);
+    l.specialPending = shared.pending.some(p => p.memberIds.includes(m.memberId));
+    const rawTotal = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) + l.allMembersSharePaise + (l.sharedSpecialPaise || 0);
     if (rawTotal < 0) {
       warnings.push('A member\'s bill was clamped to Rs.0 because an admin deduction exceeded their unbilled share.');
       l.totalPaise = 0;
@@ -355,5 +473,7 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
     expenseTotalPaise: eaterTotal, allMembersExpensePaise: commonTotal, allMembersUnallocatedPaise: commonUnallocated, dailyExpensePaise: daily, overheadExpensePaise: overhead,
     allocatedPaise: allocatable, unallocatedPaise: unallocated,
     lines: members.map(m => lines.get(m.memberId)!), warnings, issues,
+    pendingSharedSpecials: shared.pending,
+    sharedSpecialSummaries: shared.summaries,
   };
 }

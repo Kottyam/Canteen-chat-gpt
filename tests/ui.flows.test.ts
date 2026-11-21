@@ -67,7 +67,7 @@ test('menu ADD flow (Pooling, payments admin): "Add price?" while adding -> one 
   await click(saveBtn(h));
   assert.deepEqual(weeklyInserts().map((r: any) => r.item_code).sort(), ['fish_fry', 'meals']);
   assert.ok(weeklyInserts().every((r: any) => Number(r.unit_price) === 0)); // Pooling unit_price stays 0 (pool items carry no price)
-  assert.deepEqual(rpcs('set_pooling_special_item'), [{ p_weekday: 1, p_item_code: 'fish_fry', p_price_paise: 2550 }]);
+  assert.deepEqual(rpcs('set_pooling_special_item'), [{ p_weekday: 1, p_item_code: 'fish_fry', p_price_paise: 2550, p_pricing_mode: 'fixed' }]);
 });
 
 test('menu ADD flow: invalid price blocks the add with a message; nothing saved', async () => {
@@ -110,14 +110,15 @@ test('menu EDIT flow: change and remove price of an existing item; deleting the 
   await click(h.querySelector('button[aria-label="Delete Fish"]'));
   await click(saveBtn(h));
   const got = rpcs('set_pooling_special_item').sort((a: any, b: any) => a.p_item_code.localeCompare(b.p_item_code));
-  assert.deepEqual(got, [{ p_weekday: 4, p_item_code: 'chicken', p_price_paise: 6500 }, { p_weekday: 4, p_item_code: 'fish', p_price_paise: null }, { p_weekday: 4, p_item_code: 'meals', p_price_paise: 0 }]);
+  assert.deepEqual(got, [{ p_weekday: 4, p_item_code: 'chicken', p_price_paise: 6500, p_pricing_mode: 'fixed' }, { p_weekday: 4, p_item_code: 'fish', p_price_paise: null, p_pricing_mode: 'fixed' }, { p_weekday: 4, p_item_code: 'meals', p_price_paise: 0, p_pricing_mode: 'fixed' }]);
 });
 
-test('Standard mode menu: unchanged price field, no "Add price?"', async () => {
+test('Standard mode menu: unchanged price field, no "Add price?" and no Shared cost mode', async () => {
   fakeDb.reset(); auth.perms = ['payments']; standard();
   const h = await openMenu(5);
   assert.equal(addPriceBox(h), undefined);
   assert.ok(h.querySelector('input[placeholder="Price"]'));
+  assert.doesNotMatch(h.textContent, /Fixed price|Shared cost/);
 });
 
 test('guest orders OFF hides the Guest Order tab; ON shows it; payments admin toggle calls the RPC, others are disabled', async () => {
@@ -1114,4 +1115,55 @@ test('website points Android users to Google Play (no APK download button)', asy
     const np = (await mount(createElement(M.InstallPrompt))).host; await tick(5);
     assert.equal(np.querySelector('[data-testid="install-prompt-play-store"]'), null, 'install prompt hidden inside the native app');
   } finally { delete (win as any).Capacitor; }
+});
+
+test('menu ADD flow (Pooling): Shared cost needs no price and stores pricing_mode shared', async () => {
+  fakeDb.reset(); auth.perms = ['payments']; pooling();
+  const h = await openMenu(1);
+  await type(nameInput(h), 'Biryani');
+  await click(addPriceBox(h));
+  assert.ok(byText(h, 'button', /^Shared cost$/));
+  await click(byText(h, 'button', /^Shared cost$/));
+  assert.equal(h.querySelector('input[aria-label="Item price"]'), null);
+  await click(addBtn(h));
+  assert.match(h.textContent, /Shared cost \(unsaved\)/);
+  await click(saveBtn(h));
+  assert.deepEqual(rpcs('set_pooling_special_item'), [{ p_weekday: 1, p_item_code: 'biryani', p_price_paise: null, p_pricing_mode: 'shared' }]);
+});
+
+test('Pooling current month: pending shared cost shows amount pending; saving the total calls the RPC', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { asOf, cd } = seedCurrentMonth(); asAdmin(); pooling();
+  fakeDb.db.orders.push({
+    id: 'shared1', employee_id: 'mA', ordered_for: cd(1), status: 'active',
+    order_items: [{ item_source: 'employee', item_code: 'biryani', item_name: 'Biryani', quantity: 2, pooling_special: true, pooling_special_unit_paise: null, pooling_special_pricing_mode: 'shared' }],
+  });
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  const s = draftSection(host);
+  assert.match(s.textContent, /amount pending/);
+  assert.match(s.textContent, /Shared cost specials/);
+  const input = host.querySelector('input[aria-label="Total for Biryani on ' + cd(1) + '"]');
+  assert.ok(input);
+  await type(input, '10');
+  await click(byText(s, 'button', /^Save total$/)); await tick();
+  assert.deepEqual(rpcs('set_pooling_special_shared_cost'), [{ p_date: cd(1), p_item_code: 'biryani', p_total_paise: 1000 }]);
+});
+
+test('Bills screen lists a named Shared cost special line separate from Special items', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'mid-1', name: 'Anu', role: 'employee' };
+  fakeDb.setAuthUid('mid-1');
+  fakeDb.db.monthly_bills = [{
+    id: 'b1', employee_id: 'mid-1', bill_year: 2026, bill_month: 10, published: true,
+    food_total: 80, guest_food_total: 0, admin_added_total: 0, special_items_total: 25, common_bill_total: 0,
+    special_lines: [{ label: 'Biryani · 10 Nov', paise: 500 }],
+    total: 110,
+  }];
+  fakeDb.db.bill_payments = [];
+  const { host } = await mount(createElement(M.Bills)); await tick(10);
+  assert.match(host.textContent, /Special items ₹25\.00/);
+  assert.match(host.textContent, /Biryani · 10 Nov ₹5\.00/);
+  await click(byText(host, 'button', /October 2026/));
+  assert.match(host.textContent, /Special items \(incl\. your guests\)/);
+  assert.match(host.textContent, /Biryani · 10 Nov/);
+  assert.match(host.textContent, /₹5\.00/);
 });
