@@ -1167,3 +1167,14 @@ test('Bills screen lists a named Shared cost special line separate from Special 
   assert.match(host.textContent, /Biryani · 10 Nov/);
   assert.match(host.textContent, /₹5\.00/);
 });
+
+
+test('Pooling Billing Mode keeps Guest orders; Standard Billing Mode does not show that toggle', async () => {
+  fakeDb.reset(); auth.perms = ['payments']; pooling();
+  const p = await mount(createElement(M.BillingModeSettings)); await tick();
+  assert.match(p.host.textContent, /Guest orders/);
+  fakeDb.reset(); auth.perms = ['payments']; standard();
+  const s = await mount(createElement(M.BillingModeSettings)); await tick();
+  assert.doesNotMatch(s.host.textContent, /Guest orders/);
+  assert.match(s.host.textContent, /Billing Model/);
+});

@@ -3,9 +3,10 @@ import AsyncActionButton from '../common/AsyncActionButton';
 import { CanteenBillingSettings, parseMessCutDays } from '../../supabase/functions/_shared/poolingBilling';
 import { MESS_CUT_RANGE_MESSAGE, saveBillingSettings } from '../../services/billingSettings';
 import { publishBillingSettings, useBillingSettings } from '../../hooks/useBillingSettings';
+import GuestOrdersToggle from './GuestOrdersToggle';
 
 const BillingModeSettings: React.FC = () => {
-  const { settings, loaded, error } = useBillingSettings();
+  const { settings, loaded, error, pooling } = useBillingSettings();
   const [draft, setDraft] = useState<CanteenBillingSettings>(settings);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -63,6 +64,7 @@ const BillingModeSettings: React.FC = () => {
         <button type="button" disabled={busy || !loaded} className={opt(draft.billSendMode === 'automatic')} onClick={() => setDraft({ ...draft, billSendMode: 'automatic' })}>Automatic</button>
       </div>
     </div>
+    {pooling && loaded && <div className="rounded-2xl border bg-white p-4 shadow-sm"><GuestOrdersToggle/></div>}
     {message && <div className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700">{message}</div>}
     <AsyncActionButton type="button" loading={busy} loadingLabel="Saving…" disabled={busy || !loaded || Boolean(error)} onClick={() => void save()} className="rounded-lg bg-primary-600 px-4 py-2.5 font-medium text-white shadow-sm">Save Billing Settings</AsyncActionButton>
   </div>;
