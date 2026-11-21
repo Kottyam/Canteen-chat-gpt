@@ -3,7 +3,7 @@ import AsyncActionButton from '../common/AsyncActionButton';
 import { useBillingSettings } from '../../hooks/useBillingSettings';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../supabase';
-import { PoolingResult, SharedSpecialSummary, istBusinessDate, previousBillingPeriod, messCutAppliedLabel, MessCutMode, COMMON_BILL_LABEL, poolingExpenseGrandTotalPaise, sharedSpecialLineLabel } from '../../supabase/functions/_shared/poolingBilling';
+import { PoolingResult, SharedSpecialSummary, istBusinessDate, previousBillingPeriod, messCutAppliedLabel, MessCutMode, COMMON_BILL_LABEL, poolingExpenseSummaryPaise, sharedSpecialLineLabel } from '../../supabase/functions/_shared/poolingBilling';
 import { loadPoolingRun, previewPoolingBills, publishPoolingBill, savePoolingRun } from '../../services/poolingBills';
 import { parsePriceToPaise, savePoolingSpecialSharedCost } from '../../services/poolingSpecials';
 import { buildPoolingDraftPdfModel, displayBusinessDate, monthLabel, poolingDraftPdfAdapter } from '../../utils/poolingDraftPdf';
@@ -13,6 +13,17 @@ export const POOLING_INPUTS_CHANGED = 'gocanteen:pooling-inputs-changed';
 const DRAFT_TABLES = ['expenses', 'employee_adjustments', 'orders', 'order_items', 'holiday_dates', 'pooling_special_shared_costs'] as const;
 
 const rs = (p: number) => `₹${(p / 100).toFixed(2)}`;
+
+const PoolingExpenseSummary: React.FC<{ result: PoolingResult; className?: string }> = ({ result, className }) => {
+  const s = poolingExpenseSummaryPaise(result);
+  return <div className={className || 'grid gap-1 text-sm'} aria-label="Expense summary">
+    <div className="flex justify-between"><span>Expenses</span><b>{rs(s.foodPaise)}</b></div>
+    {s.commonPaise > 0 && <div className="flex justify-between"><span>Common bill</span><b>{rs(s.commonPaise)}</b></div>}
+    {s.specialPaise > 0 && <div className="flex justify-between"><span>Special expenses</span><b>{rs(s.specialPaise)}</b></div>}
+    <div className="flex justify-between font-semibold"><span>Total expenses</span><b>{rs(s.totalPaise)}</b></div>
+  </div>;
+};
+
 
 
 const sortSharedSpecials = (summaries: SharedSpecialSummary[]) =>
@@ -148,7 +159,7 @@ const CurrentMonthDraft: React.FC<{ threshold: number; mode?: MessCutMode; cante
     {error && <div className="text-sm text-red-700">{error}</div>}
     {!r && loading && <div className="text-sm text-gray-600">Calculating…</div>}
     {r && <>
-      <div className="flex justify-between text-sm"><span>Expenses so far</span><b>{rs(poolingExpenseGrandTotalPaise(r))}</b></div>
+      <PoolingExpenseSummary result={r} className="grid gap-1 rounded-2xl border bg-white p-4 text-sm shadow-sm"/>
       {(r.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700">{w}</div>)}
       <div className="divide-y text-sm">{r.lines.map(l => <div key={l.memberId} data-draft-member={l.memberId} className="grid gap-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{draft!.names[l.memberId] || 'Member'}</div>
@@ -225,7 +236,7 @@ const PoolingMonthlyBills: React.FC = () => {
     {busy === 'load' && !result && <div className="rounded-xl border bg-gray-50 p-4 text-sm text-gray-600">Calculating…</div>}
     {result && <>
       <div className="grid gap-2 rounded-2xl border bg-white p-4 text-sm shadow-sm sm:grid-cols-2">
-        <div className="flex justify-between"><span>Total expenses</span><b>{rs(poolingExpenseGrandTotalPaise(result))}</b></div>
+        <div className="sm:col-span-2"><PoolingExpenseSummary result={result}/></div>
         {result.unallocatedPaise > 0 && <div className="flex justify-between text-red-700 sm:col-span-2"><span>Unallocated (needs review)</span><b>{rs(result.unallocatedPaise)}</b></div>}
         {(result.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700 sm:col-span-2">{w}</div>)}
       </div>

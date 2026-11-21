@@ -279,7 +279,7 @@ for (const mode of ['manual', 'automatic'] as const) test(`Pooling current month
   const s = draftSection(host); assert.ok(s, 'current month section on the same page');
   const t = s.textContent;
   assert.match(t, new RegExp(`Draft as of ${M.displayBusinessDate(asOf)}`));
-  assert.match(t, /Expenses so far₹1000\.00/); // future expense excluded
+  assert.match(t, /Expenses₹1000\.00/); // future expense excluded
   const row = (id: string) => s.querySelector(`[data-draft-member="${id}"]`).textContent;
   assert.match(row('mA'), /Anu/); assert.match(row('mA'), /Pool ₹500\.00/); assert.match(row('mA'), /Special ₹25\.00/); assert.match(row('mA'), /Admin added ₹50\.00/); assert.match(row('mA'), /₹575\.00$/);
   assert.match(row('mB'), /Biju/); assert.match(row('mB'), /₹500\.00$/); assert.doesNotMatch(row('mB'), /Admin added/);
@@ -304,7 +304,7 @@ test('Pooling current month: Expenses add / edit / delete refresh the draft imme
   fakeDb.reset(); seedPoolingMonth({ orders: true }); const { cd } = seedCurrentMonth(); asAdmin(); pooling();
   const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
   const exp = await mount(createElement(M.Expenses));
-  const total = () => draftSection(host).textContent.match(/Expenses so far(₹[\d.]+)/)[1];
+  const total = () => draftSection(host).textContent.match(/Expenses(₹[\d.]+)/)[1];
   assert.equal(total(), '₹1000.00');
   let events = 0; const on = () => { events++; }; window.addEventListener(M.POOLING_INPUTS_CHANGED, on);
   await type(exp.host.querySelector('input[type="date"]'), cd(1)); await type(exp.host.querySelector('input[placeholder="Amount"]'), '200');
@@ -339,7 +339,7 @@ test('Pooling current month: the latest data wins and never touches the previous
   window.dispatchEvent(new (window as any).Event(M.POOLING_INPUTS_CHANGED));
   fakeDb.db.expenses.push({ id: 'c2', expense_date: cd(1), amount: 10, description: 'x' });
   window.dispatchEvent(new (window as any).Event(M.POOLING_INPUTS_CHANGED)); await wait(350); await tick();
-  assert.match(draftSection(host).textContent, /Expenses so far₹1010\.00/);
+  assert.match(draftSection(host).textContent, /Expenses₹1010\.00/);
   assert.match(host.textContent, /₹1234\.56Published/); // previous month keeps its saved published amount
   assert.doesNotMatch(draftSection(host).textContent, /Published/);
   noWrites();
@@ -355,13 +355,13 @@ test('Pooling current month PDF: exports exactly the displayed draft (values, mo
     assert.equal(m.canteenName, 'Test Canteen'); assert.match(m.title, /DRAFT \(NOT PUBLISHED\)/);
     assert.equal(m.subtitle, `${m.month} · Draft as of ${M.displayBusinessDate(asOf)}`);
     assert.deepEqual(m.rows.map((r: any) => [r.name, r.share, r.special, r.adminAdded, r.total]).sort(), [['Anu', 50000, 2500, 5000, 57500], ['Biju', 50000, 0, 0, 50000]]);
-    assert.equal(m.expenseTotal, 100000); assert.equal(m.billTotal, 107500);
+    assert.equal(m.foodExpense, 100000); assert.equal(m.commonExpense, 0); assert.equal(m.specialExpense, 2500); assert.equal(m.expenseTotal, 102500); assert.equal(m.billTotal, 107500);
     noWrites();
     const texts: string[] = []; let pages = 1;
     const doc: any = { setTextColor() {}, setFont() {}, setFontSize() {}, setFillColor() {}, setDrawColor() {}, rect() {}, line() {}, addPage() { pages++; },
       splitTextToSize: (s: string) => s.length > 20 ? [s.slice(0, 20), s.slice(20)] : [s], text: (t: any) => { texts.push(...(Array.isArray(t) ? t : [t])); } };
     M.renderPoolingDraftPdf(doc, m, 'now');
-    for (const s of ['Test Canteen', m.subtitle, 'Rs.575.00', 'Rs.500.00', 'Rs.25.00', 'Rs.50.00', 'Total expenses: Rs.1000.00', 'Bill total: Rs.1075.00', 'Draft — not published.']) assert.ok(texts.includes(s), s);
+    for (const s of ['Test Canteen', m.subtitle, 'Rs.575.00', 'Rs.500.00', 'Rs.25.00', 'Rs.50.00', 'Expenses: Rs.1000.00', 'Special expenses: Rs.25.00', 'Total expenses: Rs.1025.00', 'Bill total: Rs.1075.00', 'Draft — not published.']) assert.ok(texts.includes(s), s);
     const big = { ...m, rows: Array.from({ length: 80 }, (_, i) => ({ ...m.rows[0], name: `Member number ${i} with a long name` })) };
     texts.length = 0; pages = 1; M.renderPoolingDraftPdf(doc, big, 'now');
     assert.ok(pages > 1, 'multi-page'); for (let i = 0; i < 80; i++) assert.ok(texts.includes(`Member number ${i} with`.slice(0, 20)) && texts.includes(String(i + 1)));
@@ -1350,7 +1350,7 @@ test('Pooling draft PDF: Mess cut and money columns never overlap, including lon
     assertNoOverlap(placed, showCommon ? 'common' : 'base');
     const { cols, xs } = M.poolingDraftPdfLayout(showCommon);
     assert.equal(cols.reduce((s: number, w: number) => s + w, 0), 186);
-    const skip = /^(Total expenses|Bill total|Unallocated|Draft —|amount pending:|Generated)/;
+    const skip = /^(Expenses:|Common bill:|Special expenses:|Total expenses|Bill total|Unallocated|Draft —|amount pending:|Generated)/;
     const body = placed.filter((p: any) => p.y >= 52 && p.y < 270 && p.align == null && !skip.test(p.t));
     for (const p of body) {
       const col = xs.findIndex((x: number, i: number) => p.x + 0.05 >= x && p.x < x + cols[i]);
@@ -1366,4 +1366,23 @@ test('member bill PDF is a stacked breakdown, not a Mess cut / Pool share table'
   assert.match(src, /Pool share:/);
   assert.doesNotMatch(src, /'Mess cut'/);
   assert.doesNotMatch(src, /Yes \(\d+ consecutive\)/);
+});
+
+
+test('Expense summary lists food-pool, Common bill and specials, then Total expenses', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { cd } = seedCurrentMonth(); asAdmin(); pooling();
+  fakeDb.db.orders.push({
+    id: 'sum-sh', employee_id: 'mA', ordered_for: cd(1), status: 'active',
+    order_items: [{ item_source: 'employee', item_code: 'biryani', item_name: 'Biryani', quantity: 1, pooling_special: true, pooling_special_pricing_mode: 'shared' }],
+  });
+  fakeDb.db.pooling_special_shared_costs = [{ canteen_id: 'c1', special_date: cd(1), item_code: 'biryani', total_paise: 30000 }];
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  const box = draftSection(host).querySelector('[aria-label="Expense summary"]');
+  assert.ok(box);
+  const text = box.textContent || '';
+  assert.match(text, /Expenses₹1000\.00/);
+  assert.match(text, /Special expenses₹325\.00/);
+  assert.match(text, /Total expenses₹1325\.00/);
+  assert.ok(text.indexOf('Expenses') < text.indexOf('Special expenses'));
+  assert.ok(text.indexOf('Special expenses') < text.indexOf('Total expenses'));
 });

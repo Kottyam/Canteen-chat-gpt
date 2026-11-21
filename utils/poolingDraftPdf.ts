@@ -2,7 +2,7 @@
 // pipeline (deliverPdf) and brand header style. Generating it never writes bills/runs/notifications.
 import { jsPDF } from 'jspdf';
 import type { MessCutMode, PoolingResult } from '../supabase/functions/_shared/poolingBilling';
-import { COMMON_BILL_LABEL, poolingExpenseGrandTotalPaise } from '../supabase/functions/_shared/poolingBilling';
+import { COMMON_BILL_LABEL, poolingExpenseSummaryPaise } from '../supabase/functions/_shared/poolingBilling';
 import { deliverPdf } from './pdfLegacy';
 
 const BRAND_GREEN = [5, 150, 105] as const;
@@ -17,11 +17,12 @@ export function messCutPdfLabel(applied: boolean, excludedDays: number, mode?: M
 }
 
 export interface DraftPdfRow { name: string; days: string; messCut: string; share: number; commonBill: number; special: number; adminAdded: number; total: number; specialPending?: boolean; specialDetails?: string[] }
-export interface DraftPdfModel { canteenName: string; month: string; asOf: string; title: string; subtitle: string; rows: DraftPdfRow[]; expenseTotal: number; billTotal: number; unallocated: number; pendingNotes: string[]; filename: string }
+export interface DraftPdfModel { canteenName: string; month: string; asOf: string; title: string; subtitle: string; rows: DraftPdfRow[]; foodExpense: number; commonExpense: number; specialExpense: number; expenseTotal: number; billTotal: number; unallocated: number; pendingNotes: string[]; filename: string }
 
 /** Pure: the exact values shown on screen for the draft. */
 export function buildPoolingDraftPdfModel(result: PoolingResult, names: Record<string, string>, canteenName: string, asOf: string): DraftPdfModel {
   const month = monthLabel(result.year, result.month);
+  const summary = poolingExpenseSummaryPaise(result);
   const rows = result.lines.map(l => ({
     name: names[l.memberId] || 'Member',
     days: `${l.attendedDays}/${l.windowDays}`,
@@ -35,7 +36,12 @@ export function buildPoolingDraftPdfModel(result: PoolingResult, names: Record<s
   return {
     canteenName: canteenName || 'GoCanteen', month, asOf,
     title: 'POOLING BILL — DRAFT (NOT PUBLISHED)', subtitle: `${month} · Draft as of ${displayBusinessDate(asOf)}`,
-    rows, expenseTotal: poolingExpenseGrandTotalPaise(result), billTotal: rows.reduce((s, r) => s + r.total, 0), unallocated: result.unallocatedPaise,
+    rows,
+    foodExpense: summary.foodPaise,
+    commonExpense: summary.commonPaise,
+    specialExpense: summary.specialPaise,
+    expenseTotal: summary.totalPaise,
+    billTotal: rows.reduce((s, r) => s + r.total, 0), unallocated: result.unallocatedPaise,
     pendingNotes: (result.pendingSharedSpecials || []).map(p => `amount pending: ${p.itemName} (${p.date})`),
     filename: `GoCanteen-Pooling-Draft-${result.year}-${String(result.month).padStart(2, '0')}-asof-${asOf}.pdf`,
   };
@@ -91,10 +97,19 @@ export function renderPoolingDraftPdf(doc: any, m: DraftPdfModel, generatedAt: s
     lines.forEach((ls, j) => ls.forEach((line, k) => doc.text(line, xs[j] + 1, y + 3.5 + k * LINE)));
     doc.setDrawColor(220, 220, 220); doc.line(M, y + h, M + W, y + h); y += h;
   });
-  if (y + 22 > BOTTOM) { doc.addPage(); y = header(); }
+  const footerLines = [`Expenses: ${rsPdf(m.foodExpense ?? 0)}`];
+  if ((m.commonExpense || 0) > 0) footerLines.push(`Common bill: ${rsPdf(m.commonExpense)}`);
+  if ((m.specialExpense || 0) > 0) footerLines.push(`Special expenses: ${rsPdf(m.specialExpense)}`);
+  footerLines.push(`Total expenses: ${rsPdf(m.expenseTotal)}`);
+  const footerH = footerLines.length * 5 + 22;
+  if (y + footerH > BOTTOM) { doc.addPage(); y = header(); }
   doc.setFont('helvetica', 'bold'); doc.setFontSize(9); y += 6;
-  doc.text(`Total expenses: ${rsPdf(m.expenseTotal)}`, M, y); doc.text(`Bill total: ${rsPdf(m.billTotal)}`, M + W, y, { align: 'right' });
-  if (m.unallocated > 0) { y += 5; doc.text(`Unallocated: ${rsPdf(m.unallocated)}`, M, y); }
+  footerLines.forEach((line, i) => {
+    doc.text(line, M, y);
+    if (i === footerLines.length - 1) doc.text(`Bill total: ${rsPdf(m.billTotal)}`, M + W, y, { align: 'right' });
+    y += 5;
+  });
+  if (m.unallocated > 0) { doc.text(`Unallocated: ${rsPdf(m.unallocated)}`, M, y); y += 5; }
   for (const note of m.pendingNotes || []) { y += 5; if (y > BOTTOM) { doc.addPage(); y = header(); } doc.setTextColor(153, 27, 27); doc.text(note, M, y); doc.setTextColor(0, 0, 0); }
   y += 6; doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text('Draft — not published.', M, y);
   return doc;

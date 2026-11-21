@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computePoolingBills, normalizeBillingSettings, previousBillingPeriod, isCompletedPeriod, istBusinessDate, apportion, toPaise, DEFAULT_BILLING_SETTINGS } from '../supabase/functions/_shared/poolingBilling.ts';
+import { computePoolingBills, normalizeBillingSettings, previousBillingPeriod, isCompletedPeriod, istBusinessDate, apportion, toPaise, DEFAULT_BILLING_SETTINGS, poolingExpenseSummaryPaise } from '../supabase/functions/_shared/poolingBilling.ts';
 
 const d = (n: number) => `2026-09-${String(n).padStart(2, '0')}`;
 // Sept 2026: 30 days. Helper: member eats on given days.
@@ -709,4 +709,27 @@ test('shared-cost summaries are newest first and include per-member shares', () 
   }));
   assert.equal(pending.sharedSpecialSummaries[0].pending, true);
   assert.deepEqual(pending.sharedSpecialSummaries[0].shares, []);
+});
+
+test('expense summary is food-pool + Common bill + specials; total is X+Y+Z', () => {
+  const r = computePoolingBills(base({
+    expenses: [
+      { date: d(1), amountPaise: 325000, splitMode: 'eaters' },
+      { date: d(2), amountPaise: 100000, splitMode: 'all_members' },
+    ],
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))],
+    members: [{ memberId: 'A' }, { memberId: 'B' }, { memberId: 'C' }, { memberId: 'D' }],
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(10), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(10), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+    sharedSpecialCosts: [{ date: d(10), itemCode: 'biryani', totalPaise: 30000 }],
+  }));
+  const s = poolingExpenseSummaryPaise(r);
+  assert.equal(s.foodPaise, 325000);
+  assert.equal(s.commonPaise, 100000);
+  assert.equal(s.specialPaise, 30000);
+  assert.equal(s.totalPaise, 455000);
+  const billTotal = r.lines.reduce((n: number, l: any) => n + l.totalPaise, 0);
+  assert.equal(billTotal, s.totalPaise, 'bill total matches expenses+common+specials when there is no admin-added');
 });
