@@ -3,9 +3,10 @@ import{supabase,supabaseEnabled}from'../../supabase';
 import AsyncActionButton from'../common/AsyncActionButton';
 import{useBillingSettings}from'../../hooks/useBillingSettings';
 import{useAuth}from'../../context/AuthContext';
+import{COMMON_BILL_LABEL,ExpenseSplitMode,expenseSplitModeOrDefault}from'../../supabase/functions/_shared/poolingBilling';
 import{buildExpensesPdfModel,expensesPdfAdapter}from'../../utils/expensesPdf';
 
-interface Expense{id:string;expense_date:string;amount:number;description:string;added_by?:string;created_by?:string;category?:string}
+interface Expense{id:string;expense_date:string;amount:number;description:string;added_by?:string;created_by?:string;category?:string;split_mode?:ExpenseSplitMode}
 interface ExpenseMonth{key:string;year:number;month:number;label:string;items:Expense[];total:number}
 
 const MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -18,6 +19,7 @@ const Expenses:React.FC=()=>{
   const[items,setItems]=useState<Expense[]>([]);
   const[amount,setAmount]=useState('');
   const[description,setDescription]=useState('');
+  const[splitMode,setSplitMode]=useState<ExpenseSplitMode>('eaters');
   const[editing,setEditing]=useState<string|null>(null);
   const[busy,setBusy]=useState<string|null>(null);
   const[selectedMonth,setSelectedMonth]=useState<string|null>(null);
@@ -26,8 +28,8 @@ const Expenses:React.FC=()=>{
   const[pdfMessage,setPdfMessage]=useState('');
   const load=async()=>{
     if(!supabaseEnabled||!supabase)return;
-    const{data,error}=await supabase.from('expenses').select('id,expense_date,amount,description').order('expense_date',{ascending:false});
-    if(!error)setItems((data||[]).map((x:any)=>({...x,amount:Number(x.amount)})));
+    const{data,error}=await supabase.from('expenses').select('id,expense_date,amount,description,split_mode').order('expense_date',{ascending:false});
+    if(!error)setItems((data||[]).map((x:any)=>({...x,amount:Number(x.amount),split_mode:expenseSplitModeOrDefault(x.split_mode)})));
   };
   useEffect(()=>{void load()},[]);
   useEffect(()=>{
@@ -88,12 +90,13 @@ const Expenses:React.FC=()=>{
   ):null;
   const save=async()=>{
     if(busy||!supabaseEnabled||!supabase||!date||!amount)return;
-    const payload={expense_date:date,amount:Number(amount),description:description.trim()};
+    const payload:any={expense_date:date,amount:Number(amount),description:description.trim()};
+    if(pooling)payload.split_mode=splitMode;
     setBusy('save');
     try{
       const result=editing?await supabase.from('expenses').update(payload).eq('id',editing):await supabase.from('expenses').insert(payload);
       if(result.error)throw result.error;
-      setAmount('');setDescription('');setEditing(null);
+      setAmount('');setDescription('');setSplitMode('eaters');setEditing(null);
       await load();
       window.dispatchEvent(new Event('gocanteen:pooling-inputs-changed'));
     }catch(e){console.warn(e)}finally{setBusy(null)};
@@ -108,7 +111,15 @@ const Expenses:React.FC=()=>{
       window.dispatchEvent(new Event('gocanteen:pooling-inputs-changed'));
     }catch(e){console.warn(e)}finally{setBusy(null)};
   };
-  if(selected)return <div className="min-w-0"><button type="button" onClick={()=>setSelectedMonth(null)} className="mb-4 rounded-lg border px-3 py-2 text-sm font-medium">← Monthly Expense History</button>{pdfControls}<div className="rounded-lg border p-4"><h3 className="text-xl font-bold text-primary-900">{selected.label}</h3><p className="mt-1 text-sm text-gray-600">Expense Details</p><div className="mt-4 space-y-2">{selected.items.map(x=><div key={x.id} className="grid min-w-0 gap-1 rounded-lg border p-3 sm:grid-cols-[130px_minmax(0,1fr)_130px] sm:items-center"><div className="text-sm text-gray-600">{new Date(`${x.expense_date}T00:00:00`).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</div><div className="break-words font-medium">{x.description||'—'}</div><div className="font-semibold sm:text-right">₹{x.amount.toFixed(2)}</div><div className="flex gap-2 sm:col-span-3"><button disabled={Boolean(busy)} onClick={()=>{setEditing(x.id);setAmount(String(x.amount));setDescription(x.description);setDate(x.expense_date);setSelectedMonth(null)}} className="rounded border px-3 py-1.5 text-sm">Edit</button><AsyncActionButton loading={busy===`delete:${x.id}`} loadingLabel="Deleting…" disabled={Boolean(busy)&&busy!==`delete:${x.id}`} onClick={()=>void remove(x.id)} className="rounded border px-3 py-1.5 text-sm text-red-600">Delete</AsyncActionButton></div></div>)}</div><div className="mt-4 flex items-center justify-between border-t pt-4"><span className="font-semibold">Total Expenses</span><span className="text-lg font-bold">₹{selected.total.toFixed(2)}</span></div></div></div>;
-  return <div className="min-w-0"><h3 className="text-2xl font-bold text-primary-900">Expenses</h3><p className="mt-1 text-sm text-gray-600">Enter expenses by date.</p>{pdfControls}<div className="mt-4 rounded-lg border p-4"><h4 className="font-semibold text-gray-800">Add Expense</h4><div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="text-sm font-medium">Expense Date<input disabled={Boolean(busy)} type="date" value={date} onChange={e=>setDate(e.target.value||'')} className="mt-1 block w-full rounded-lg border p-2.5"/></label><input disabled={Boolean(busy)} type="number" min="0" step="0.01" placeholder="Amount" value={amount} onChange={e=>setAmount(e.target.value)} className="rounded-lg border p-2.5"/><input disabled={Boolean(busy)} placeholder="Description" value={description} onChange={e=>setDescription(e.target.value)} className="rounded-lg border p-2.5"/></div><AsyncActionButton type="button" loading={busy==='save'} loadingLabel={editing?'Updating…':'Adding…'} disabled={Boolean(busy)||!date||!amount} onClick={()=>void save()} className="mt-3 rounded-lg bg-primary-600 px-4 py-2.5 font-medium text-white shadow-sm">{editing?'Update':'Add'} Expense</AsyncActionButton>{editing&&<button type="button" onClick={()=>{setEditing(null);setAmount('');setDescription('');setDate('')}} className="ml-2 rounded-lg border px-4 py-2.5 text-sm">Cancel</button>}</div><div className="mt-6"><h4 className="text-xl font-bold text-primary-900">Monthly Expense History</h4>{months.length===0?<div className="mt-3 rounded-lg border p-4 text-sm text-gray-600">No expense history available.</div>:<div className="mt-3 space-y-2">{months.map(m=><button type="button" key={m.key} onClick={()=>setSelectedMonth(m.key)} className="block w-full rounded-lg border p-4 text-left transition hover:border-primary-300"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><div className="font-semibold text-gray-800">{m.label}</div><div className="text-sm text-gray-600">{m.items.length} expense {m.items.length===1?'entry':'entries'}</div></div><div className="font-bold text-gray-800">₹{m.total.toFixed(2)}</div></div></button>)}</div>}</div></div>;
+  if(selected)return <div className="min-w-0"><button type="button" onClick={()=>setSelectedMonth(null)} className="mb-4 rounded-lg border px-3 py-2 text-sm font-medium">← Monthly Expense History</button>{pdfControls}<div className="rounded-lg border p-4"><h3 className="text-xl font-bold text-primary-900">{selected.label}</h3><p className="mt-1 text-sm text-gray-600">Expense Details</p><div className="mt-4 space-y-2">{selected.items.map(x=><div key={x.id} className="grid min-w-0 gap-1 rounded-lg border p-3 sm:grid-cols-[130px_minmax(0,1fr)_130px] sm:items-center"><div className="text-sm text-gray-600">{new Date(`${x.expense_date}T00:00:00`).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</div><div className="break-words font-medium">{x.description||'—'}{pooling&&x.split_mode==='all_members'?<span className="ml-2 text-xs font-semibold text-primary-700">{COMMON_BILL_LABEL}</span>:null}</div><div className="font-semibold sm:text-right">₹{x.amount.toFixed(2)}</div><div className="flex gap-2 sm:col-span-3"><button disabled={Boolean(busy)} onClick={()=>{setEditing(x.id);setAmount(String(x.amount));setDescription(x.description);setSplitMode(expenseSplitModeOrDefault(x.split_mode));setDate(x.expense_date);setSelectedMonth(null)}} className="rounded border px-3 py-1.5 text-sm">Edit</button><AsyncActionButton loading={busy===`delete:${x.id}`} loadingLabel="Deleting…" disabled={Boolean(busy)&&busy!==`delete:${x.id}`} onClick={()=>void remove(x.id)} className="rounded border px-3 py-1.5 text-sm text-red-600">Delete</AsyncActionButton></div></div>)}</div><div className="mt-4 flex items-center justify-between border-t pt-4"><span className="font-semibold">Total Expenses</span><span className="text-lg font-bold">₹{selected.total.toFixed(2)}</span></div></div></div>;
+  return <div className="min-w-0"><h3 className="text-2xl font-bold text-primary-900">Expenses</h3><p className="mt-1 text-sm text-gray-600">Enter expenses by date.</p>{pdfControls}<div className="mt-4 rounded-lg border p-4"><h4 className="font-semibold text-gray-800">Add Expense</h4><div className="mt-3 grid gap-3 sm:grid-cols-3"><label className="text-sm font-medium">Expense Date<input disabled={Boolean(busy)} type="date" value={date} onChange={e=>setDate(e.target.value||'')} className="mt-1 block w-full rounded-lg border p-2.5"/></label><input disabled={Boolean(busy)} type="number" min="0" step="0.01" placeholder="Amount" value={amount} onChange={e=>setAmount(e.target.value)} className="rounded-lg border p-2.5"/><input disabled={Boolean(busy)} placeholder="Description" value={description} onChange={e=>setDescription(e.target.value)} className="rounded-lg border p-2.5"/></div>{pooling&&<div className="mt-3">
+        <div className="text-sm font-medium text-gray-700">Share among</div>
+        <div className="mt-2 flex gap-2 rounded-xl bg-gray-100 p-1" role="group" aria-label="Share among" data-testid="expense-split-mode">
+          <button type="button" disabled={Boolean(busy)} className={`min-h-11 flex-1 rounded-lg px-3 py-2 text-sm font-semibold ${splitMode==='eaters'?'bg-white text-primary-700 shadow-sm':'text-gray-600'}`} onClick={()=>setSplitMode('eaters')}>People who eat</button>
+          <button type="button" disabled={Boolean(busy)} className={`min-h-11 flex-1 rounded-lg px-3 py-2 text-sm font-semibold ${splitMode==='all_members'?'bg-white text-primary-700 shadow-sm':'text-gray-600'}`} onClick={()=>setSplitMode('all_members')}>{COMMON_BILL_LABEL} (all members)</button>
+        </div>
+        <p className="mt-1 text-xs text-gray-500">{splitMode==='all_members'?'Common bill is split equally among every member this month, including those who did not eat. It is not reduced by mess cut.':'This amount is shared among members by the days they are charged for food (the usual food pool).'}</p>
+      </div>}
+      <AsyncActionButton type="button" loading={busy==='save'} loadingLabel={editing?'Updating…':'Adding…'} disabled={Boolean(busy)||!date||!amount} onClick={()=>void save()} className="mt-3 rounded-lg bg-primary-600 px-4 py-2.5 font-medium text-white shadow-sm">{editing?'Update':'Add'} Expense</AsyncActionButton>{editing&&<button type="button" onClick={()=>{setEditing(null);setAmount('');setDescription('');setSplitMode('eaters');setDate('')}} className="ml-2 rounded-lg border px-4 py-2.5 text-sm">Cancel</button>}</div><div className="mt-6"><h4 className="text-xl font-bold text-primary-900">Monthly Expense History</h4>{months.length===0?<div className="mt-3 rounded-lg border p-4 text-sm text-gray-600">No expense history available.</div>:<div className="mt-3 space-y-2">{months.map(m=><button type="button" key={m.key} onClick={()=>setSelectedMonth(m.key)} className="block w-full rounded-lg border p-4 text-left transition hover:border-primary-300"><div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><div className="font-semibold text-gray-800">{m.label}</div><div className="text-sm text-gray-600">{m.items.length} expense {m.items.length===1?'entry':'entries'}</div></div><div className="font-bold text-gray-800">₹{m.total.toFixed(2)}</div></div></button>)}</div>}</div></div>;
 };
 export default Expenses;

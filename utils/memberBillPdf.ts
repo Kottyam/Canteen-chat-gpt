@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { deliverPdf } from './pdfLegacy';
+import { COMMON_BILL_LABEL } from '../supabase/functions/_shared/poolingBilling';
 import { formatSignedRupees } from './moneyDisplay';
 
 const BRAND_GREEN = [5, 150, 105] as const;
@@ -63,6 +64,7 @@ export interface MemberBillPdfBill {
   guest_food_total: number;
   admin_added_total: number;
   special_items_total?: number;
+  common_bill_total?: number;
   total: number;
   member_name_snapshot?: string | null;
   published?: boolean;
@@ -95,7 +97,7 @@ export interface MemberBillPdfModel {
   publishedTotal: number;
   reconciled: boolean;
   roundingAdjustment: number;
-  breakdown: { memberFood: number; guestFood: number; adminAdded: number; specials: number };
+  breakdown: { memberFood: number; guestFood: number; adminAdded: number; specials: number; commonBill: number };
   filename: string;
 }
 
@@ -229,6 +231,7 @@ export function buildMemberBillPdfModel(
       guestFood: money(bill.guest_food_total || 0),
       adminAdded: money(bill.admin_added_total || 0),
       specials: money(bill.special_items_total || 0),
+      commonBill: money(bill.common_bill_total || 0),
     },
     filename: `GoCanteen-Bill-${year}-${String(month).padStart(2, '0')}.pdf`,
   };
@@ -425,7 +428,7 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
   flush();
 
   if (model.billingModel === 'pooling') {
-    const boxH = 28 + (model.breakdown.specials ? 5 : 0) + (model.breakdown.guestFood ? 5 : 0);
+    const boxH = 28 + (model.breakdown.specials ? 5 : 0) + (model.breakdown.guestFood ? 5 : 0) + (model.breakdown.commonBill ? 5 : 0);
     if (y + boxH > PAGE_BOTTOM) newPage();
     y += 6;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
@@ -434,6 +437,7 @@ export function renderMemberBillPdf(doc: any, model: MemberBillPdfModel, generat
     doc.text(`Pool share: ${pdfMoney(model.breakdown.memberFood)}`, M, y); y += 5;
     if (model.breakdown.guestFood) { doc.text(`Guest share: ${pdfMoney(model.breakdown.guestFood)}`, M, y); y += 5; }
     if (model.breakdown.specials) { doc.text(`Special items: ${pdfMoney(model.breakdown.specials)}`, M, y); y += 5; }
+    if (model.breakdown.commonBill) { doc.text(`${COMMON_BILL_LABEL}: ${pdfMoney(model.breakdown.commonBill)}`, M, y); y += 5; }
     doc.text(`Admin added: ${pdfMoney(model.breakdown.adminAdded)}`, M, y); y += 5;
     doc.setFont('helvetica', 'bold');
     doc.text(`Grand total: ${pdfMoney(model.publishedTotal)}`, M, y); y += 6;

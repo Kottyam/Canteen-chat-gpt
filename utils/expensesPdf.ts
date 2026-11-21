@@ -19,6 +19,7 @@ export interface ExpensePdfItem {
   added_by?: string;
   created_by?: string;
   category?: string;
+  split_mode?: string;
 }
 export interface ExpensePdfRow { date: string; description: string; amount: number; addedBy?: string }
 export interface ExpensePdfModel {
@@ -39,7 +40,7 @@ export function buildExpensesPdfModel(canteenName: string, year: number, month: 
     .sort((a, b) => String(a.expense_date).localeCompare(String(b.expense_date)))
     .map(x => ({
       date: displayExpenseDate(x.expense_date),
-      description: (x.description || x.category || '').trim() || '—',
+      description: ((x.description || x.category || '').trim() || '—') + (x.split_mode === 'all_members' ? ' (Common bill)' : ''),
       amount: Number(x.amount) || 0,
       addedBy: (x.added_by || x.created_by || '').trim() || undefined,
     }));

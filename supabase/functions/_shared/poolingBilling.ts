@@ -21,11 +21,14 @@
 //           Shorter / scattered runs stay chargeable. Multiple qualifying runs each count.
 //           Holidays and weekly offs are skipped: they neither count as leave nor break a run.
 //           Threshold 0: same as 'any' (every no-order day is dropped).
-//  * Expense allocation (updated): the month's TOTAL expense is shared proportionally
-//    across members by their chargeable days (after mess cut). Total expense /
-//    total chargeable days * each member's chargeable days. No unallocated leftover
-//    unless there are zero chargeable days. A running-month draft (asOf) uses only
-//    elapsed operating days and expenses dated <= asOf.
+//  * Expense allocation (updated): 'eaters' (default) expenses — the month's food-pool
+//    total is shared proportionally across members by their chargeable days (after mess
+//    cut). 'all_members' expenses (Common bill) are combined and split equally among
+//    the monthly cohort (every employee whose membership overlaps the month, including
+//    zero-order and mid-month joiners/leavers; not admins or guests). Common bill is
+//    not reduced by mess cut. No unallocated leftover on the food pool unless there are
+//    zero chargeable days; Common bill is unallocated only if the cohort is empty.
+//    A running-month draft (asOf) uses only elapsed operating days and expenses dated <= asOf.
 //  * Special-item snapshots and Admin Added amounts are added on top (never deducted).
 //  * Rounding: exact fractional shares are computed, floored to paise and the
 //    remaining paise are given by largest remainder (members by memberId), so the
@@ -86,7 +89,14 @@ export function normalizeBillingSettings(row: any): CanteenBillingSettings {
   return { billingModel: model, messCutMinDays: days, messCutMode: mode, billSendMode: send };
 }
 
-export interface PoolingExpense { id?: string; date: string; amountPaise: number }
+export type ExpenseSplitMode = 'eaters' | 'all_members';
+export const COMMON_BILL_LABEL = 'Common bill';
+export const isValidExpenseSplitMode = (v: unknown): v is ExpenseSplitMode => v === 'eaters' || v === 'all_members';
+export function expenseSplitModeOrDefault(v: unknown): ExpenseSplitMode {
+  return isValidExpenseSplitMode(v) ? v : 'eaters';
+}
+
+export interface PoolingExpense { id?: string; date: string; amountPaise: number; splitMode?: ExpenseSplitMode }
 export interface PoolingOrder {
   memberId: string;
   date: string;
@@ -135,6 +145,7 @@ export interface PoolingLine {
   overheadSharePaise: number;
   sharePaise: number;
   adminAddedPaise: number;
+  allMembersSharePaise: number;
   totalPaise: number;
 }
 export interface PoolingResult {
@@ -146,6 +157,8 @@ export interface PoolingResult {
   messCutMode: MessCutMode;
   operatingDays: string[];
   expenseTotalPaise: number;
+  allMembersExpensePaise: number;
+  allMembersUnallocatedPaise: number;
   dailyExpensePaise: number;
   overheadExpensePaise: number;
   allocatedPaise: number;
@@ -183,6 +196,9 @@ export function toPaise(rupees: number | string | null | undefined): number {
   return Math.round(n * 100);
 }
 export const paiseToRupees = (p: number) => Math.round(p) / 100;
+/** Food-pool expenses plus Common bill expenses (for Total expenses display). */
+export const poolingExpenseGrandTotalPaise = (r: { expenseTotalPaise: number; allMembersExpensePaise?: number }) =>
+  Math.round(Number(r.expenseTotalPaise) || 0) + Math.round(Number(r.allMembersExpensePaise) || 0);
 
 /** Distribute `total` paise by exact weights; returns integers summing to total. */
 export function apportion(total: number, weights: Array<{ key: string; weight: number }>): Map<string, number> {
@@ -283,57 +299,60 @@ export function computePoolingBills(input: PoolingInput): PoolingResult {
       memberId: m.memberId, windowDays: window.length, attendedDays: att.length, absentDays: absent,
       messCutApplied: cut, excludedDays: excluded, chargeableDays: charge.size,
       dailySharePaise: 0, overheadSharePaise: 0, sharePaise: 0,
-      adminAddedPaise: Math.round(Number(m.adminAddedPaise) || 0), totalPaise: 0,
+      adminAddedPaise: Math.round(Number(m.adminAddedPaise) || 0), allMembersSharePaise: 0, totalPaise: 0,
       specialMemberPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.memberPaise) || 0)),
       specialGuestPaise: Math.max(0, Math.round(Number(input.specials?.[m.memberId]?.guestPaise) || 0)),
     });
   }
-  // expenses — proportional share by chargeable days (after mess cut).
-  // Total expense is divided by the sum of all members' chargeable days, then each member
-  // receives (their chargeable days / total chargeable days) * total expense.
-  // No unallocated unless there are zero chargeable days.
-  let total = 0;
+  // Food-pool ('eaters') expenses: proportional share by chargeable days (after mess cut).
+  // Common bill ('all_members') expenses: equal split among the monthly cohort; not mess-cut.
+  let eaterTotal = 0, commonTotal = 0;
   for (const e of input.expenses) {
     if (!inMonth(e.date)) continue;
     const a = Math.round(Number(e.amountPaise) || 0);
     if (a < 0) { warnings.push(`Negative expense ${e.id ?? e.date} ignored.`); issues.push(`A negative expense on ${e.date} was ignored. Fix it in Expenses.`); continue; }
-    total += a;
+    if (expenseSplitModeOrDefault(e.splitMode) === 'all_members') commonTotal += a;
+    else eaterTotal += a;
   }
   const totalChargeableDays = members.reduce((s, m) => s + (chargeable.get(m.memberId)?.size || 0), 0);
   let unallocated = 0;
   const exact = new Map<string, number>();
   if (totalChargeableDays === 0) {
-    unallocated = total;
+    unallocated = eaterTotal;
     members.forEach(m => exact.set(m.memberId, 0));
   } else {
     for (const m of members) {
       const days = chargeable.get(m.memberId)?.size || 0;
-      exact.set(m.memberId, (total * days) / totalChargeableDays);
+      exact.set(m.memberId, (eaterTotal * days) / totalChargeableDays);
     }
   }
   if (unallocated > 0) warnings.push('No chargeable days: amount left unallocated for admin review.');
-  const allocatable = total - unallocated;
+  const allocatable = eaterTotal - unallocated;
   const daily = allocatable, overhead = 0;
   const rounded = largestRemainder(allocatable, members.map(m => ({ key: m.memberId, v: exact.get(m.memberId)! })));
+  const commonShares = members.length ? apportion(commonTotal, members.map(m => ({ key: m.memberId, weight: 1 }))) : new Map<string, number>();
+  const commonUnallocated = members.length ? 0 : commonTotal;
+  if (commonUnallocated > 0) warnings.push('No members this month: Common bill left unallocated for admin review.');
   for (const m of members) {
     const l = lines.get(m.memberId)!;
     l.sharePaise = rounded.get(m.memberId) || 0;
     l.dailySharePaise = l.sharePaise;
     l.overheadSharePaise = 0;
-    const rawTotal = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0);
+    l.allMembersSharePaise = commonShares.get(m.memberId) || 0;
+    const rawTotal = l.sharePaise + l.adminAddedPaise + (l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) + l.allMembersSharePaise;
     if (rawTotal < 0) {
       warnings.push('A member\'s bill was clamped to Rs.0 because an admin deduction exceeded their unbilled share.');
       l.totalPaise = 0;
     } else l.totalPaise = rawTotal;
   }
   { const missing = Object.keys(input.specials || {}).filter(id => !lines.has(id) && ((input.specials![id].memberPaise || 0) + (input.specials![id].guestPaise || 0)) > 0).length;
-    if (missing) { const t = `Special item charges for ${missing} member${missing > 1 ? 's' : ''} without a membership record this month cannot be billed. Check the member list.`; warnings.push(t); issues.push(t); } }
-  if (!operating.length && total > 0) warnings.push('Every day of this month is marked as a holiday.');
+    if (missing) { const tmsg = `Special item charges for ${missing} member${missing > 1 ? 's' : ''} without a membership record this month cannot be billed. Check the member list.`; warnings.push(tmsg); issues.push(tmsg); } }
+  if (!operating.length && eaterTotal > 0) warnings.push('Every day of this month is marked as a holiday.');
   const emptyDays = operating.filter(date => !members.some(m => attended.get(m.memberId)?.has(date)));
   if (emptyDays.length) warnings.push(`No orders on ${emptyDays.length} day${emptyDays.length > 1 ? 's' : ''} (${emptyDays.map(x => Number(x.slice(8))).join(', ')}). If the mess was closed, mark them as holidays.`);
   return {
     year, month, periodStart: start, periodEnd: end, messCutMinDays: threshold, messCutMode: mode, operatingDays: operating,
-    expenseTotalPaise: total, dailyExpensePaise: daily, overheadExpensePaise: overhead,
+    expenseTotalPaise: eaterTotal, allMembersExpensePaise: commonTotal, allMembersUnallocatedPaise: commonUnallocated, dailyExpensePaise: daily, overheadExpensePaise: overhead,
     allocatedPaise: allocatable, unallocatedPaise: unallocated,
     lines: members.map(m => lines.get(m.memberId)!), warnings, issues,
   };

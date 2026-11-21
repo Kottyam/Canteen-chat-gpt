@@ -3,7 +3,7 @@ import AsyncActionButton from '../common/AsyncActionButton';
 import { useBillingSettings } from '../../hooks/useBillingSettings';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../supabase';
-import { PoolingResult, istBusinessDate, previousBillingPeriod, messCutAppliedLabel, MessCutMode } from '../../supabase/functions/_shared/poolingBilling';
+import { PoolingResult, istBusinessDate, previousBillingPeriod, messCutAppliedLabel, MessCutMode, COMMON_BILL_LABEL, poolingExpenseGrandTotalPaise } from '../../supabase/functions/_shared/poolingBilling';
 import { loadPoolingRun, previewPoolingBills, publishPoolingBill, savePoolingRun } from '../../services/poolingBills';
 import { buildPoolingDraftPdfModel, displayBusinessDate, monthLabel, poolingDraftPdfAdapter } from '../../utils/poolingDraftPdf';
 
@@ -57,10 +57,10 @@ const CurrentMonthDraft: React.FC<{ threshold: number; mode?: MessCutMode; cante
     {error && <div className="text-sm text-red-700">{error}</div>}
     {!r && loading && <div className="text-sm text-gray-600">Calculating…</div>}
     {r && <>
-      <div className="flex justify-between text-sm"><span>Expenses so far</span><b>{rs(r.expenseTotalPaise)}</b></div>
+      <div className="flex justify-between text-sm"><span>Expenses so far</span><b>{rs(poolingExpenseGrandTotalPaise(r))}</b></div>
       <div className="divide-y text-sm">{r.lines.map(l => <div key={l.memberId} data-draft-member={l.memberId} className="grid gap-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{draft!.names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, r.messCutMode || 'any', 'short')}` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, r.messCutMode || 'any', 'short')}` : ''}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}</div></div>
         <div className="text-right font-bold">{rs(l.totalPaise)}</div>
       </div>)}</div>
     </>}
@@ -131,13 +131,13 @@ const PoolingMonthlyBills: React.FC = () => {
     {busy === 'load' && !result && <div className="rounded-xl border bg-gray-50 p-4 text-sm text-gray-600">Calculating…</div>}
     {result && <>
       <div className="grid gap-2 rounded-2xl border bg-white p-4 text-sm shadow-sm sm:grid-cols-2">
-        <div className="flex justify-between"><span>Total expenses</span><b>{rs(result.expenseTotalPaise)}</b></div>
+        <div className="flex justify-between"><span>Total expenses</span><b>{rs(poolingExpenseGrandTotalPaise(result))}</b></div>
         {result.unallocatedPaise > 0 && <div className="flex justify-between text-red-700 sm:col-span-2"><span>Unallocated (needs review)</span><b>{rs(result.unallocatedPaise)}</b></div>}
         {(result.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700 sm:col-span-2">{w}</div>)}
       </div>
       <div className="space-y-2">{result.lines.map(l => <div key={l.memberId} className="grid gap-1 rounded-xl border bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{names[l.memberId] || 'Member'}</div>
-          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, result.messCutMode || 'any', 'long')}` : ''} · Charged days {l.chargeableDays}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}</div></div>
+          <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, result.messCutMode || 'any', 'long')}` : ''} · Charged days {l.chargeableDays}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}</div></div>
         <div className="text-right"><div className="text-lg font-bold">{rs(publishedTotal(l.memberId) ?? l.totalPaise)}</div>{sentFor(l.memberId) && <div className="text-xs font-semibold text-primary-700">Published</div>}</div>
       </div>)}</div>
       <div className="flex flex-wrap gap-2">

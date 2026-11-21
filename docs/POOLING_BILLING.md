@@ -18,7 +18,7 @@ If the table/row does not exist the app behaves exactly as today.
 * Monthly Reports shows the **Pooling bill** screen instead of the standard report.
 
 ### Accounting model
-Source of money = the canteen's existing **Expenses** records for the month (`expenses.canteen_id`, `expense_date` in month, amount > 0). Menu prices / order revenue are not used. Additional revenue is not subtracted.
+Source of money = the canteen's existing **Expenses** records for the month (`expenses.canteen_id`, `expense_date` in month, amount > 0). By default each expense is in the food pool (`split_mode='eaters'`). An expense marked **Common bill** (`all_members`) is split equally among all members instead. Menu prices / order revenue are not used. Additional revenue is not subtracted.
 1. **Operating day** = every day of the month that is not an admin-declared holiday or recurring weekly off (Holiday Management). Closure is **never inferred** from "nobody ordered": such a day is a no-order day for every member (the pooling screen warns, so the admin can mark it as a holiday if the mess was closed).
 2. **Member window** = operating days from the member's join date (`profiles.created_at`, IST) to month end. Deleted members are excluded.
 3. **No-order days** = window operating days without a consumed order (cumulative, not continuous; several orders on a date = 1 day; cancelled and guest-only orders don't count).
@@ -28,6 +28,7 @@ Source of money = the canteen's existing **Expenses** records for the month (`ex
 7. A day where nobody is chargeable, or a month without operating days, is **not** moved to other members: that amount is shown as **Unallocated** for admin review.
 8. Integer paise, largest-remainder rounding (per-day amounts by date, member shares by member id): shares + unallocated sum exactly to the expense total.
 9. Admin-added amounts (`employee_adjustments`) and special-item snapshot charges (member + guest) are added to that member only, on top of the pool share; never deducted from expenses.
+9b. **Common bill** (`expenses.split_mode='all_members'`): one or more such expenses in the month are combined and split **equally** among the monthly pooling cohort (every employee whose membership overlaps the month, including members who did not eat and mid-month joiners/leavers; not admins or guests). This share is **not** reduced by mess cut. The UI label everywhere is "Common bill". Default for new and existing expenses is `eaters` (the usual food pool). Standard billing ignores the flag. A member whose food share is 0 can still be billed and published if their Common bill share is greater than 0.
 11. Attendance comes from the member's orders whoever placed them (the member or an admin on their behalf); cancelled, empty and guest-only orders are not attendance.
 10. Guests: guest items do not create attendance and are not charged separately; their cost is inside the pooled expenses. (Decision for owner — see PR.)
 
