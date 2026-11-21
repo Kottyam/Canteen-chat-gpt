@@ -116,10 +116,13 @@ export interface SharedSpecialCost { date: string; itemCode: string; itemName?: 
 /** One row per member who ordered a shared-cost special (qty ignored; guest items count as that member). */
 export interface SharedSpecialOrder { memberId: string; date: string; itemCode: string; itemName?: string }
 export interface SharedSpecialPending { date: string; itemCode: string; itemName: string; memberIds: string[]; memberCount: number }
+export interface SharedSpecialShare { memberId: string; paise: number }
 export interface SharedSpecialSummary {
   date: string; itemCode: string; itemName: string;
   memberIds: string[]; memberCount: number;
   totalPaise: number | null; pending: boolean;
+  /** Present when a total has been entered and there are members to charge; amounts use the same equal split as the bill. */
+  shares?: SharedSpecialShare[];
 }
 export interface SpecialLine { label: string; paise: number; itemCode?: string; date?: string }
 
@@ -310,7 +313,7 @@ export function allocateSharedSpecials(
     const cost = costMap.get(key);
     if (!cost) {
       pending.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length });
-      summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length, totalPaise: null, pending: true });
+      summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length, totalPaise: null, pending: true, shares: [] });
       const who = participants.length === 1 ? '1 member' : `${participants.length} members`;
       const msg = `Shared cost pending for ${sharedSpecialLineLabel(name, g.date)} (${who}). Enter the total before publishing those bills.`;
       issues.push(msg);
@@ -318,12 +321,13 @@ export function allocateSharedSpecials(
     }
     if (!participants.length) {
       unallocatedPaise += cost.totalPaise;
-      summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: [], memberCount: 0, totalPaise: cost.totalPaise, pending: false });
+      summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: [], memberCount: 0, totalPaise: cost.totalPaise, pending: false, shares: [] });
       warnings.push(`Shared cost for ${sharedSpecialLineLabel(name, g.date)} has no members to charge; left unallocated.`);
       continue;
     }
-    summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length, totalPaise: cost.totalPaise, pending: false });
     const shares = apportion(cost.totalPaise, participants.map(id => ({ key: id, weight: 1 })));
+    const shareRows = participants.map(id => ({ memberId: id, paise: shares.get(id) || 0 }));
+    summaries.push({ date: g.date, itemCode: g.itemCode, itemName: name, memberIds: participants, memberCount: participants.length, totalPaise: cost.totalPaise, pending: false, shares: shareRows });
     const label = sharedSpecialLineLabel(name, g.date);
     for (const id of participants) {
       const paise = shares.get(id) || 0;
@@ -336,10 +340,10 @@ export function allocateSharedSpecials(
   for (const leftover of [...costMap.values()].sort((a, b) => a.date < b.date ? -1 : a.date === b.date ? a.itemCode.localeCompare(b.itemCode) : 1)) {
     unallocatedPaise += leftover.totalPaise;
     const name = leftover.itemName || leftover.itemCode;
-    summaries.push({ date: leftover.date, itemCode: leftover.itemCode, itemName: name, memberIds: [], memberCount: 0, totalPaise: leftover.totalPaise, pending: false });
+    summaries.push({ date: leftover.date, itemCode: leftover.itemCode, itemName: name, memberIds: [], memberCount: 0, totalPaise: leftover.totalPaise, pending: false, shares: [] });
     warnings.push(`Shared cost for ${sharedSpecialLineLabel(name, leftover.date)} has no members to charge; left unallocated.`);
   }
-  summaries.sort((a, b) => a.date.localeCompare(b.date) || a.itemCode.localeCompare(b.itemCode) || a.itemName.localeCompare(b.itemName));
+  summaries.sort((a, b) => b.date.localeCompare(a.date) || a.itemCode.localeCompare(b.itemCode) || a.itemName.localeCompare(b.itemName));
   return { byMember, pending, summaries, unallocatedPaise, warnings, issues };
 }
 

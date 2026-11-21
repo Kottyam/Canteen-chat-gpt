@@ -680,3 +680,33 @@ test('shared cost is separate from Common bill and the food pool', () => {
   assert.equal(line(r, 'A').totalPaise, 500 + 300 + 200);
   assert.equal(r.unallocatedPaise, 0);
 });
+
+test('shared-cost summaries are newest first and include per-member shares', () => {
+  const r = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 0 }],
+    orders: [...orders('A', range(1, 30)), ...orders('B', range(1, 30))],
+    sharedSpecialOrders: [
+      { memberId: 'A', date: d(5), itemCode: 'fish', itemName: 'Fish' },
+      { memberId: 'B', date: d(5), itemCode: 'fish', itemName: 'Fish' },
+      { memberId: 'A', date: d(20), itemCode: 'biryani', itemName: 'Biryani' },
+      { memberId: 'B', date: d(20), itemCode: 'biryani', itemName: 'Biryani' },
+    ],
+    sharedSpecialCosts: [
+      { date: d(5), itemCode: 'fish', totalPaise: 1000 },
+      { date: d(20), itemCode: 'biryani', totalPaise: 1001 },
+    ],
+  }));
+  assert.deepEqual(r.sharedSpecialSummaries.map((s: any) => s.date), [d(20), d(5)]);
+  const biryani = r.sharedSpecialSummaries[0];
+  assert.equal(biryani.itemName, 'Biryani');
+  assert.equal(biryani.totalPaise, 1001);
+  assert.deepEqual(biryani.shares.map((x: any) => x.paise).sort((a: number, b: number) => b - a), [501, 500]);
+  assert.equal(biryani.shares.reduce((s: number, x: any) => s + x.paise, 0), 1001);
+  const pending = computePoolingBills(base({
+    expenses: [{ date: d(1), amountPaise: 0 }],
+    orders: [...orders('A', range(1, 30))],
+    sharedSpecialOrders: [{ memberId: 'A', date: d(8), itemCode: 'fish', itemName: 'Fish' }],
+  }));
+  assert.equal(pending.sharedSpecialSummaries[0].pending, true);
+  assert.deepEqual(pending.sharedSpecialSummaries[0].shares, []);
+});
