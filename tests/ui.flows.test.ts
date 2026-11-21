@@ -5,6 +5,8 @@ import { build } from 'esbuild';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { Window } from 'happy-dom';
+import { jsPDF } from 'jspdf';
+import { readFileSync } from 'node:fs';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 const out = path.join(here, '../node_modules/.cache/gc-ui/entry.mjs');
@@ -1148,6 +1150,113 @@ test('Pooling current month: pending shared cost shows amount pending; saving th
   assert.deepEqual(rpcs('set_pooling_special_shared_cost'), [{ p_date: cd(1), p_item_code: 'biryani', p_total_paise: 1000 }]);
 });
 
+function persistSharedCosts() {
+  fakeDb.rpcHandlers.set_pooling_special_shared_cost = (args: any) => {
+    const rows = (fakeDb.db.pooling_special_shared_costs ||= []);
+    const i = rows.findIndex((r: any) => r.special_date === args.p_date && r.item_code === args.p_item_code);
+    if (args.p_total_paise == null) { if (i >= 0) rows.splice(i, 1); }
+    else {
+      const row = { canteen_id: 'c1', special_date: args.p_date, item_code: args.p_item_code, total_paise: args.p_total_paise };
+      if (i >= 0) rows[i] = row; else rows.push(row);
+    }
+    return { data: null, error: null };
+  };
+}
+function sharedSection(host: any) { return host.querySelector('section[aria-label="Shared cost specials"]'); }
+
+test('Shared cost specials lists newest date first, total above each member share', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { cd } = seedCurrentMonth(); asAdmin(); pooling(); persistSharedCosts();
+  // second date in the current month (after day 1)
+  const asOf = M.istBusinessDate(new Date()); const day = Number(asOf.slice(-2));
+  const dOld = cd(1); const dNew = cd(day);
+  fakeDb.db.orders.push(
+    { id: 'sh-old', employee_id: 'mA', ordered_for: dOld, status: 'active', order_items: [{ item_source: 'employee', item_code: 'fish', item_name: 'Fish', quantity: 1, pooling_special: true, pooling_special_pricing_mode: 'shared' }] },
+    { id: 'sh-old-b', employee_id: 'mB', ordered_for: dOld, status: 'active', order_items: [{ item_source: 'employee', item_code: 'fish', item_name: 'Fish', quantity: 1, pooling_special: true, pooling_special_pricing_mode: 'shared' }] },
+    { id: 'sh-new', employee_id: 'mA', ordered_for: dNew, status: 'active', order_items: [{ item_source: 'employee', item_code: 'biryani', item_name: 'Biryani', quantity: 1, pooling_special: true, pooling_special_pricing_mode: 'shared' }] },
+  );
+  fakeDb.db.pooling_special_shared_costs = [
+    { canteen_id: 'c1', special_date: dOld, item_code: 'fish', total_paise: 1000 },
+    { canteen_id: 'c1', special_date: dNew, item_code: 'biryani', total_paise: 2000 },
+  ];
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  const s = sharedSection(host)!; assert.ok(s);
+  const text = s.textContent || '';
+  assert.match(text, /Shared cost specials/);
+  const biryaniAt = text.indexOf('Biryani'); const fishAt = text.indexOf('Fish');
+  assert.ok(biryaniAt >= 0 && fishAt >= 0 && biryaniAt < fishAt, 'newest (today\'s Biryani) is listed above the earlier Fish');
+  const card = [...s.querySelectorAll('.rounded-xl.border')].find((el: any) => /Fish/.test(el.textContent || ''));
+  assert.ok(card);
+  const ct = card!.textContent || '';
+  assert.match(ct, /₹10\.00/);
+  assert.match(ct, /Anu₹5\.00/);
+  assert.match(ct, /Biju₹5\.00/);
+  assert.ok(ct.indexOf('₹10.00') < ct.indexOf('Anu'), 'total is shown before the member breakdown');
+  assert.equal(card!.querySelector('input'), null, 'saved total is not an always-editable field');
+  assert.ok(byText(card, 'button', /^Edit$/));
+  assert.ok(byText(card, 'button', /^Delete$/));
+});
+
+test('after saving a Shared cost total, Edit then Save/Cancel; Delete returns to amount pending', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { cd } = seedCurrentMonth(); asAdmin(); pooling(); persistSharedCosts();
+  fakeDb.db.orders.push({
+    id: 'shared1', employee_id: 'mA', ordered_for: cd(1), status: 'active',
+    order_items: [{ item_source: 'employee', item_code: 'biryani', item_name: 'Biryani', quantity: 2, pooling_special: true, pooling_special_unit_paise: null, pooling_special_pricing_mode: 'shared' }],
+  });
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  let s = sharedSection(host)!;
+  assert.match(s.textContent, /amount pending/);
+  assert.match(s.textContent, /Anu—/);
+  const input = host.querySelector('input[aria-label="Total for Biryani on ' + cd(1) + '"]');
+  await type(input, '10');
+  await click(byText(s, 'button', /^Save total$/)); await wait(400); await tick(10);
+  s = sharedSection(host)!;
+  assert.match(s.textContent, /₹10\.00/);
+  assert.match(s.textContent, /Anu₹10\.00/);
+  assert.equal(s.querySelector('input'), null);
+  assert.deepEqual(rpcs('set_pooling_special_shared_cost'), [{ p_date: cd(1), p_item_code: 'biryani', p_total_paise: 1000 }]);
+  // Cancel leaves the saved total in place
+  await click(byText(s, 'button', /^Edit$/));
+  assert.ok(host.querySelector('input[aria-label="Total for Biryani on ' + cd(1) + '"]'));
+  await click(byText(s, 'button', /^Cancel$/)); await tick();
+  s = sharedSection(host)!;
+  assert.equal(s.querySelector('input'), null);
+  assert.match(s.textContent, /₹10\.00/);
+  // Edit and save a new total
+  await click(byText(s, 'button', /^Edit$/));
+  await type(host.querySelector('input[aria-label="Total for Biryani on ' + cd(1) + '"]'), '20');
+  await click(byText(s, 'button', /^Save$/)); await wait(400); await tick(10);
+  s = sharedSection(host)!;
+  assert.match(s.textContent, /₹20\.00/);
+  assert.deepEqual(rpcs('set_pooling_special_shared_cost').at(-1), { p_date: cd(1), p_item_code: 'biryani', p_total_paise: 2000 });
+  // Delete (confirm is stubbed true)
+  await click(byText(s, 'button', /^Delete$/)); await wait(400); await tick(10);
+  s = sharedSection(host)!;
+  assert.match(s.textContent, /amount pending/);
+  assert.deepEqual(rpcs('set_pooling_special_shared_cost').at(-1), { p_date: cd(1), p_item_code: 'biryani', p_total_paise: null });
+  assert.ok(s.querySelector('input[aria-label="Total for Biryani on ' + cd(1) + '"]'));
+  assert.equal(byText(s, 'button', /^Edit$/), undefined);
+});
+
+test('published previous month locks Shared cost totals: no Edit, Delete, or input', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); asAdmin(); pooling();
+  const { year, month } = (() => { const d = new Date(); const m = d.getMonth(); return m === 0 ? { year: d.getFullYear() - 1, month: 12 } : { year: d.getFullYear(), month: m }; })();
+  const day = (n: number) => `${year}-${String(month).padStart(2, '0')}-${String(n).padStart(2, '0')}`;
+  fakeDb.db.orders.push({
+    id: 'prev-sh', employee_id: 'mA', ordered_for: day(10), status: 'active',
+    order_items: [{ item_source: 'employee', item_code: 'biryani', item_name: 'Biryani', quantity: 1, pooling_special: true, pooling_special_pricing_mode: 'shared' }],
+  });
+  fakeDb.db.pooling_special_shared_costs = [{ canteen_id: 'c1', special_date: day(10), item_code: 'biryani', total_paise: 1500 }];
+  fakeDb.db.pooling_bill_runs = [{ id: 'run1', status: 'published', bill_year: year, bill_month: month, pooling_bill_lines: [] }];
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  await click(byText(host, 'button', /^Previous Month$/)); await tick(10);
+  const s = sharedSection(host)!; assert.ok(s);
+  assert.match(s.textContent, /₹15\.00/);
+  assert.equal(s.querySelector('input'), null);
+  assert.equal(byText(s, 'button', /^Edit$/), undefined);
+  assert.equal(byText(s, 'button', /^Delete$/), undefined);
+  assert.equal(byText(s, 'button', /^Save total$/), undefined);
+});
+
 test('Bills screen lists a named Shared cost special line separate from Special items', async () => {
   fakeDb.reset();
   auth.user = { id: 'mid-1', name: 'Anu', role: 'employee' };
@@ -1177,4 +1286,84 @@ test('Pooling Billing Mode keeps Guest orders; Standard Billing Mode does not sh
   const s = await mount(createElement(M.BillingModeSettings)); await tick();
   assert.doesNotMatch(s.host.textContent, /Guest orders/);
   assert.match(s.host.textContent, /Billing Model/);
+});
+
+
+test('Mess cut PDF label is short and no longer uses "Yes (N consecutive)"', () => {
+  assert.equal(M.messCutPdfLabel(false, 7, 'consecutive'), 'No');
+  assert.equal(M.messCutPdfLabel(true, 7, 'consecutive'), 'Yes · 7 consec.');
+  assert.equal(M.messCutPdfLabel(true, 7, 'any'), 'Yes · 7 days');
+  assert.equal(M.messCutPdfLabel(true, 31, 'consecutive'), 'Yes · 31 consec.');
+});
+
+test('Pooling draft PDF: Mess cut and money columns never overlap, including long names, 31-day cut, large amounts, and Common bill', () => {
+  const row = (over: any = {}) => ({
+    name: 'Anu', days: '14/21', messCut: M.messCutPdfLabel(true, 7, 'consecutive'),
+    share: 123400, commonBill: 0, special: 2500, adminAdded: 5000, total: 130900, ...over,
+  });
+  const baseRows = [
+    row({ name: 'ANANDHU KRISHNA', share: 185000, total: 192500 }),
+    row({ name: 'Biju', messCut: M.messCutPdfLabel(false, 0, 'consecutive'), share: 210050, special: 0, adminAdded: 0, total: 210050 }),
+    row({ name: 'Member with a remarkably long display name that must wrap inside the Member column', messCut: M.messCutPdfLabel(true, 31, 'consecutive'), share: 999999, special: 0, adminAdded: 123456, total: 1123455, specialPending: true }),
+  ];
+  const record = (doc: any) => {
+    const placed: { t: string; x: number; y: number; w: number; align?: string }[] = [];
+    const orig = doc.text.bind(doc);
+    doc.text = (t: any, x: number, y: number, opts?: any) => {
+      const lines = Array.isArray(t) ? t : [String(t)];
+      lines.forEach((line: string, i: number) => {
+        const w = doc.getTextWidth(line);
+        let left = x;
+        if (opts?.align === 'center') left = x - w / 2;
+        if (opts?.align === 'right') left = x - w;
+        placed.push({ t: line, x: left, y: y + i * 4.6, w, align: opts?.align });
+      });
+      return orig(t, x, y, opts);
+    };
+    return placed;
+  };
+  const assertNoOverlap = (placed: any[], label: string) => {
+    const table = placed.filter((p: any) => p.y >= 44 && p.y < 275);
+    for (let i = 0; i < table.length; i++) for (let j = i + 1; j < table.length; j++) {
+      const a = table[i], b = table[j];
+      if (Math.abs(a.y - b.y) > 1.2) continue;
+      const gap = Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w);
+      assert.ok(gap >= -0.15, `${label}: "${a.t}" overlaps "${b.t}" by ${(-gap).toFixed(2)}mm at y=${a.y.toFixed(1)}`);
+    }
+    for (const p of table) {
+      assert.ok(p.x + p.w <= 12 + 186 + 0.2, `${label}: "${p.t}" overflows the right margin (ends at ${(p.x + p.w).toFixed(2)})`);
+      assert.ok(p.x >= 11.5, `${label}: "${p.t}" overflows the left margin`);
+    }
+  };
+  for (const showCommon of [false, true]) {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const placed = record(doc);
+    const rows = baseRows.map(r => ({ ...r, commonBill: showCommon ? 4500 : 0 }));
+    const m = {
+      canteenName: 'Kochi Canteen', month: 'November 2026', asOf: '2026-11-21',
+      title: 'POOLING BILL — DRAFT (NOT PUBLISHED)', subtitle: 'November 2026 · Draft as of 21 Nov 2026',
+      rows, expenseTotal: 300000, billTotal: 535005, unallocated: 0, pendingNotes: [], filename: 'draft.pdf',
+    };
+    M.renderPoolingDraftPdf(doc, m, '21 Nov 2026, 8:00 pm');
+    assert.ok(placed.some((p: any) => p.t === 'Yes · 7 consec.' || p.t === 'Yes · 31 consec.' || String(p.t).startsWith('Yes · ')));
+    assert.ok(!placed.some((p: any) => /\(\d+ consecutive\)/.test(p.t)));
+    assertNoOverlap(placed, showCommon ? 'common' : 'base');
+    const { cols, xs } = M.poolingDraftPdfLayout(showCommon);
+    assert.equal(cols.reduce((s: number, w: number) => s + w, 0), 186);
+    const skip = /^(Total expenses|Bill total|Unallocated|Draft —|amount pending:|Generated)/;
+    const body = placed.filter((p: any) => p.y >= 52 && p.y < 270 && p.align == null && !skip.test(p.t));
+    for (const p of body) {
+      const col = xs.findIndex((x: number, i: number) => p.x + 0.05 >= x && p.x < x + cols[i]);
+      if (col < 0) continue;
+      const right = xs[col] + cols[col];
+      assert.ok(p.x + p.w <= right + 0.2, `${showCommon ? 'common' : 'base'} "${p.t}" (${(p.x + p.w).toFixed(2)}) overflows column ${col} (right ${right})`);
+    }
+  }
+});
+
+test('member bill PDF is a stacked breakdown, not a Mess cut / Pool share table', () => {
+  const src = readFileSync(new URL('../utils/memberBillPdf.ts', import.meta.url), 'utf8');
+  assert.match(src, /Pool share:/);
+  assert.doesNotMatch(src, /'Mess cut'/);
+  assert.doesNotMatch(src, /Yes \(\d+ consecutive\)/);
 });

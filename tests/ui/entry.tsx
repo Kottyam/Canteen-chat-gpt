@@ -16,7 +16,7 @@ export { default as PoolingMonthlyBills } from '../../components/admin/PoolingMo
 export { default as MonthlyReport } from '../../components/admin/MonthlyReport';
 export { default as Expenses } from '../../components/admin/Expenses';
 export { POOLING_INPUTS_CHANGED } from '../../components/admin/PoolingMonthlyBills';
-export { poolingDraftPdfAdapter, renderPoolingDraftPdf, buildPoolingDraftPdfModel, displayBusinessDate } from '../../utils/poolingDraftPdf';
+export { poolingDraftPdfAdapter, renderPoolingDraftPdf, buildPoolingDraftPdfModel, displayBusinessDate, messCutPdfLabel, poolingDraftPdfLayout, rsPdf } from '../../utils/poolingDraftPdf';
 export { expensesPdfAdapter, renderExpensesPdf, buildExpensesPdfModel } from '../../utils/expensesPdf';
 export { istBusinessDate } from '../../supabase/functions/_shared/poolingBilling';
 export { SplashScreen as AppLoadingScreen, AppContent } from '../../App';

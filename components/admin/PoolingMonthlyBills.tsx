@@ -15,11 +15,16 @@ const DRAFT_TABLES = ['expenses', 'employee_adjustments', 'orders', 'order_items
 const rs = (p: number) => `₹${(p / 100).toFixed(2)}`;
 
 
-const SharedSpecialCostsEditor: React.FC<{ summaries: SharedSpecialSummary[]; onChanged: () => void; disabled?: boolean }> = ({ summaries, onChanged, disabled }) => {
+const sortSharedSpecials = (summaries: SharedSpecialSummary[]) =>
+  [...summaries].sort((a, b) => b.date.localeCompare(a.date) || a.itemCode.localeCompare(b.itemCode) || a.itemName.localeCompare(b.itemName));
+
+const SharedSpecialCostsEditor: React.FC<{ summaries: SharedSpecialSummary[]; names?: Record<string, string>; onChanged: () => void; disabled?: boolean }> = ({ summaries, names = {}, onChanged, disabled }) => {
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<Record<string, boolean>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState('');
-  if (!summaries.length) return null;
+  const list = sortSharedSpecials(summaries);
+  if (!list.length) return null;
   const keyOf = (s: SharedSpecialSummary) => `${s.date}::${s.itemCode}`;
   const save = async (s: SharedSpecialSummary) => {
     const k = keyOf(s);
@@ -31,28 +36,68 @@ const SharedSpecialCostsEditor: React.FC<{ summaries: SharedSpecialSummary[]; on
       if (paise == null) throw new Error('Enter the total cost.');
       await savePoolingSpecialSharedCost(s.date, s.itemCode, paise);
       setDraft(p => { const n = { ...p }; delete n[k]; return n; });
+      setEditing(p => ({ ...p, [k]: false }));
       window.dispatchEvent(new Event(POOLING_INPUTS_CHANGED));
       onChanged();
     } catch (e: any) { setError(e?.message || 'Could not save the total.'); }
     finally { setBusyKey(null); }
   };
+  const cancelEdit = (s: SharedSpecialSummary) => {
+    const k = keyOf(s);
+    setDraft(p => { const n = { ...p }; delete n[k]; return n; });
+    setEditing(p => ({ ...p, [k]: false }));
+  };
+  const remove = async (s: SharedSpecialSummary) => {
+    const k = keyOf(s);
+    if (disabled || busyKey) return;
+    if (!window.confirm(`Delete the saved total for ${sharedSpecialLineLabel(s.itemName, s.date)}? It will go back to amount pending.`)) return;
+    setBusyKey(k); setError('');
+    try {
+      await savePoolingSpecialSharedCost(s.date, s.itemCode, null);
+      setDraft(p => { const n = { ...p }; delete n[k]; return n; });
+      setEditing(p => ({ ...p, [k]: false }));
+      window.dispatchEvent(new Event(POOLING_INPUTS_CHANGED));
+      onChanged();
+    } catch (e: any) { setError(e?.message || 'Could not delete the total.'); }
+    finally { setBusyKey(null); }
+  };
+  const membersOf = (s: SharedSpecialSummary) => {
+    const rows = (s.shares && s.shares.length)
+      ? s.shares.map(r => ({ name: names[r.memberId] || 'Member', paise: r.paise as number | null }))
+      : (s.memberIds || []).map(id => ({ name: names[id] || 'Member', paise: null as number | null }));
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  };
   return <section aria-label="Shared cost specials" className="rounded-2xl border bg-white p-4 shadow-sm space-y-3">
     <div className="font-bold text-primary-900">Shared cost specials</div>
     <p className="text-xs text-gray-600">Enter the total after buying. It is split equally among the members who ordered that special (one share each, not by quantity).</p>
     {error && <div className="text-sm text-red-700">{error}</div>}
-    <div className="space-y-3">{summaries.map(s => {
+    <div className="space-y-3">{list.map(s => {
       const k = keyOf(s);
       const who = s.memberCount === 1 ? '1 member' : `${s.memberCount} members`;
-      return <div key={k} className="grid gap-2 rounded-xl border p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <div className="min-w-0">
-          <div className="font-semibold text-gray-800">{sharedSpecialLineLabel(s.itemName, s.date)}</div>
-          <div className="text-sm text-gray-600">{who}{s.pending ? ' · amount pending' : (s.totalPaise != null ? ` · ${rs(s.totalPaise)}` : '')}</div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+      const isEditing = Boolean(editing[k]);
+      const showField = s.pending || isEditing;
+      const members = membersOf(s);
+      return <div key={k} className="space-y-2 rounded-xl border p-3">
+        <div className="font-semibold text-gray-800">{sharedSpecialLineLabel(s.itemName, s.date)}</div>
+        {s.pending
+          ? <div className="text-sm font-semibold text-amber-700">amount pending</div>
+          : !isEditing && s.totalPaise != null
+            ? <div className="text-lg font-bold text-gray-900" aria-label={`Saved total for ${s.itemName} on ${s.date}`}>{rs(s.totalPaise)}</div>
+            : null}
+        {showField && !disabled && <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-[8rem] flex-1"><span className="flex min-h-11 items-center rounded-l-lg border border-r-0 bg-gray-50 px-2 text-gray-600">₹</span>
-            <input type="text" inputMode="decimal" aria-label={`Total for ${s.itemName} on ${s.date}`} disabled={disabled || busyKey === k} value={draft[k] ?? (s.pending || s.totalPaise == null ? '' : String((s.totalPaise || 0) / 100))} onChange={e => setDraft(p => ({ ...p, [k]: e.target.value }))} placeholder="Total" className="min-h-11 w-full rounded-r-lg border px-3 text-sm text-right"/></div>
-          <AsyncActionButton type="button" loading={busyKey === k} loadingLabel="Saving…" disabled={Boolean(disabled || (busyKey && busyKey !== k))} onClick={() => void save(s)} className="min-h-11 rounded-lg border border-primary-600 px-3 text-sm font-semibold text-primary-700">Save total</AsyncActionButton>
-        </div>
+            <input type="text" inputMode="decimal" aria-label={`Total for ${s.itemName} on ${s.date}`} disabled={busyKey === k} value={draft[k] ?? (s.pending || s.totalPaise == null ? '' : String((s.totalPaise || 0) / 100))} onChange={e => setDraft(p => ({ ...p, [k]: e.target.value }))} placeholder="Total" className="min-h-11 w-full rounded-r-lg border px-3 text-sm text-right"/></div>
+          <AsyncActionButton type="button" loading={busyKey === k} loadingLabel="Saving…" disabled={Boolean(busyKey && busyKey !== k)} onClick={() => void save(s)} className="min-h-11 rounded-lg border border-primary-600 px-3 text-sm font-semibold text-primary-700">{isEditing ? 'Save' : 'Save total'}</AsyncActionButton>
+          {isEditing && <button type="button" disabled={Boolean(busyKey)} onClick={() => cancelEdit(s)} className="min-h-11 rounded-lg border px-3 text-sm font-semibold text-gray-700">Cancel</button>}
+        </div>}
+        {!s.pending && !isEditing && !disabled && <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={Boolean(busyKey)} onClick={() => setEditing(p => ({ ...p, [k]: true }))} className="min-h-11 rounded-lg border border-primary-600 px-3 text-sm font-semibold text-primary-700">Edit</button>
+          <AsyncActionButton type="button" loading={busyKey === k} loadingLabel="Deleting…" disabled={Boolean(busyKey && busyKey !== k)} onClick={() => void remove(s)} className="min-h-11 rounded-lg border border-red-600 px-3 text-sm font-semibold text-red-700">Delete</AsyncActionButton>
+        </div>}
+        <div className="text-sm text-gray-600">{who}</div>
+        {members.length > 0 && <ul className="space-y-1 text-sm text-gray-700" aria-label={`Members for ${s.itemName} on ${s.date}`}>
+          {members.map((m, i) => <li key={`${k}-${m.name}-${i}`} className="flex justify-between gap-3"><span className="min-w-0 break-words">{m.name}</span><span className="shrink-0 font-semibold">{m.paise == null ? '—' : rs(m.paise)}</span></li>)}
+        </ul>}
       </div>;
     })}</div>
   </section>;
@@ -110,7 +155,7 @@ const CurrentMonthDraft: React.FC<{ threshold: number; mode?: MessCutMode; cante
           <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, r.messCutMode || 'any', 'short')}` : ''}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{(l.specialLines || []).map(s => ` · ${s.label} ${rs(s.paise)}`).join('')}{l.specialPending ? ' · amount pending' : ''}</div></div>
         <div className="text-right font-bold">{rs(l.totalPaise)}</div>
       </div>)}</div>
-      <SharedSpecialCostsEditor summaries={r.sharedSpecialSummaries || []} onChanged={() => void load()} disabled={loading}/>
+      <SharedSpecialCostsEditor summaries={r.sharedSpecialSummaries || []} names={draft!.names} onChanged={() => void load()} disabled={loading}/>
     </>}
   </section>;
 };
@@ -184,7 +229,7 @@ const PoolingMonthlyBills: React.FC = () => {
         {result.unallocatedPaise > 0 && <div className="flex justify-between text-red-700 sm:col-span-2"><span>Unallocated (needs review)</span><b>{rs(result.unallocatedPaise)}</b></div>}
         {(result.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700 sm:col-span-2">{w}</div>)}
       </div>
-      <SharedSpecialCostsEditor summaries={result.sharedSpecialSummaries || []} onChanged={() => void refresh()} disabled={Boolean(busy) || run?.status === 'published'}/>
+      <SharedSpecialCostsEditor summaries={result.sharedSpecialSummaries || []} names={names} onChanged={() => void refresh()} disabled={Boolean(busy) || run?.status === 'published'}/>
       <div className="space-y-2">{result.lines.map(l => <div key={l.memberId} className="grid gap-1 rounded-xl border bg-white p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{names[l.memberId] || 'Member'}</div>
           <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} days · No-order {l.absentDays}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, result.messCutMode || 'any', 'long')}` : ''} · Charged days {l.chargeableDays}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{l.specialMemberPaise ? ` · Special items ${rs(l.specialMemberPaise)}` : ''}{l.specialGuestPaise ? ` · Guest special items ${rs(l.specialGuestPaise)}` : ''}{(l.specialLines || []).map(s => ` · ${s.label} ${rs(s.paise)}`).join('')}{l.specialPending ? ' · amount pending' : ''}</div></div>
