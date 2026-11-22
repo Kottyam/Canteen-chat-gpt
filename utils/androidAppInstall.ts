@@ -1,5 +1,16 @@
 export const ANDROID_PACKAGE_ID='com.gocanteen.app';
+/** Official Play listing. Kept so we can restore Play buttons later. */
 export const PLAY_STORE_URL=`https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE_ID}`;
+/** Direct APK served at /GoCanteen.apk (baked from GitHub android-latest on each web build). */
+export const APK_DOWNLOAD_HREF='/GoCanteen.apk';
+/**
+ * Temporary: Play Store may lag the sideloaded v365 APK, so the website offers the APK.
+ * Set to true to restore "Get it on Google Play" links without other code changes.
+ */
+export const PREFER_PLAY_STORE=false;
+export const androidAppInstallOffer=PREFER_PLAY_STORE
+  ?{href:PLAY_STORE_URL,label:'Get it on Google Play',download:undefined as string|undefined,newTab:true}
+  :{href:APK_DOWNLOAD_HREF,label:'Download Android app',download:'GoCanteen.apk',newTab:false};
 export const APK_DOWNLOADED_KEY='gocanteen-apk-downloaded';
 
 export type RelatedAppsStatus='installed'|'not_installed'|'unknown';
