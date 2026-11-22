@@ -1091,31 +1091,31 @@ test('member Bills: optional UPI reference before I Have Paid; sent only when fi
   assert.match(pv, /Member UPI ref:/); assert.match(pv, /clipboard\.writeText\(p\.member_upi_reference\)/);
 });
 
-test('website points Android users to Google Play (no APK download button)', async () => {
+test('website offers the Android APK download (Play Store listing kept for a later switch)', async () => {
   fakeDb.reset();
   try { localStorage.removeItem('gocanteen-apk-downloaded'); localStorage.removeItem('gocanteen-install-dismissed-until'); } catch {}
-  const PLAY = 'https://play.google.com/store/apps/details?id=com.gocanteen.app';
   const login = (await mount(createElement(M.Login))).host;
   await tick(5);
-  const a = login.querySelector('[data-testid="login-play-store"]') as any;
-  assert.ok(a, 'login shows Google Play link');
-  assert.equal(a.getAttribute('href'), PLAY); assert.equal(a.getAttribute('target'), '_blank');
-  assert.match(a.textContent || '', /Get it on Google Play/);
-  assert.equal(login.querySelector('a[href$=".apk"], a[download]'), null, 'no APK download link on login');
-  assert.doesNotMatch(login.textContent || '', /Download Android app/);
+  const a = login.querySelector('[data-testid="login-apk-download"]') as any;
+  assert.ok(a, 'login shows APK download');
+  assert.equal(a.getAttribute('href'), '/GoCanteen.apk');
+  assert.equal(a.getAttribute('download'), 'GoCanteen.apk');
+  assert.match(a.textContent || '', /Download Android app/);
+  assert.equal(login.querySelector('[data-testid="login-play-store"], a[href*="play.google.com"]'), null, 'no Play Store button on login');
   const ip = (await mount(createElement(M.InstallPrompt))).host;
   await tick(5);
-  const b = ip.querySelector('[data-testid="install-prompt-play-store"]') as any;
-  assert.ok(b, 'install prompt shows Google Play link');
-  assert.equal(b.getAttribute('href'), PLAY); assert.equal(b.getAttribute('target'), '_blank');
-  assert.equal(ip.querySelector('a[href$=".apk"], a[download]'), null, 'no APK download link in install prompt');
-  assert.doesNotMatch(ip.textContent || '', /APK/);
+  const b = ip.querySelector('[data-testid="install-prompt-apk"]') as any;
+  assert.ok(b, 'install prompt shows APK download');
+  assert.equal(b.getAttribute('href'), '/GoCanteen.apk');
+  assert.equal(b.getAttribute('download'), 'GoCanteen.apk');
+  assert.match(b.textContent || '', /Download Android app/);
+  assert.equal(ip.querySelector('[data-testid="install-prompt-play-store"], a[href*="play.google.com"]'), null, 'no Play Store button in install prompt');
   (win as any).Capacitor = { isNativePlatform: () => true };
   try {
     const nl = (await mount(createElement(M.Login))).host; await tick(5);
-    assert.equal(nl.querySelector('[data-testid="login-play-store"]'), null, 'hidden inside the native app');
+    assert.equal(nl.querySelector('[data-testid="login-apk-download"], [data-testid="login-play-store"]'), null, 'hidden inside the native app');
     const np = (await mount(createElement(M.InstallPrompt))).host; await tick(5);
-    assert.equal(np.querySelector('[data-testid="install-prompt-play-store"]'), null, 'install prompt hidden inside the native app');
+    assert.equal(np.querySelector('[data-testid="install-prompt-apk"], [data-testid="install-prompt-play-store"]'), null, 'install prompt hidden inside the native app');
   } finally { delete (win as any).Capacitor; }
 });
 
