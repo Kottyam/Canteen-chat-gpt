@@ -1801,8 +1801,12 @@ test('Login redesign (presentation only): labelled member mobile+password first,
   const land: any = host.querySelector('[data-testid="login-landing"]');
   assert.match(land.className, /\bbg-white\b/);
   assert.match(host.textContent || '', /Member sign in/i);
-  assert.equal(host.querySelector('label[for="login-user-id"]')?.textContent, 'Mobile number');
-  assert.equal(host.querySelector('label[for="login-password"]')?.textContent, 'Password');
+  assert.equal(host.querySelector('label[for="login-user-id"]'), null);
+  assert.equal(host.querySelector('label[for="login-password"]'), null);
+  assert.equal(host.querySelector('#login-user-id')?.getAttribute('aria-label'), 'Mobile number');
+  assert.equal(host.querySelector('#login-password')?.getAttribute('aria-label'), 'Password');
+  assert.equal(host.querySelector('#login-user-id')?.getAttribute('placeholder'), 'Mobile Number');
+  assert.equal(host.querySelector('#login-password')?.getAttribute('placeholder'), 'Password');
   assert.match(host.textContent || '', /Canteen admin\? Sign in with Google/);
   assert.ok(byText(host, 'button', /Continue with Google/));
   assert.ok(byText(host, 'button', /^Sign in$/));
@@ -1812,7 +1816,7 @@ test('Login redesign (presentation only): labelled member mobile+password first,
   const html = host.innerHTML; assert.ok(html.indexOf('login-user-id') < html.indexOf('Continue with Google'));
   // Super Admin 5-digit ID switches the label/placeholder (existing rule unchanged)
   await type(host.querySelector('#login-user-id'), '12345');
-  assert.equal(host.querySelector('label[for="login-user-id"]')?.textContent, 'Admin User ID');
+  assert.equal(host.querySelector('#login-user-id')?.getAttribute('aria-label'), 'Admin User ID');
   assert.equal(host.querySelector('#login-user-id').getAttribute('placeholder'), 'Admin User ID');
 });
 
