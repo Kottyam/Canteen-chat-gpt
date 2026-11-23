@@ -1851,7 +1851,8 @@ test('Admin Home (Overview top): order-for day stats, kitchen totals, payments w
   const { host, root } = await mount(createElement(M.AdminHome, { available: all, onAction: (a: string) => actions.push(a) }));
   await tick(10);
   assert.match(host.querySelector('[data-testid="admin-home-day"]')?.textContent || '', /Showing tomorrow/);
-  assert.match(host.textContent || '', /Good (morning|afternoon|evening), Priya/);
+  assert.match(host.textContent || '', /Good (morning|afternoon|evening), Sunrise Canteen/);
+  assert.doesNotMatch(host.textContent || '', /Good (morning|afternoon|evening), Priya/);
   const orders = host.querySelector('[data-testid="admin-home-orders"]')?.textContent || '';
   assert.match(orders, /Tomorrow’s orders/); assert.match(orders, /2 \/ 3/); // cancelled + today orders excluded
   assert.match(host.querySelector('[data-testid="admin-home-kitchen"]')?.textContent || '', /Kitchen tomorrow6items/); // meals 1+1+2 guests, fish 2
