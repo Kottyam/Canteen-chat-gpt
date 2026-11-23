@@ -1545,7 +1545,7 @@ test('SuperAdmin can create a PER_MEMBER plan, assign to canteen with 100 active
   assert.match(cuText, /₹20\.00 × 125 active members/);
 });
 
-test('Member Home redesign: calm header, cutoff countdown, Today/Tomorrow switch, View/Cancel, Bill Pay now, Menu/Specials, Notices, inline InstallPrompt, Profile Logout', async () => {
+test('Member Home redesign: calm header, cutoff countdown, order-for day only, View/Cancel, Bill Pay now, Menu/Specials, Notices, inline InstallPrompt, Profile Logout', async () => {
   fakeDb.reset();
   standard();
   auth.user = {
@@ -1654,12 +1654,18 @@ test('Member Home redesign: calm header, cutoff countdown, Today/Tomorrow switch
   assert.equal(byText(headerEl, 'button', /Logout/), undefined);
   assert.ok(headerEl.querySelector('button[aria-label="Profile"]'));
 
-  // Greeting, cutoff banner, ordered meal with View + Cancel
+  // Greeting, cutoff banner, ordered meal with View + Cancel — no Today/Tomorrow switch
   const txt = host.textContent || '';
   assert.match(txt, /Good (morning|afternoon|evening), Arjun Menon/);
   assert.match(host.querySelector('[data-testid="home-cutoff-banner"]')?.textContent || '', /Today’s orders close at 11:59 pm/);
   const mealCard = host.querySelector('[data-testid="home-meal-card"]');
   assert.ok(mealCard);
+  assert.equal(mealCard.querySelector('[role="tablist"]'), null);
+  assert.equal(byText(mealCard, 'button', /^Today$/), undefined);
+  assert.equal(byText(mealCard, 'button', /^Tomorrow$/), undefined);
+  assert.match(mealCard.textContent || '', /Today’s meal/);
+  assert.match(mealCard.querySelector('[data-testid="home-meal-date"]')?.textContent || '', /\d/);
+  assert.doesNotMatch(mealCard.textContent || '', /Tomorrow’s meal/);
   assert.match(mealCard.textContent || '', /Ordered/);
   assert.match(mealCard.textContent || '', /Meals · Fish Fry × 2/);
   assert.ok(byText(mealCard, 'button', /^View order$/));
@@ -1673,13 +1679,16 @@ test('Member Home redesign: calm header, cutoff countdown, Today/Tomorrow switch
   assert.match(billCard.textContent || '', /₹1,240/);
   assert.ok(byText(billCard, 'button', /^Pay now$/));
 
-  // Today's menu with prices in standard mode
+  // Today's menu with prices in standard mode (follows order-for day)
   const menuCard = host.querySelector('[data-testid="home-menu-card"]');
   assert.ok(menuCard);
+  assert.match(menuCard.textContent || '', /Today’s menu/);
+  assert.doesNotMatch(menuCard.textContent || '', /Tomorrow’s menu/);
   assert.match(menuCard.textContent || '', /Meals.*₹60/);
 
-  // Notices: Holiday tomorrow + Open poll
-  assert.match(host.querySelector('[data-testid="home-holiday-notice"]')?.textContent || '', /Holiday tomorrow/);
+  // Notices follow the same order-for day: tomorrow being a holiday is NOT shown when ordering for today.
+  // Open poll remains visible.
+  assert.equal(host.querySelector('[data-testid="home-holiday-notice"]'), null);
   const pollNotice = host.querySelector('[data-testid="home-poll-notice"]');
   assert.ok(pollNotice);
   assert.match(pollNotice.textContent || '', /Friday special preference\?/);
@@ -1693,15 +1702,7 @@ test('Member Home redesign: calm header, cutoff countdown, Today/Tomorrow switch
   assert.ok(nav);
   assert.equal(nav.querySelectorAll('button').length, 4);
 
-  // Switch to Tomorrow tab -> shows Tomorrow holiday status and hides Cancel order
-  await click(byText(mealCard, 'button', /^Tomorrow$/));
-  await tick(4);
-  assert.match(host.querySelector('[data-testid="home-meal-status"]')?.textContent || '', /Holiday/);
-  assert.equal(byText(host.querySelector('[data-testid="home-meal-card"]'), 'button', /^Cancel order$/), undefined);
-
-  // Switch back to Today and cancel order while window is open
-  await click(byText(host.querySelector('[data-testid="home-meal-card"]'), 'button', /^Today$/));
-  await tick(4);
+  // Cancel the current order-for (today) order while the window is open
   fakeDb.rpcHandlers.cancel_order_source = () => ({ data: null });
   await click(byText(host.querySelector('[data-testid="home-meal-card"]'), 'button', /^Cancel order$/));
   await tick(6);
@@ -1721,8 +1722,55 @@ test('Member Home redesign: calm header, cutoff countdown, Today/Tomorrow switch
 
   await act(async () => root.unmount());
 
+  // When the canteen's order mode is tomorrow, Home shows only tomorrow (no Today tab)
+  fakeDb.db.order_window_settings = [
+    { enabled: true, start_time: '06:00', end_time: '23:59', order_for: 'tomorrow' },
+  ];
+  fakeDb.db.weekly_menu = [
+    { weekday: weekday(tmrStr), item_code: 'biryani', item_name: 'Chicken Biryani', unit_price: 80, active: true },
+  ];
+  data.orders = [];
+  const tmr = await mount(createElement(M.EmployeeDashboard));
+  await tick(10);
+  const tmrMeal = tmr.host.querySelector('[data-testid="home-meal-card"]');
+  const tmrMenu = tmr.host.querySelector('[data-testid="home-menu-card"]');
+  assert.ok(tmrMeal);
+  assert.ok(tmrMenu);
+  assert.equal(tmrMeal.querySelector('[role="tablist"]'), null);
+  assert.equal(byText(tmrMeal, 'button', /^Today$/), undefined);
+  assert.equal(byText(tmrMeal, 'button', /^Tomorrow$/), undefined);
+  assert.match(tmrMeal.textContent || '', /Tomorrow’s meal/);
+  assert.doesNotMatch(tmrMeal.textContent || '', /Today’s meal/);
+  assert.match(tmr.host.querySelector('[data-testid="home-cutoff-banner"]')?.textContent || '', /Tomorrow’s orders close at 11:59 pm|Tomorrow is a holiday/);
+  assert.match(tmr.host.querySelector('[data-testid="home-meal-status"]')?.textContent || '', /Holiday/);
+  assert.match(tmr.host.querySelector('[data-testid="home-holiday-notice"]')?.textContent || '', /Holiday tomorrow/);
+  assert.match(tmrMenu.textContent || '', /Tomorrow’s menu/);
+  assert.match(tmrMenu.textContent || '', /Chicken Biryani/);
+  assert.doesNotMatch(tmrMenu.textContent || '', /Today’s menu/);
+  assert.equal(byText(tmrMeal, 'button', /^Cancel order$/), undefined);
+  await act(async () => tmr.root.unmount());
+
   // When order window is closed, Cancel order is NOT shown on Home; pooling hides regular prices
   pooling();
+  fakeDb.db.order_window_settings = [
+    { enabled: true, start_time: '06:00', end_time: '23:59', order_for: 'today' },
+  ];
+  fakeDb.db.weekly_menu = [
+    { weekday: weekday(todayStr), item_code: 'meals', item_name: 'Meals', unit_price: 60, active: true },
+    { weekday: weekday(todayStr), item_code: 'fish', item_name: 'Fish Fry', unit_price: 45, active: true },
+  ];
+  data.orders = [
+    {
+      id: 'ord-today',
+      employeeId: 'M001',
+      date: todayStr,
+      items: { meals: true, fish: true },
+      itemQuantities: { meals: 1, fish: 2 },
+      itemNames: { meals: 'Meals', fish: 'Fish Fry' },
+      status: 'active',
+      orderSource: 'employee',
+    },
+  ];
   fakeDb.rpcHandlers.employee_order_window_open = () => ({ data: false });
   const closed = await mount(createElement(M.EmployeeDashboard));
   await tick(10);
