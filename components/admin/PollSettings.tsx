@@ -11,7 +11,7 @@ const PollSettings: React.FC = () => {
   const [questions, setQuestions] = useState<PollQuestion[]>([{ id: 'q1', text: '', options: ['', ''], allowMultiple: false }]);
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
-  const [enabled, setEnabled] = useState(false);
+  const [enabled, setEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -49,7 +49,7 @@ const PollSettings: React.FC = () => {
     setBusy(true); setMsg('');
     try {
       await savePoll({ title: title.trim(), questions: clean, startsAt: new Date(startsAt).toISOString(), endsAt: new Date(endsAt).toISOString(), enabled });
-      setTitle(''); setQuestions([{ id: `q${Date.now()}`, text: '', options: ['', ''], allowMultiple: false }]); setStartsAt(''); setEndsAt(''); setEnabled(false);
+      setTitle(''); setQuestions([{ id: `q${Date.now()}`, text: '', options: ['', ''], allowMultiple: false }]); setStartsAt(''); setEndsAt(''); setEnabled(true);
       await refresh();
       setMsg('Poll saved.');
     } catch (e: any) {

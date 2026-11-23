@@ -569,6 +569,52 @@ test('admin Poll settings still list ended polls and their results download', as
   assert.match(h.textContent, /Download Results PDF/);
 });
 
+test('admin create-poll form defaults to On; admin can still switch Off; save sends enabled true', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'O1', identityId: 'o1', name: 'Owner', role: 'admin', canteenId: 'can1' };
+  auth.perms = ['payments'];
+  fakeDb.setAuthUid('o1');
+  fakeDb.db.profiles = [{ id: 'o1', canteen_id: 'can1', role: 'admin' }];
+  fakeDb.db.polls = [];
+  const { host } = await mount(createElement(M.PollSettings));
+  await tick(6);
+  const onBtn = byText(host, 'button', /^On$/);
+  const offBtn = byText(host, 'button', /^Off$/);
+  assert.ok(onBtn); assert.ok(offBtn);
+  assert.match(onBtn.className, /bg-white/);
+  assert.match(onBtn.className, /text-primary-700/);
+  assert.doesNotMatch(offBtn.className, /bg-white text-primary-700/);
+  // Admin can still switch Off, then back On
+  await click(offBtn); await tick(2);
+  assert.match(offBtn.className, /bg-white/);
+  assert.doesNotMatch(onBtn.className, /bg-white text-primary-700/);
+  await click(onBtn); await tick(2);
+  assert.match(onBtn.className, /bg-white/);
+  // Save a new poll without touching Off — payload is enabled: true
+  const title: any = host.querySelector('input[placeholder="Poll title"]');
+  const q: any = host.querySelector('input[placeholder="Question text"]');
+  const opts = host.querySelectorAll('input[placeholder^="Option"]');
+  await type(title, 'Lunch preference');
+  await type(q, 'What should we serve?');
+  await type(opts[0], 'Fish');
+  await type(opts[1], 'Chicken');
+  const times = host.querySelectorAll('input[type="datetime-local"]');
+  await type(times[0], '2026-11-24T09:00');
+  await type(times[1], '2026-11-24T18:00');
+  await click(byText(host, 'button', /^Save Poll$/));
+  await tick(8);
+  const inserts = fakeDb.calls.filter((c: any) => c.table === 'polls' && (c.ops || []).some((o: any) => o[0] === 'insert'));
+  assert.ok(inserts.length >= 1);
+  const row = inserts.at(-1).ops.find((o: any) => o[0] === 'insert')[1][0];
+  const rec = Array.isArray(row) ? row[0] : row;
+  assert.equal(rec.enabled, true);
+  assert.equal(rec.title, 'Lunch preference');
+  // After save, the next create form is still defaulted to On
+  assert.match(byText(host, 'button', /^On$/).className, /bg-white/);
+  assert.match(byText(host, 'button', /^On$/).className, /text-primary-700/);
+});
+
+
 test('admin can download an ended poll results PDF through the shared deliverPdf path (web + Android), read-only', async () => {
   seedPolls(); auth.user = { id: 'O1', name: 'Owner', role: 'admin', canteenName: 'Kochi' }; auth.perms = ['payments'];
   fakeDb.db.poll_responses = [
