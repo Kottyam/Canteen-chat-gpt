@@ -1792,3 +1792,108 @@ test('Member Home redesign: calm header, cutoff countdown, order-for day only, V
   await tick(4);
   assert.ok(byText(admHeader.host, 'button', /^Logout$/));
 });
+
+test('Login redesign (presentation only): labelled member mobile+password first, quiet admin Google, APK card, Super Admin ID label', async () => {
+  fakeDb.reset(); auth.user = null;
+  try { localStorage.removeItem('gocanteen-apk-downloaded'); } catch {}
+  const { host } = await mount(createElement(M.Login));
+  await tick(5);
+  const land: any = host.querySelector('[data-testid="login-landing"]');
+  assert.match(land.className, /\bbg-white\b/);
+  assert.match(host.textContent || '', /Member sign in/i);
+  assert.equal(host.querySelector('label[for="login-user-id"]')?.textContent, 'Mobile number');
+  assert.equal(host.querySelector('label[for="login-password"]')?.textContent, 'Password');
+  assert.match(host.textContent || '', /Canteen admin\? Sign in with Google/);
+  assert.ok(byText(host, 'button', /Continue with Google/));
+  assert.ok(byText(host, 'button', /^Sign in$/));
+  const card = host.querySelector('[data-testid="login-apk-card"]');
+  assert.ok(card); assert.ok(card.querySelector('[data-testid="login-apk-download"]'));
+  // Member form comes before the Google admin option
+  const html = host.innerHTML; assert.ok(html.indexOf('login-user-id') < html.indexOf('Continue with Google'));
+  // Super Admin 5-digit ID switches the label/placeholder (existing rule unchanged)
+  await type(host.querySelector('#login-user-id'), '12345');
+  assert.equal(host.querySelector('label[for="login-user-id"]')?.textContent, 'Admin User ID');
+  assert.equal(host.querySelector('#login-user-id').getAttribute('placeholder'), 'Admin User ID');
+});
+
+test('Admin Home (Overview top): order-for day stats, kitchen totals, payments waiting, bill status, permission-gated quick actions', async () => {
+  fakeDb.reset(); standard();
+  auth.user = { id: 'A1', identityId: 'a1', name: 'Priya Nair', role: 'admin', canteenName: 'Sunrise Canteen' };
+  auth.perms = ['dashboard', 'orders', 'daily_reports', 'expenses', 'monthly_reports', 'payments', 'members'];
+  const fmtIst = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  const todayStr = fmtIst(new Date()); const [yy, mm, dd] = todayStr.split('-').map(Number);
+  const tmrStr = fmtIst(new Date(Date.UTC(yy, mm - 1, dd + 1, 12)));
+  fakeDb.db.order_window_settings = [{ enabled: true, start_time: '06:00', end_time: '23:59', order_for: 'tomorrow' }];
+  data.users = [
+    { id: 'M1', identityId: 'u1', name: 'Anu', role: 'employee', status: 'active' },
+    { id: 'M2', identityId: 'u2', name: 'Biju', role: 'employee', status: 'active' },
+    { id: 'M3', identityId: 'u3', name: 'Cini', role: 'employee', status: 'active' },
+  ];
+  data.menuItems = [{ itemCode: 'meals', itemName: 'Meals', unitPrice: 60, active: true }, { itemCode: 'fish', itemName: 'Fish curry', unitPrice: 40, active: true }];
+  data.orders = [
+    { id: 'o1', employeeId: 'M1', memberIdentityId: 'u1', date: tmrStr, items: { meals: true, fish: true }, itemQuantities: { meals: 1, fish: 2 }, status: 'active' },
+    { id: 'o2', employeeId: 'M2', memberIdentityId: 'u2', date: tmrStr, items: { meals: true }, guestItems: { meals: true }, guestItemQuantities: { meals: 2 }, status: 'active' },
+    { id: 'o3', employeeId: 'M3', memberIdentityId: 'u3', date: todayStr, items: { meals: true }, status: 'active' },
+    { id: 'o4', employeeId: 'M3', memberIdentityId: 'u3', date: tmrStr, items: { meals: true }, status: 'cancelled' },
+  ];
+  const now = new Date(); const curM = Number(todayStr.slice(5, 7)); const curY = Number(todayStr.slice(0, 4));
+  const prevM = curM === 1 ? 12 : curM - 1; const prevY = curM === 1 ? curY - 1 : curY;
+  fakeDb.db.monthly_bills = [
+    { id: 'b-cur', employee_id: 'u1', bill_month: curM, bill_year: curY, total: 100, published: true },
+    { id: 'b-prev', employee_id: 'u1', bill_month: prevM, bill_year: prevY, total: 100, published: false },
+  ];
+  fakeDb.db.bill_payments = [
+    { id: 'p1', bill_id: 'b-cur', amount: 100, status: 'pending_verification', created_at: now.toISOString() },
+    { id: 'p2', bill_id: 'b-cur', amount: 50, status: 'paid', created_at: now.toISOString() },
+  ];
+  const actions: string[] = [];
+  const all = { 'place-order': true, kitchen: true, expense: true, bills: true, payments: true };
+  const { host, root } = await mount(createElement(M.AdminHome, { available: all, onAction: (a: string) => actions.push(a) }));
+  await tick(10);
+  assert.match(host.querySelector('[data-testid="admin-home-day"]')?.textContent || '', /Showing tomorrow/);
+  assert.match(host.textContent || '', /Good (morning|afternoon|evening), Priya/);
+  const orders = host.querySelector('[data-testid="admin-home-orders"]')?.textContent || '';
+  assert.match(orders, /Tomorrow’s orders/); assert.match(orders, /2 \/ 3/); // cancelled + today orders excluded
+  assert.match(host.querySelector('[data-testid="admin-home-kitchen"]')?.textContent || '', /Kitchen tomorrow6items/); // meals 1+1+2 guests, fish 2
+  const list = host.querySelector('[data-testid="admin-home-kitchen-list"]')?.textContent || '';
+  assert.match(list, /Meals4/); assert.match(list, /Fish curry2/);
+  assert.match(host.querySelector('[data-testid="admin-home-payments"]')?.textContent || '', /Payments to check1waiting/);
+  assert.match(host.querySelector('[data-testid="admin-home-bills"]')?.textContent || '', /Draft/);
+  assert.equal(host.querySelector('[role="tablist"]'), null); // no Today/Tomorrow switch
+  for (const [re, key] of [[/Place an order/, 'place-order'], [/Kitchen list/, 'kitchen'], [/Add an expense/, 'expense'], [/bills$/, 'bills'], [/Review 1 payment/, 'payments']] as const) {
+    await click(byText(host.querySelector('[data-testid="admin-home-actions"]'), 'button', re as RegExp));
+    assert.equal(actions.at(-1), key);
+  }
+  // No writes from the read-only Home
+  assert.equal(fakeDb.calls.filter((c: any) => c.rpc || (c.kind && c.kind !== 'select')).length, 0);
+  await act(async () => root.unmount());
+
+  // Permission-gated: no payments/bills permission -> those cards and actions hidden
+  const limited = await mount(createElement(M.AdminHome, { available: { 'place-order': true, kitchen: false, expense: false, bills: false, payments: false }, onAction: () => {} }));
+  await tick(6);
+  assert.equal(limited.host.querySelector('[data-testid="admin-home-payments"]'), null);
+  assert.equal(limited.host.querySelector('[data-testid="admin-home-bills"]'), null);
+  assert.equal(byText(limited.host, 'button', /Add an expense/), undefined);
+  assert.ok(byText(limited.host, 'button', /Place an order/));
+});
+
+test('AdminDashboard: Overview shows Admin Home above the existing Overview; quick actions open existing tabs; tab nav and Logout unchanged', async () => {
+  fakeDb.reset(); standard();
+  auth.user = { id: 'A1', identityId: 'a1', name: 'Priya Nair', role: 'admin', canteenName: 'Sunrise Canteen' };
+  auth.perms = ['dashboard', 'orders', 'daily_reports', 'expenses', 'monthly_reports', 'payments', 'members', 'menu', 'revenue'];
+  data.users = []; data.orders = [];
+  const { host } = await mount(createElement(M.AdminDashboard));
+  await tick(10);
+  assert.ok(host.querySelector('[data-testid="admin-home"]'));
+  assert.ok(byText(host, 'button', /^Logout$/));
+  const nav = host.querySelector('main > nav');
+  for (const label of ['Overview', 'Members', 'Menu & Prices', 'Orders', 'Calendar', 'Daily Summary', 'Monthly Reports', 'Finance', 'AI Intelligence', 'Settings', 'Billing & Subscription'])
+    assert.ok(byText(nav, 'button', new RegExp(`^${label.replace(/[&]/g, '\\$&')}$`)), label);
+  const go = async (re: RegExp) => { await click(byText(host.querySelector('[data-testid="admin-home-actions"]'), 'button', re)); await tick(4); };
+  await go(/Add an expense/);
+  assert.match(byText(nav, 'button', /^Finance$/).className, /bg-primary-600/);
+  await click(byText(nav, 'button', /^Overview$/)); await tick(6);
+  await go(/Payment checks|Review/);
+  assert.match(byText(nav, 'button', /^Members$/).className, /bg-primary-600/);
+  assert.ok(byText(host, 'button', /^Payment Verification$/));
+});

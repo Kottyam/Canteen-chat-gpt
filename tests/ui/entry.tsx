@@ -41,3 +41,5 @@ export { default as SuperAdminDashboard } from '../../components/admin/SuperAdmi
 export { default as ContactUs } from '../../components/admin/ContactUs';
 export { default as EmployeeDashboard } from '../../components/employee/EmployeeDashboard';
 export { default as CanteenHeader } from '../../components/shared/CanteenHeader';
+export { default as AdminHome } from '../../components/admin/AdminHome';
+export { default as AdminDashboard } from '../../components/admin/AdminDashboard';
