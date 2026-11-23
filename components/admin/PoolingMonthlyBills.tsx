@@ -161,12 +161,12 @@ const CurrentMonthDraft: React.FC<{ threshold: number; mode?: MessCutMode; cante
     {r && <>
       <PoolingExpenseSummary result={r} className="grid gap-1 rounded-2xl border bg-white p-4 text-sm shadow-sm"/>
       {(r.issues || []).map(w => <div key={w} role="alert" className="text-sm text-red-700">{w}</div>)}
+      <SharedSpecialCostsEditor summaries={r.sharedSpecialSummaries || []} names={draft!.names} onChanged={() => void load()} disabled={loading}/>
       <div className="divide-y text-sm">{r.lines.map(l => <div key={l.memberId} data-draft-member={l.memberId} className="grid gap-1 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="min-w-0"><div className="break-words font-semibold text-gray-800">{draft!.names[l.memberId] || 'Member'}</div>
           <div className="text-gray-600">Ate {l.attendedDays}/{l.windowDays} · Pool {rs(l.sharePaise)}{l.messCutApplied ? ` · ${messCutAppliedLabel(l.excludedDays, r.messCutMode || 'any', 'short')}` : ''}{(l.allMembersSharePaise || 0) ? ` · ${COMMON_BILL_LABEL} ${rs(l.allMembersSharePaise)}` : ''}{l.adminAddedPaise ? ` · Admin added ${rs(l.adminAddedPaise)}` : ''}{(l.specialMemberPaise || 0) + (l.specialGuestPaise || 0) ? ` · Special ${rs((l.specialMemberPaise || 0) + (l.specialGuestPaise || 0))}` : ''}{(l.specialLines || []).map(s => ` · ${s.label} ${rs(s.paise)}`).join('')}{l.specialPending ? ' · amount pending' : ''}</div></div>
         <div className="text-right font-bold">{rs(l.totalPaise)}</div>
       </div>)}</div>
-      <SharedSpecialCostsEditor summaries={r.sharedSpecialSummaries || []} names={draft!.names} onChanged={() => void load()} disabled={loading}/>
     </>}
   </section>;
 };
