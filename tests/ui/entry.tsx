@@ -43,3 +43,4 @@ export { default as EmployeeDashboard } from '../../components/employee/Employee
 export { default as CanteenHeader } from '../../components/shared/CanteenHeader';
 export { default as AdminHome } from '../../components/admin/AdminHome';
 export { default as AdminDashboard } from '../../components/admin/AdminDashboard';
+export { default as DailySummary } from '../../components/admin/DailySummary';

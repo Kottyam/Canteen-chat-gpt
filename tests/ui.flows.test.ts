@@ -1948,3 +1948,40 @@ test('AdminDashboard: Overview shows Admin Home above the existing Overview; qui
   assert.match(byText(nav, 'button', /^Members$/).className, /bg-primary-600/);
   assert.ok(byText(host, 'button', /^Payment Verification$/));
 });
+
+
+test('Pooling current month: Shared cost entry appears above the members list', async () => {
+  fakeDb.reset(); seedPoolingMonth({ orders: true }); const { cd } = seedCurrentMonth(); asAdmin(); pooling();
+  fakeDb.db.orders.push({
+    id: 'shared-pos', employee_id: 'mA', ordered_for: cd(1), status: 'active',
+    order_items: [{ item_source: 'employee', item_code: 'biryani', item_name: 'Biryani', quantity: 1, pooling_special: true, pooling_special_pricing_mode: 'shared' }],
+  });
+  const { host } = await mount(createElement(M.PoolingMonthlyBills)); await tick(10);
+  const s = draftSection(host);
+  const shared = s.querySelector('section[aria-label="Shared cost specials"]');
+  const firstMember = s.querySelector('[data-draft-member]');
+  assert.ok(shared); assert.ok(firstMember);
+  const pos = (el: any) => { const a=[...s.querySelectorAll('*')]; return a.indexOf(el); };
+  assert.ok(pos(shared) < pos(firstMember), 'Shared cost specials section is above the members list');
+});
+
+test('Daily Summary: Financial Summary is hidden in Pooling and still shown in Standard', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'A1', identityId: 'a1', name: 'Priya', role: 'admin', canteenName: 'Sunrise Canteen' };
+  auth.perms = ['daily_reports'];
+  data.users = []; data.orders = []; data.prices = {};
+  standard();
+  const std = await mount(createElement(M.DailySummary));
+  await tick(8);
+  assert.match(std.host.textContent || '', /Financial Summary/);
+  assert.match(std.host.textContent || '', /Total Revenue/);
+  assert.match(std.host.textContent || '', /Food Items/);
+  await act(async () => std.root.unmount());
+
+  pooling();
+  const pool = await mount(createElement(M.DailySummary));
+  await tick(8);
+  assert.doesNotMatch(pool.host.textContent || '', /Financial Summary/);
+  assert.doesNotMatch(pool.host.textContent || '', /Total Revenue/);
+  assert.match(pool.host.textContent || '', /Food Items/);
+});
