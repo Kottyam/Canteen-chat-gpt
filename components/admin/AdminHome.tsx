@@ -83,7 +83,7 @@ const AdminHome: React.FC<Props> = ({ onAction, available }) => {
     return [...totals.values()].sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
   }, [dayOrders, menuItems]);
   const kitchenTotal = kitchenRows.reduce((s, r) => s + r.qty, 0);
-  const firstName = (user?.name || 'Admin').trim().split(/\s+/)[0];
+  const greetingName = (user?.canteenName || '').trim() || 'Admin';
 
   const billMonth = monthName(period.year, period.month);
   const billValue = !billState ? '—' : billState.published > 0 ? 'Published' : 'Draft';
@@ -123,7 +123,7 @@ const AdminHome: React.FC<Props> = ({ onAction, available }) => {
     <div data-testid="admin-home" className="space-y-5">
       <section>
         <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500">{formatBusinessDayHeading(now)}</p>
-        <h2 className="mt-0.5 text-2xl font-extrabold tracking-tight text-gray-900 sm:text-3xl">{getMemberGreeting(firstName, now)}</h2>
+        <h2 className="mt-0.5 text-2xl font-extrabold tracking-tight text-gray-900 sm:text-3xl">{getMemberGreeting(greetingName, now)}</h2>
         <p data-testid="admin-home-day" className="mt-1 text-sm font-semibold text-primary-700">
           Showing {orderFor === 'tomorrow' ? 'tomorrow' : 'today'} · {formatOrderDayDate(targetDate)}
         </p>
