@@ -76,6 +76,44 @@ export function formatBusinessDayHeading(now: Date = new Date()): string {
   }).format(now);
 }
 
+export function formatOrderDayDate(dateIso: string): string {
+  const [y, m, d] = String(dateIso || '').split('-').map(Number);
+  if (!y || !m || !d) return '';
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: BUSINESS_TIME_ZONE,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(Date.UTC(y, m - 1, d, 12)));
+}
+
+export function holidayNoticeForOrderDay(
+  orderFor: OrderFor,
+  isHoliday: boolean,
+  orderDate: string
+): HolidayNoticeModel | null {
+  if (!isHoliday || !orderDate) return null;
+  const [hy, hm, hd] = String(orderDate).slice(0, 10).split('-').map(Number);
+  const formatted = new Intl.DateTimeFormat('en-IN', {
+    timeZone: BUSINESS_TIME_ZONE,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+  }).format(new Date(Date.UTC(hy, hm - 1, hd, 12)));
+  if (orderFor === 'today') {
+    return {
+      date: orderDate,
+      title: 'Holiday today',
+      subtitle: 'The kitchen is closed today. Orders are not available.',
+    };
+  }
+  return {
+    date: orderDate,
+    title: `Holiday tomorrow (${formatted})`,
+    subtitle: 'The kitchen is closed that day. No orders will be taken.',
+  };
+}
+
 export function formatClock12h(hhmm?: string | null): string {
   if (!hhmm) return '';
   const [hStr, mStr] = String(hhmm).split(':');

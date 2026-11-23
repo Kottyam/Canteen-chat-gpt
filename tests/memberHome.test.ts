@@ -4,7 +4,9 @@ import {
   computeOrderCutoffBanner,
   findNextHolidayNotice,
   formatClock12h,
+  formatOrderDayDate,
   getMemberGreeting,
+  holidayNoticeForOrderDay,
   summarizeMemberBill,
 } from '../utils/memberHome.ts';
 
@@ -95,4 +97,18 @@ test('findNextHolidayNotice surfaces today or upcoming holiday', () => {
   assert.equal(today!.title, 'Holiday today');
 
   assert.equal(findNextHolidayNotice(['2026-11-20'], false, false, now), null);
+});
+
+test('formatOrderDayDate formats the IST business date compactly', () => {
+  assert.equal(formatOrderDayDate('2026-11-23'), 'Mon, 23 Nov');
+  assert.equal(formatOrderDayDate('2026-11-24'), 'Tue, 24 Nov');
+});
+
+test('holidayNoticeForOrderDay only describes the active order-for day', () => {
+  assert.equal(holidayNoticeForOrderDay('today', false, '2026-11-23'), null);
+  assert.equal(holidayNoticeForOrderDay('today', true, '2026-11-23')!.title, 'Holiday today');
+  const tmr = holidayNoticeForOrderDay('tomorrow', true, '2026-11-24');
+  assert.ok(tmr);
+  assert.match(tmr!.title, /Holiday tomorrow \(Tuesday, 24 Nov\)/);
+  assert.equal(holidayNoticeForOrderDay('tomorrow', false, '2026-11-24'), null);
 });

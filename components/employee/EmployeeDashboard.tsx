@@ -27,12 +27,12 @@ import {
   useMenuSpecialsForDate,
 } from '../../hooks/usePoolingSpecials';
 import { useActivePoll } from '../../hooks/usePoll';
-import { formatDate } from '../../utils/helpers';
 import {
   computeOrderCutoffBanner,
-  findNextHolidayNotice,
   formatBusinessDayHeading,
+  formatOrderDayDate,
   getMemberGreeting,
+  holidayNoticeForOrderDay,
   OrderWindowSettingsRow,
   summarizeMemberBill,
 } from '../../utils/memberHome';
@@ -63,7 +63,7 @@ const summarizeOrderLines = (
 
 const EmployeeDashboard: React.FC = () => {
   const { user, logout } = useAuth();
-  const { orders, setOrders, refreshOrders, menuItems, holidays } = useData();
+  const { orders, setOrders, refreshOrders, menuItems } = useData();
   const { pooling } = useBillingSettings();
   const guestOrdersOn = useGuestOrdersEnabled();
   const { poll: activePoll, open: activePollOpen } = useActivePoll();
@@ -75,7 +75,6 @@ const EmployeeDashboard: React.FC = () => {
   const [isPasswordModalOpen, setPasswordModalOpen] = useState(false);
 
   const [orderFor, setOrderFor] = useState<OrderFor>('today');
-  const [viewDay, setViewDay] = useState<OrderFor>('today');
   const [nowTick, setNowTick] = useState<Date>(() => new Date());
 
   const [windowSettings, setWindowSettings] = useState<OrderWindowSettingsRow | null>(null);
@@ -91,8 +90,6 @@ const EmployeeDashboard: React.FC = () => {
     title: '',
     message: '',
   });
-  const [declaredHolidayDates, setDeclaredHolidayDates] = useState<string[]>([]);
-
   const [adminAddedRows, setAdminAddedRows] = useState<EmployeeAdjustment[]>([]);
   const [weeklyMenu, setWeeklyMenu] = useState<MenuItem[]>([]);
   const [menuLoading, setMenuLoading] = useState(true);
@@ -107,8 +104,8 @@ const EmployeeDashboard: React.FC = () => {
 
   const todayDate = getOrderTargetDate('today', nowTick);
   const tomorrowDate = getOrderTargetDate('tomorrow', nowTick);
-  const viewDate = viewDay === 'tomorrow' ? tomorrowDate : todayDate;
-  const dayStatus = viewDay === 'tomorrow' ? tomorrowStatus : todayStatus;
+  const viewDate = orderFor === 'tomorrow' ? tomorrowDate : todayDate;
+  const dayStatus = orderFor === 'tomorrow' ? tomorrowStatus : todayStatus;
   const specialsMap = useMenuSpecialsForDate(viewDate);
 
   const orderEmployeeKey = user?.memberLoginMode === 'mobile' ? user.mobile : user?.id;
@@ -169,9 +166,9 @@ const EmployeeDashboard: React.FC = () => {
   );
 
   const canCancel = Boolean(
-    hasMemberItems && !dayStatus.holiday && dayStatus.windowOpen && viewDay === orderFor && !cancelling
+    hasMemberItems && !dayStatus.holiday && dayStatus.windowOpen && !cancelling
   );
-  const canOrderOnViewDay = Boolean(!dayStatus.holiday && dayStatus.windowOpen && viewDay === orderFor);
+  const canOrderOnViewDay = Boolean(!dayStatus.holiday && dayStatus.windowOpen);
 
   const activeWeeklyMenu = useMemo(
     () => weeklyMenu.filter(item => item.active && !item.archived),
@@ -184,19 +181,13 @@ const EmployeeDashboard: React.FC = () => {
   );
 
   const holidayNotice = useMemo(
-    () =>
-      findNextHolidayNotice(
-        [...(holidays || []), ...declaredHolidayDates],
-        todayStatus.holiday,
-        tomorrowStatus.holiday,
-        nowTick
-      ),
-    [holidays, declaredHolidayDates, todayStatus.holiday, tomorrowStatus.holiday, nowTick]
+    () => holidayNoticeForOrderDay(orderFor, dayStatus.holiday, viewDate),
+    [orderFor, dayStatus.holiday, viewDate]
   );
 
   const cutoffBanner = useMemo(
-    () => computeOrderCutoffBanner(windowSettings, dayStatus, viewDay, orderFor, nowTick),
-    [windowSettings, dayStatus, viewDay, orderFor, nowTick]
+    () => computeOrderCutoffBanner(windowSettings, dayStatus, orderFor, orderFor, nowTick),
+    [windowSettings, dayStatus, orderFor, nowTick]
   );
 
   const loadWindowAndHolidays = useCallback(async () => {
@@ -225,22 +216,6 @@ const EmployeeDashboard: React.FC = () => {
         }
       } catch {
         // Keep existing window settings if unavailable
-      }
-      try {
-        const todayIso = formatDate(now);
-        const { data: hdRows } = await supabase
-          .from('holiday_dates')
-          .select('holiday_date')
-          .gte('holiday_date', todayIso)
-          .order('holiday_date', { ascending: true })
-          .limit(5);
-        if (Array.isArray(hdRows)) {
-          setDeclaredHolidayDates(
-            hdRows.map((r: any) => String(r.holiday_date || '').slice(0, 10)).filter(Boolean)
-          );
-        }
-      } catch {
-        setDeclaredHolidayDates([]);
       }
     }
     try {
@@ -392,7 +367,7 @@ const EmployeeDashboard: React.FC = () => {
     try {
       await cancelOrder(viewOrder, 'employee');
       setOrders(await refreshOrders());
-      setHomeMsg(`${viewDay === 'tomorrow' ? 'Tomorrow’s' : 'Today’s'} member order has been cancelled.`);
+      setHomeMsg(`${orderFor === 'tomorrow' ? 'Tomorrow’s' : 'Today’s'} member order has been cancelled.`);
     } catch (e: any) {
       setHomeMsg(e?.message || 'Could not cancel order.');
     } finally {
@@ -407,8 +382,9 @@ const EmployeeDashboard: React.FC = () => {
   };
 
   const renderHome = () => {
-    const mealTitle = viewDay === 'tomorrow' ? 'Tomorrow’s meal' : 'Today’s meal';
-    const menuTitle = viewDay === 'tomorrow' ? 'Tomorrow’s menu' : 'Today’s menu';
+    const mealTitle = orderFor === 'tomorrow' ? 'Tomorrow’s meal' : 'Today’s meal';
+    const menuTitle = orderFor === 'tomorrow' ? 'Tomorrow’s menu' : 'Today’s menu';
+    const orderDayDate = formatOrderDayDate(viewDate);
     const hasNotices = Boolean(holidayNotice || (activePoll && activePollOpen));
 
     const cutoffStyle =
@@ -473,52 +449,18 @@ const EmployeeDashboard: React.FC = () => {
               </div>
             </section>
 
-            {/* Today / Tomorrow Switch + Meal Card */}
+            {/* Meal & order status for the canteen's current order-for day */}
             <section
               data-testid="home-meal-card"
               className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5"
             >
-              <div
-                role="tablist"
-                aria-label="Select meal day"
-                className="grid grid-cols-2 rounded-xl bg-slate-100 p-1"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={viewDay === 'today'}
-                  onClick={() => {
-                    setHomeMsg('');
-                    setViewDay('today');
-                  }}
-                  className={`min-h-9 rounded-lg px-3 py-1.5 text-xs font-bold transition sm:text-sm ${
-                    viewDay === 'today'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Today
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={viewDay === 'tomorrow'}
-                  onClick={() => {
-                    setHomeMsg('');
-                    setViewDay('tomorrow');
-                  }}
-                  className={`min-h-9 rounded-lg px-3 py-1.5 text-xs font-bold transition sm:text-sm ${
-                    viewDay === 'tomorrow'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Tomorrow
-                </button>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <h3 className="text-base font-extrabold text-slate-900 sm:text-lg">{mealTitle}</h3>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-base font-extrabold text-slate-900 sm:text-lg">{mealTitle}</h3>
+                  <p data-testid="home-meal-date" className="mt-0.5 text-xs font-semibold text-slate-500">
+                    {orderDayDate}
+                  </p>
+                </div>
                 <span
                   data-testid="home-meal-status"
                   className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusBadge.cls}`}
@@ -578,10 +520,8 @@ const EmployeeDashboard: React.FC = () => {
                     {dayStatus.holiday
                       ? 'The kitchen is closed for a holiday.'
                       : canOrderOnViewDay
-                        ? `No meal ordered yet for ${viewDay}.`
-                        : viewDay !== orderFor
-                          ? `Active ordering is currently set to ${orderFor}.`
-                          : `Ordering for ${viewDay} is currently closed.`}
+                        ? `No meal ordered yet for ${orderFor}.`
+                        : `Ordering for ${orderFor} is currently closed.`}
                   </p>
                   {viewAdminAdded.length > 0 && (
                     <p className="text-xs font-medium text-slate-600">
@@ -621,8 +561,13 @@ const EmployeeDashboard: React.FC = () => {
               data-testid="home-menu-card"
               className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5"
             >
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-extrabold text-slate-900 sm:text-lg">{menuTitle}</h3>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-base font-extrabold text-slate-900 sm:text-lg">{menuTitle}</h3>
+                  <p data-testid="home-menu-date" className="mt-0.5 text-xs font-semibold text-slate-500">
+                    {orderDayDate}
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => openOrdersTab('me')}
@@ -634,7 +579,7 @@ const EmployeeDashboard: React.FC = () => {
               {menuLoading ? (
                 <p className="mt-3 text-sm text-slate-500">Loading menu…</p>
               ) : activeWeeklyMenu.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No menu items listed for {viewDay}.</p>
+                <p className="mt-3 text-sm text-slate-500">No menu items listed for {orderFor}.</p>
               ) : (
                 <ul className="mt-3 divide-y divide-slate-100">
                   {activeWeeklyMenu.map(item => {
