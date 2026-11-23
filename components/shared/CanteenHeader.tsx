@@ -1,3 +1,126 @@
-import React from'react';import{useAuth}from'../../context/AuthContext';import NotificationBell from'../employee/NotificationBell';
-interface HeaderProps{onChangePassword:()=>void;onOpenNotifications?:()=>void;onOpenBill?:(billId:string)=>void;onOpenNotification?:(notification:any)=>void;}
-const CanteenHeader:React.FC<HeaderProps>=({onChangePassword,onOpenNotifications,onOpenBill,onOpenNotification})=>{const{user,logout}=useAuth();const admin=user?.role==='admin';const superAdmin=admin&&user?.adminRole==='super_admin';const roleLabel=admin?(user?.adminRole==='super_admin'?'Super Admin':user?.adminRole||'Admin'):'Member';const welcome=admin?(user?.canteenName?`Welcome to ${user.canteenName}`:`Welcome, ${user?.name||user?.id}`):`Welcome, ${user?.name||user?.id}`;return <header className="sticky top-0 z-40 w-full border-b border-gray-200 bg-white shadow-sm"><div className="mx-auto w-full max-w-7xl px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2 sm:px-6 lg:px-8"><div className="flex min-w-0 items-center justify-between gap-3"><div className="min-w-0"><h1 className={`${admin?'text-xl sm:text-2xl':'text-2xl sm:text-3xl'} truncate font-extrabold leading-tight text-primary-700`}>Go Canteen</h1><p className="text-xs font-medium text-gray-600 sm:text-sm">Canteen Management System</p></div><div className="flex min-w-0 items-center gap-1.5 sm:gap-3"><div className="hidden min-w-0 text-right sm:block"><p className="truncate text-base font-semibold text-gray-700">{welcome}</p><p className="text-sm capitalize text-gray-600">{roleLabel}</p></div>{(user?.role==='employee'||user?.role==='admin')&&<NotificationBell onViewAll={onOpenNotifications} onOpenBill={onOpenBill} onOpenNotification={onOpenNotification}/>} {superAdmin&&<button type="button" onClick={onChangePassword} className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 sm:px-3 sm:text-sm">Change Password</button>}<button type="button" onClick={()=>void logout()} aria-label="Logout" title="Logout" className={`${admin?'min-h-9 rounded-lg px-3 text-sm':'min-h-10 rounded-lg px-3 text-sm'} flex shrink-0 items-center justify-center bg-red-600 font-semibold text-white hover:bg-red-700 shadow-sm`}>Logout</button></div></div><div className="mt-1 min-w-0 sm:hidden"><p className="truncate text-xs font-semibold text-gray-700">{welcome}</p><p className="text-[11px] capitalize text-gray-600">{roleLabel}</p></div></div></header>};export default CanteenHeader;
+import React from 'react';
+import { useAuth } from '../../context/AuthContext';
+import NotificationBell from '../employee/NotificationBell';
+
+interface HeaderProps {
+  onChangePassword: () => void;
+  onOpenNotifications?: () => void;
+  onOpenBill?: (billId: string) => void;
+  onOpenNotification?: (notification: any) => void;
+  variant?: 'default' | 'member';
+  onOpenProfile?: () => void;
+}
+
+const CanteenHeader: React.FC<HeaderProps> = ({
+  onChangePassword,
+  onOpenNotifications,
+  onOpenBill,
+  onOpenNotification,
+  variant = 'default',
+  onOpenProfile,
+}) => {
+  const { user, logout } = useAuth();
+  const admin = user?.role === 'admin';
+  const superAdmin = admin && user?.adminRole === 'super_admin';
+  const roleLabel = admin
+    ? user?.adminRole === 'super_admin'
+      ? 'Super Admin'
+      : user?.adminRole || 'Admin'
+    : 'Member';
+  const welcome = admin
+    ? user?.canteenName
+      ? `Welcome to ${user.canteenName}`
+      : `Welcome, ${user?.name || user?.id}`
+    : `Welcome, ${user?.name || user?.id}`;
+
+  if (variant === 'member') {
+    const initial = (user?.name || user?.id || 'M').trim().charAt(0).toUpperCase() || 'M';
+    const canteenTitle = user?.canteenName || 'Go Canteen';
+    return (
+      <header className="sticky top-0 z-40 w-full border-b border-gray-100 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 pt-[max(10px,env(safe-area-inset-top))] pb-2.5 sm:px-6">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-primary-700">Go Canteen</p>
+            <h1 className="truncate text-lg font-extrabold leading-tight text-gray-900 sm:text-xl">
+              {canteenTitle}
+            </h1>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <NotificationBell
+              onViewAll={onOpenNotifications}
+              onOpenBill={onOpenBill}
+              onOpenNotification={onOpenNotification}
+            />
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              aria-label="Profile"
+              title="Profile"
+              className="flex h-10 w-10 touch-manipulation items-center justify-center rounded-full bg-primary-100 text-sm font-extrabold text-primary-800 hover:bg-primary-200"
+            >
+              {initial}
+            </button>
+          </div>
+        </div>
+      </header>
+    );
+  }
+
+  return (
+    <header className="sticky top-0 z-40 w-full border-b border-gray-200 bg-white shadow-sm">
+      <div className="mx-auto w-full max-w-7xl px-3 pt-[max(8px,env(safe-area-inset-top))] pb-2 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1
+              className={`${
+                admin ? 'text-xl sm:text-2xl' : 'text-2xl sm:text-3xl'
+              } truncate font-extrabold leading-tight text-primary-700`}
+            >
+              Go Canteen
+            </h1>
+            <p className="text-xs font-medium text-gray-600 sm:text-sm">Canteen Management System</p>
+          </div>
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
+            <div className="hidden min-w-0 text-right sm:block">
+              <p className="truncate text-base font-semibold text-gray-700">{welcome}</p>
+              <p className="text-sm capitalize text-gray-600">{roleLabel}</p>
+            </div>
+            {(user?.role === 'employee' || user?.role === 'admin') && (
+              <NotificationBell
+                onViewAll={onOpenNotifications}
+                onOpenBill={onOpenBill}
+                onOpenNotification={onOpenNotification}
+              />
+            )}
+            {superAdmin && (
+              <button
+                type="button"
+                onClick={onChangePassword}
+                className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 sm:px-3 sm:text-sm"
+              >
+                Change Password
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void logout()}
+              aria-label="Logout"
+              title="Logout"
+              className={`${
+                admin ? 'min-h-9 rounded-lg px-3 text-sm' : 'min-h-10 rounded-lg px-3 text-sm'
+              } flex shrink-0 items-center justify-center bg-red-600 font-semibold text-white hover:bg-red-700 shadow-sm`}
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+        <div className="mt-1 min-w-0 sm:hidden">
+          <p className="truncate text-xs font-semibold text-gray-700">{welcome}</p>
+          <p className="text-[11px] capitalize text-gray-600">{roleLabel}</p>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+export default CanteenHeader;
