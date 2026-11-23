@@ -1386,3 +1386,161 @@ test('Expense summary lists food-pool, Common bill and specials, then Total expe
   assert.ok(text.indexOf('Expenses') < text.indexOf('Special expenses'));
   assert.ok(text.indexOf('Special expenses') < text.indexOf('Total expenses'));
 });
+
+test('SuperAdmin can create a PER_MEMBER plan, assign to canteen with 100 active members -> Rs 2,000, live updates when member count changes, and Canteen Admin ContactUs shows it', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'SA1', name: 'Super Admin', role: 'admin', adminRole: 'super_admin' };
+  const active100 = Array.from({ length: 100 }, (_, i) => ({
+    id: `E${i}`, employee_code: `E${i}`, sr_number: null, full_name: `Member ${i}`,
+    role: 'employee', admin_role: null, status: 'active', canteen_id: 'can1',
+  }));
+  // Inactive employees and canteen admins must NOT count as active members
+  const ignored = [
+    { id: 'EX1', employee_code: 'EX1', sr_number: null, full_name: 'Inactive Emp', role: 'employee', admin_role: null, status: 'inactive', canteen_id: 'can1' },
+    { id: 'ADM1', employee_code: 'ADM1', sr_number: null, full_name: 'Canteen Admin', role: 'admin', admin_role: 'owner', status: 'active', canteen_id: 'can1' },
+  ];
+  fakeDb.db.canteens = [{ id: 'can1', name: 'Kochi Canteen', owner_id: 'ADM1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', archived: false }];
+  fakeDb.db.profiles = [...active100, ...ignored];
+  fakeDb.db.subscription_plans = [
+    { id: 'plan-fixed', name: 'Standard', description: 'Fixed plan', pricing_model: 'FIXED_AMOUNT', monthly_price: 1999, annual_price: 19990, price: 1999, per_member_price: null, billing_period: 'monthly', billing_cycle: 'monthly', billing_availability: 'monthly_annual', currency: 'INR', trial_days: 14, active: true, is_default: true, min_members: null, max_members: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+  ];
+  fakeDb.db.subscription_plan_ranges = [];
+  fakeDb.db.canteen_subscriptions = [];
+  fakeDb.db.subscription_payments = [];
+  fakeDb.db.subscription_payment_settings = [{ id: true, payment_provider: 'manual', manual_payment_enabled: true, razorpay_enabled: false, upi_id: 'gocanteen@upi', payment_display_name: 'GoCanteen', payment_instructions: null, bank_payment_details: null, vendor_contact_email: 'support@gocanteen.online', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }];
+  fakeDb.db.subscription_payment_methods = [];
+
+  fakeDb.rpcHandlers.super_admin_platform_stats = () => ({ data: { total_canteens: 1, active_canteens: 1, trial_canteens: 0, suspended_canteens: 0, total_employees: 100 } });
+  fakeDb.rpcHandlers.super_admin_upsert_subscription_plan = (args: any) => {
+    const row = {
+      id: args.p_plan_id || 'plan-pm',
+      name: args.p_name,
+      description: args.p_description,
+      pricing_model: args.p_pricing_model,
+      monthly_price: Number(args.p_monthly_price || 0),
+      annual_price: Number(args.p_annual_price || 0),
+      price: Number(args.p_monthly_price || args.p_annual_price || 0),
+      per_member_price: args.p_pricing_model === 'PER_MEMBER' ? Number(args.p_monthly_price || args.p_annual_price || 0) : null,
+      billing_period: 'monthly',
+      billing_cycle: 'monthly',
+      billing_availability: args.p_billing_availability,
+      currency: args.p_currency,
+      trial_days: 14,
+      active: args.p_active,
+      is_default: args.p_is_default,
+      min_members: null,
+      max_members: null,
+      created_at: '2026-11-23T00:00:00Z',
+      updated_at: '2026-11-23T00:00:00Z',
+    };
+    fakeDb.db.subscription_plans.unshift(row);
+    return { data: row };
+  };
+  fakeDb.rpcHandlers.super_admin_set_subscription = (args: any) => {
+    const plan = fakeDb.db.subscription_plans.find((x: any) => x.id === args.p_plan_id) || fakeDb.db.subscription_plans[0];
+    const activeCount = fakeDb.db.profiles.filter((p: any) => p.canteen_id === args.p_canteen_id && p.role === 'employee' && p.status === 'active').length;
+    const rate = args.p_billing_cycle === 'annual' ? plan.annual_price : plan.monthly_price;
+    const amount = plan.pricing_model === 'PER_MEMBER' ? Math.round(rate * activeCount * 100) / 100 : rate;
+    const sub = {
+      id: 'sub-1', canteen_id: args.p_canteen_id, plan_id: plan.id,
+      status: args.p_action === 'activate' ? 'active' : 'trial',
+      trial_start: null, trial_end: null, subscription_start: '2026-11-23T00:00:00Z', subscription_end: '2026-12-23T00:00:00Z',
+      amount, currency: plan.currency, payment_status: 'paid', billing_cycle: args.p_billing_cycle || 'monthly',
+      plan_selection_mode: 'manual', created_at: '2026-11-23T00:00:00Z', updated_at: '2026-11-23T00:00:00Z',
+    };
+    fakeDb.db.canteen_subscriptions = [sub];
+    return { data: sub };
+  };
+
+  const { host, root } = await mount(createElement(M.SuperAdminDashboard));
+  await tick(10);
+
+  // Open Plans tab and create PER_MEMBER plan at Rs 20 / member / month
+  await click(byText(host, 'button', /^Plans$/));
+  const nameIn = host.querySelector('input[placeholder="Plan Name"]');
+  await type(nameIn, 'Per Member Standard');
+  const sel = host.querySelector('[data-testid="plan-pricing-model"]') as any;
+  assert.ok(sel);
+  await act(async () => {
+    sel.value = 'PER_MEMBER';
+    sel.dispatchEvent(new (win as any).Event('change', { bubbles: true }));
+  });
+  await tick(2);
+  const pmInput = host.querySelector('input[placeholder="Price per Member (Monthly)"]');
+  assert.ok(pmInput, 'per-member price input visible');
+  await type(pmInput, '20');
+  assert.match(host.textContent || '', /100 members → ₹2,000\.00 \/ month/);
+  await click(byText(host, 'button', /^Create Plan$/));
+  await tick(8);
+
+  const upsertCalls = rpcs('super_admin_upsert_subscription_plan');
+  assert.equal(upsertCalls.length, 1);
+  assert.equal(upsertCalls[0].p_pricing_model, 'PER_MEMBER');
+  assert.equal(upsertCalls[0].p_monthly_price, 20);
+  assert.match(host.textContent || '', /₹20\.00 \/ member \/ month/);
+  // Existing fixed plan remains intact
+  assert.match(host.textContent || '', /₹1,999\.00 \/ month/);
+
+  // Open Subscriptions tab, select Per Member Standard for Kochi Canteen (100 active members)
+  await click(byText(host, 'button', /^Subscriptions$/));
+  await tick(4);
+  const planSelect = [...host.querySelectorAll('select')].find((s: any) => [...s.options].some((o: any) => o.value === 'plan-pm')) as any;
+  assert.ok(planSelect);
+  await act(async () => {
+    planSelect.value = 'plan-pm';
+    planSelect.dispatchEvent(new (win as any).Event('change', { bubbles: true }));
+  });
+  await tick(2);
+  const preview = host.querySelector('[data-testid="sub-computed-can1"]');
+  assert.ok(preview);
+  assert.match(preview.textContent || '', /₹2,000\.00 \/ month \(₹20\.00 × 100 active members\)/);
+
+  // Disable trial and activate subscription
+  const trialBox = byText(host, 'label', /Enable initial trial/)?.querySelector('input');
+  if ((trialBox as any)?.checked) await click(trialBox);
+  await click(byText(host, 'button', /^Activate Subscription$/));
+  await tick(8);
+  const setCalls = rpcs('super_admin_set_subscription');
+  assert.equal(setCalls.length, 1);
+  assert.equal(setCalls[0].p_plan_id, 'plan-pm');
+  const curAmt = host.querySelector('[data-testid="sub-current-amount-can1"]');
+  assert.ok(curAmt);
+  assert.match(curAmt.textContent || '', /₹2,000\.00 \/ month/);
+
+  // Add 25 more active employees -> live computed amount updates to Rs 2,500 without changing plan
+  for (let i = 100; i < 125; i++) {
+    fakeDb.db.profiles.push({
+      id: `E${i}`, employee_code: `E${i}`, sr_number: null, full_name: `Member ${i}`,
+      role: 'employee', admin_role: null, status: 'active', canteen_id: 'can1',
+    });
+  }
+  await act(async () => root.unmount());
+  const sa2 = await mount(createElement(M.SuperAdminDashboard));
+  await tick(10);
+  await click(byText(sa2.host, 'button', /^Subscriptions$/));
+  await tick(6);
+  assert.match(sa2.host.querySelector('[data-testid="sub-current-amount-can1"]')?.textContent || '', /₹2,500\.00 \/ month/);
+  assert.match(sa2.host.textContent || '', /₹20\.00 × 125 active members/);
+  await act(async () => sa2.root.unmount());
+
+  // Now check Canteen Admin ContactUs ("Billing & Subscription") view for can1 (125 active members)
+  auth.user = { id: 'ADM1', name: 'Canteen Admin', role: 'admin', canteenId: 'can1' };
+  fakeDb.rpcHandlers.sync_subscription_statuses = () => ({ data: null });
+  fakeDb.rpcHandlers.get_canteen_subscription_state = () => ({
+    data: { allowed: true, status: 'active', subscription: fakeDb.db.canteen_subscriptions[0], payment_status: 'paid', reason: 'active' },
+  });
+  fakeDb.rpcHandlers.get_subscription_billing_quote = () => ({
+    data: {
+      required: true, plan_id: 'plan-pm', plan_name: 'Per Member Standard',
+      pricing_model: 'PER_MEMBER', billing_cycle: 'monthly', per_member_price: 20,
+      amount: 2500, currency: 'INR', member_count: 125, contact_email: 'support@gocanteen.online',
+    },
+  });
+  const cu = await mount(createElement(M.ContactUs));
+  await tick(10);
+  const cuText = cu.host.textContent || '';
+  assert.match(cuText, /Per Member Standard \(Per Member\)/);
+  assert.match(cuText, /Active Members125/);
+  assert.match(cuText, /₹2,500\.00 \/ month/);
+  assert.match(cuText, /₹20\.00 × 125 active members/);
+});

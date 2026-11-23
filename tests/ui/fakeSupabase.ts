@@ -30,7 +30,7 @@ function run(table: string, ops: any[], single: boolean) {
   if (kind === 'delete') { db[table] = rows.filter(r => !match(r, ops)); return { data: null, error: null }; }
   if (kind === 'update') { const v = ops.find(([op]) => op === 'update')[1][0]; rows.filter(r => match(r, ops)).forEach(r => Object.assign(r, v)); return { data: null, error: null }; }
   const out = rows.filter(r => match(r, ops));
-  return { data: single ? (out[0] ?? null) : out, error: null };
+  return { data: single ? (out[0] ?? null) : out, count: out.length, error: null };
 }
 function from(table: string) {
   const ops: any[] = [];
