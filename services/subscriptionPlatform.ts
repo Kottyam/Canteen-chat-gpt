@@ -1,18 +1,19 @@
 import { supabase } from '../supabase';
+import { computeSubscriptionAmount, perMemberUnitPrice, matchingMemberRange, SubscriptionPricingModel } from '../utils/subscriptionPricing';
 
 export type SubscriptionStatus='trial'|'active'|'payment_pending'|'expired'|'suspended';
 export type PaymentStatus='pending'|'paid'|'failed'|'refunded';
 export type BillingCycle='monthly'|'annual';
 export type BillingPeriod='monthly'|'quarterly'|'yearly';
 export type PaymentProvider='manual'|'razorpay';
-export type PricingModel='MEMBER_RANGE'|'FIXED_AMOUNT';
+export type PricingModel=SubscriptionPricingModel;
 export type PlanSelectionMode='auto_range'|'manual';
 export type PaymentType='subscription'|'renewal'|'plan_upgrade';
 
 export interface SubscriptionPlanRange{id:string;plan_id:string;min_members:number;max_members:number;monthly_price:number;annual_price:number;created_at:string;updated_at:string;}
 export interface SubscriptionPlan{
  id:string; name:string; description:string|null; pricing_model:PricingModel;
- monthly_price:number; annual_price:number; price:number; billing_period:BillingPeriod; billing_cycle:BillingCycle; billing_availability:'monthly'|'annual'|'monthly_annual';
+ monthly_price:number; annual_price:number; price:number; per_member_price?:number|null; billing_period:BillingPeriod; billing_cycle:BillingCycle; billing_availability:'monthly'|'annual'|'monthly_annual';
  currency:string; trial_days:number; active:boolean; is_default:boolean;
  min_members:number|null; max_members:number|null; created_at:string; updated_at:string;
 }
@@ -40,7 +41,7 @@ export interface SubscriptionPaymentSettings{
  upi_id:string|null; payment_display_name:string|null; payment_instructions:string|null;
  bank_payment_details:string|null; vendor_contact_email:string|null; created_at:string; updated_at:string;
 }
-export interface SubscriptionBillingQuote{required:boolean;plan_id?:string;plan_name?:string;pricing_model?:PricingModel;billing_cycle?:BillingCycle;amount?:number;currency?:string;member_count?:number;min_members?:number;max_members?:number;max_exceeded?:boolean;contact_email?:string;message?:string|null;}
+export interface SubscriptionBillingQuote{required:boolean;plan_id?:string;plan_name?:string;pricing_model?:PricingModel;billing_cycle?:BillingCycle;per_member_price?:number;amount?:number;currency?:string;member_count?:number;min_members?:number;max_members?:number;max_exceeded?:boolean;contact_email?:string;message?:string|null;}
 
 export interface UpgradeQuote{
  required:boolean; active_members?:number; current_plan_id?:string; current_plan_name?:string;
@@ -120,4 +121,4 @@ export async function deactivatePaymentMethod(id:string){const{data,error}=await
 export async function deletePaymentMethod(id:string){const{data,error}=await requireClient().rpc('super_admin_set_payment_method',{p_method_id:id,p_action:'delete'});if(error)throw error;return data as PaymentMethod}
 export async function archiveCanteen(canteenId:string){const{data,error}=await requireClient().rpc('super_admin_archive_canteen',{p_canteen_id:canteenId});if(error)throw error;return data}
 export async function restoreCanteen(canteenId:string){const{data,error}=await requireClient().rpc('super_admin_restore_canteen',{p_canteen_id:canteenId});if(error)throw error;return data}
-export{planPrice};
+export{planPrice,computeSubscriptionAmount,perMemberUnitPrice,matchingMemberRange};

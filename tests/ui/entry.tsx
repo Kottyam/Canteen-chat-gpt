@@ -37,3 +37,5 @@ export { default as SuperAdminCanteenSummary } from '../../components/admin/Supe
 export { default as SuperAdminCanteenLists } from '../../components/admin/SuperAdminCanteenLists';
 export { useActivePoll } from '../../hooks/usePoll';
 export { default as InstallPrompt } from '../../components/common/InstallPrompt';
+export { default as SuperAdminDashboard } from '../../components/admin/SuperAdminDashboard';
+export { default as ContactUs } from '../../components/admin/ContactUs';
