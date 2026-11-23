@@ -39,3 +39,5 @@ export { useActivePoll } from '../../hooks/usePoll';
 export { default as InstallPrompt } from '../../components/common/InstallPrompt';
 export { default as SuperAdminDashboard } from '../../components/admin/SuperAdminDashboard';
 export { default as ContactUs } from '../../components/admin/ContactUs';
+export { default as EmployeeDashboard } from '../../components/employee/EmployeeDashboard';
+export { default as CanteenHeader } from '../../components/shared/CanteenHeader';

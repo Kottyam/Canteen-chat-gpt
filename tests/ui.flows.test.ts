@@ -1544,3 +1544,203 @@ test('SuperAdmin can create a PER_MEMBER plan, assign to canteen with 100 active
   assert.match(cuText, /₹2,500\.00 \/ month/);
   assert.match(cuText, /₹20\.00 × 125 active members/);
 });
+
+test('Member Home redesign: calm header, cutoff countdown, Today/Tomorrow switch, View/Cancel, Bill Pay now, Menu/Specials, Notices, inline InstallPrompt, Profile Logout', async () => {
+  fakeDb.reset();
+  standard();
+  auth.user = {
+    id: 'M001',
+    identityId: 'u-m1',
+    name: 'Arjun Menon',
+    mobile: '9876543210',
+    role: 'employee',
+    canteenId: 'can1',
+    canteenName: 'TechPark Canteen',
+    memberLoginMode: 'sr',
+  };
+  fakeDb.setAuthUid('u-m1');
+
+  const now = new Date();
+  const fmtIst = (d: Date) =>
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  const todayStr = fmtIst(now);
+  const [yy, mm, dd] = todayStr.split('-').map(Number);
+  const tmrDate = new Date(Date.UTC(yy, mm - 1, dd + 1, 12));
+  const tmrStr = fmtIst(tmrDate);
+  const weekday = (dStr: string) => {
+    const [y, m, d] = dStr.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
+  };
+
+  fakeDb.db.order_window_settings = [
+    { enabled: true, start_time: '06:00', end_time: '23:59', order_for: 'today' },
+  ];
+  fakeDb.rpcHandlers.employee_order_window_open = () => ({ data: true });
+  fakeDb.rpcHandlers.is_holiday_for_date = ({ p_date }: any) => ({
+    data: p_date === tmrStr,
+  });
+  fakeDb.db.holiday_dates = [{ holiday_date: tmrStr }];
+  fakeDb.db.weekly_menu = [
+    { weekday: weekday(todayStr), item_code: 'meals', item_name: 'Meals', unit_price: 60, active: true },
+    { weekday: weekday(todayStr), item_code: 'fish', item_name: 'Fish Fry', unit_price: 45, active: true },
+  ];
+  fakeDb.db.monthly_bills = [
+    {
+      id: 'bill-nov',
+      employee_id: 'u-m1',
+      bill_month: 11,
+      bill_year: 2026,
+      days_ordered: 18,
+      food_total: 1240,
+      guest_food_total: 0,
+      admin_added_total: 0,
+      total: 1240,
+      published: true,
+      upi_name: 'TechPark Canteen',
+      upi_id: 'canteen@upi',
+    },
+  ];
+  fakeDb.db.bill_payments = [
+    {
+      id: 'pay-1',
+      bill_id: 'bill-nov',
+      employee_id: 'u-m1',
+      amount: 1240,
+      status: 'unpaid',
+      created_at: '2026-11-20T10:00:00Z',
+      updated_at: '2026-11-20T10:00:00Z',
+    },
+  ];
+  fakeDb.db.polls = [
+    {
+      id: 'poll-1',
+      title: 'Friday special preference?',
+      enabled: true,
+      starts_at: new Date(Date.now() - 3600_000).toISOString(),
+      ends_at: new Date(Date.now() + 3600_000).toISOString(),
+      questions: [{ id: 'q1', text: 'Pick one', allowMultiple: false, options: ['Biryani', 'Sadya'] }],
+    },
+  ];
+  data.orders = [
+    {
+      id: 'ord-today',
+      employeeId: 'M001',
+      date: todayStr,
+      items: { meals: true, fish: true },
+      itemQuantities: { meals: 1, fish: 2 },
+      itemNames: { meals: 'Meals', fish: 'Fish Fry' },
+      status: 'active',
+      orderSource: 'employee',
+    },
+  ];
+
+  localStorage.removeItem('gocanteen-install-dismissed-until');
+  localStorage.removeItem('gocanteen-apk-downloaded');
+  Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 14)', configurable: true });
+  (win as any).Capacitor = undefined;
+
+  const { host, root } = await mount(createElement(M.EmployeeDashboard));
+  await tick(10);
+
+  // Calm header: canteen name + profile initial, NO Logout button in header
+  const headerEl = host.querySelector('header');
+  assert.ok(headerEl);
+  assert.match(headerEl.textContent || '', /TechPark Canteen/);
+  assert.equal(byText(headerEl, 'button', /Logout/), undefined);
+  assert.ok(headerEl.querySelector('button[aria-label="Profile"]'));
+
+  // Greeting, cutoff banner, ordered meal with View + Cancel
+  const txt = host.textContent || '';
+  assert.match(txt, /Good (morning|afternoon|evening), Arjun Menon/);
+  assert.match(host.querySelector('[data-testid="home-cutoff-banner"]')?.textContent || '', /Today’s orders close at 11:59 pm/);
+  const mealCard = host.querySelector('[data-testid="home-meal-card"]');
+  assert.ok(mealCard);
+  assert.match(mealCard.textContent || '', /Ordered/);
+  assert.match(mealCard.textContent || '', /Meals · Fish Fry × 2/);
+  assert.ok(byText(mealCard, 'button', /^View order$/));
+  assert.ok(byText(mealCard, 'button', /^Cancel order$/));
+  assert.ok(byText(mealCard, 'button', /\+ Order for guest/));
+
+  // Bill summary card with Rs 1,240 + Pay now
+  const billCard = host.querySelector('[data-testid="home-bill-card"]');
+  assert.ok(billCard);
+  assert.match(billCard.textContent || '', /November bill/);
+  assert.match(billCard.textContent || '', /₹1,240/);
+  assert.ok(byText(billCard, 'button', /^Pay now$/));
+
+  // Today's menu with prices in standard mode
+  const menuCard = host.querySelector('[data-testid="home-menu-card"]');
+  assert.ok(menuCard);
+  assert.match(menuCard.textContent || '', /Meals.*₹60/);
+
+  // Notices: Holiday tomorrow + Open poll
+  assert.match(host.querySelector('[data-testid="home-holiday-notice"]')?.textContent || '', /Holiday tomorrow/);
+  const pollNotice = host.querySelector('[data-testid="home-poll-notice"]');
+  assert.ok(pollNotice);
+  assert.match(pollNotice.textContent || '', /Friday special preference\?/);
+
+  // Inline install prompt at bottom of Home (with APK offer, PREFER_PLAY_STORE stays false)
+  assert.ok(host.querySelector('[data-testid="home-install-card"]'));
+  assert.ok(host.querySelector('[data-testid="install-prompt-apk"]'));
+
+  // 4-item bottom nav preserved
+  const nav = host.querySelector('nav');
+  assert.ok(nav);
+  assert.equal(nav.querySelectorAll('button').length, 4);
+
+  // Switch to Tomorrow tab -> shows Tomorrow holiday status and hides Cancel order
+  await click(byText(mealCard, 'button', /^Tomorrow$/));
+  await tick(4);
+  assert.match(host.querySelector('[data-testid="home-meal-status"]')?.textContent || '', /Holiday/);
+  assert.equal(byText(host.querySelector('[data-testid="home-meal-card"]'), 'button', /^Cancel order$/), undefined);
+
+  // Switch back to Today and cancel order while window is open
+  await click(byText(host.querySelector('[data-testid="home-meal-card"]'), 'button', /^Today$/));
+  await tick(4);
+  fakeDb.rpcHandlers.cancel_order_source = () => ({ data: null });
+  await click(byText(host.querySelector('[data-testid="home-meal-card"]'), 'button', /^Cancel order$/));
+  await tick(6);
+  assert.equal(rpcs('cancel_order_source').length, 1);
+
+  // Click Pay now -> switches to Bills tab and opens existing Bill Details UPI modal
+  await click(byText(host.querySelector('[data-testid="home-bill-card"]'), 'button', /^Pay now$/));
+  await tick(8);
+  assert.match(host.textContent || '', /Bill Details/);
+  assert.match(host.textContent || '', /Pay ₹1240\.00/);
+
+  // Click Profile in bottom nav -> Logout & Change Password live in Profile
+  await click(byText(nav, 'button', /Profile/));
+  await tick(4);
+  assert.ok(byText(host, 'button', /^Change Password$/));
+  assert.ok(byText(host, 'button', /^Logout$/));
+
+  await act(async () => root.unmount());
+
+  // When order window is closed, Cancel order is NOT shown on Home; pooling hides regular prices
+  pooling();
+  fakeDb.rpcHandlers.employee_order_window_open = () => ({ data: false });
+  const closed = await mount(createElement(M.EmployeeDashboard));
+  await tick(10);
+  assert.equal(byText(closed.host.querySelector('[data-testid="home-meal-card"]'), 'button', /^Cancel order$/), undefined);
+  assert.doesNotMatch(closed.host.querySelector('[data-testid="home-menu-card"]')?.textContent || '', /₹60/);
+  await act(async () => closed.root.unmount());
+
+  // On native Capacitor, inline install card is hidden
+  (win as any).Capacitor = { isNativePlatform: () => true };
+  const nat = await mount(createElement(M.EmployeeDashboard));
+  await tick(8);
+  assert.equal(nat.host.querySelector('[data-testid="home-install-card"]'), null);
+  (win as any).Capacitor = undefined;
+  await act(async () => nat.root.unmount());
+
+  // Admin CanteenHeader remains unchanged (still includes Logout button)
+  auth.user = { id: 'ADM1', name: 'Admin', role: 'admin', canteenName: 'TechPark Canteen' };
+  const admHeader = await mount(createElement(M.CanteenHeader, { onChangePassword: () => {} }));
+  await tick(4);
+  assert.ok(byText(admHeader.host, 'button', /^Logout$/));
+});
