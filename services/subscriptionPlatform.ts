@@ -96,7 +96,7 @@ export async function loadSuperAdminUsageAudit(startDate:string,endDate:string,c
 export async function loadPlatformData(){
  await syncSubscriptionStatuses(); const c=requireClient();
  const [stats,can,profiles,plans,planRanges,subs,payments,settings,methods]=await Promise.all([
-  getPlatformStats(),c.from('canteens').select('id,name,owner_id,created_at,updated_at,archived').order('name'),
+  getPlatformStats(),c.from('canteens').select('id,name,owner_id,created_at,updated_at,archived,login_id,login_user_id').order('name'),
   c.from('profiles').select('id,employee_code,sr_number,full_name,role,admin_role,status,canteen_id').order('full_name'),
   c.from('subscription_plans').select('*').order('created_at',{ascending:false}),c.from('subscription_plan_ranges').select('*').order('min_members'),c.from('canteen_subscriptions').select('*'),
   c.from('subscription_payments').select('*').order('created_at',{ascending:false}),

@@ -7,7 +7,7 @@ const source = readFileSync(new URL('../components/admin/AdminDashboard.tsx', im
 const body = source.match(/useEffect\(\(\)=>\{(const allowed:SettingsTab\[\]=\[\];.*?)\},\[settingsTab,/s)?.[1];
 assert.ok(body, 'find the real Settings tab reconciliation effect');
 const js = transformSync(body, { loader: 'ts' }).code;
-const reconcile = new Function('settingsTab', 'can', 'isOwner', 'setSettingsTab', 'showFoodArrangement', js);
+const reconcile = new Function('settingsTab', 'can', 'isOwner', 'setSettingsTab', 'showFoodArrangement', 'showCanteenPassword', js);
 function clickBilling(permissions: string[], owner = false, showFoodArrangement = true) {
   let selected = 'billing'; // same state transition as the Billing Mode button
   reconcile(selected, (p: string) => permissions.includes(p), owner, (next: string) => { selected = next; }, showFoodArrangement);
@@ -56,4 +56,13 @@ test('Guest orders stay on Employee Food Arrangement for Standard and appear on 
   const billing = readFileSync(new URL('../components/admin/BillingModeSettings.tsx', import.meta.url), 'utf8');
   assert.match(food, /<GuestOrdersToggle\/>/);
   assert.match(billing, /pooling && loaded && <div className="rounded-2xl border bg-white p-4 shadow-sm"><GuestOrdersToggle\/><\/div>/);
+});
+
+test('Canteen ID Password tab stays selected only when showCanteenPassword is true', () => {
+  let selected = 'password';
+  reconcile('password', (p: string) => p === 'payments', false, (next: string) => { selected = next; }, true, true);
+  assert.equal(selected, 'password');
+  selected = 'password';
+  reconcile('password', (p: string) => p === 'payments', false, (next: string) => { selected = next; }, true, false);
+  assert.equal(selected, 'payment');
 });

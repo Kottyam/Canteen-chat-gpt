@@ -1853,9 +1853,17 @@ test('Login redesign (presentation only): labelled member mobile+password first,
   assert.equal(host.querySelector('#login-password')?.getAttribute('aria-label'), 'Password');
   assert.equal(host.querySelector('#login-user-id')?.getAttribute('placeholder'), 'Mobile Number');
   assert.equal(host.querySelector('#login-password')?.getAttribute('placeholder'), 'Password');
-  assert.match(host.textContent || '', /Canteen admin\? Sign in with Google/);
+  assert.match(host.textContent || '', /Canteen admin\?/);
+  assert.doesNotMatch(host.textContent || '', /Canteen admin\? Sign in with Google/);
   assert.ok(byText(host, 'button', /Continue with Google/));
   assert.ok(byText(host, 'button', /^Sign in$/));
+  assert.ok(byText(host, 'button', /Sign in with Canteen ID/));
+  assert.equal(host.querySelector('label[for="login-canteen-id"]'), null);
+  assert.equal(host.querySelector('label[for="login-canteen-password"]'), null);
+  assert.equal(host.querySelector('#login-canteen-id')?.getAttribute('placeholder'), 'Canteen ID');
+  assert.equal(host.querySelector('#login-canteen-password')?.getAttribute('placeholder'), 'Password');
+  assert.equal(host.querySelector('#login-canteen-id')?.getAttribute('aria-label'), 'Canteen ID');
+  assert.ok((host.innerHTML).indexOf('Continue with Google') < (host.innerHTML).indexOf('login-canteen-id'));
   const card = host.querySelector('[data-testid="login-apk-card"]');
   assert.ok(card); assert.ok(card.querySelector('[data-testid="login-apk-download"]'));
   // Member form comes before the Google admin option
@@ -1984,4 +1992,86 @@ test('Daily Summary: Financial Summary is hidden in Pooling and still shown in S
   assert.doesNotMatch(pool.host.textContent || '', /Financial Summary/);
   assert.doesNotMatch(pool.host.textContent || '', /Total Revenue/);
   assert.match(pool.host.textContent || '', /Food Items/);
+});
+
+
+test('Login: Sign in with Canteen ID uses loginWithCanteenId and leaves member sign-in unchanged', async () => {
+  fakeDb.reset(); auth.user = null;
+  auth.canteenLoginCalls = [];
+  auth.canteenLoginResult = { ok: false, error: 'Canteen ID or password is incorrect.' };
+  const { host } = await mount(createElement(M.Login));
+  await tick(5);
+  assert.ok(byText(host, 'button', /^Sign in$/));
+  assert.equal(host.querySelector('#login-user-id')?.getAttribute('placeholder'), 'Mobile Number');
+  await type(host.querySelector('#login-canteen-id'), 'kochi01');
+  await type(host.querySelector('#login-canteen-password'), 'secretpass');
+  await click(byText(host, 'button', /Sign in with Canteen ID/));
+  await tick(4);
+  assert.equal(auth.canteenLoginCalls.length, 1);
+  assert.equal(auth.canteenLoginCalls[0][0], 'kochi01');
+  assert.equal(auth.canteenLoginCalls[0][1], 'secretpass');
+  assert.match(host.textContent || '', /Canteen ID or password is incorrect/);
+});
+
+test('Super Admin existing canteen: Canteen login can set ID and reset password', async () => {
+  fakeDb.reset();
+  auth.user = { id: 'SA1', name: 'Super Admin', role: 'admin', adminRole: 'super_admin' };
+  fakeDb.db.canteens = [{ id: 'can1', name: 'Kochi Canteen', owner_id: 'ADM1', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', archived: false }];
+  fakeDb.db.profiles = [{ id: 'ADM1', employee_code: 'ADM1', full_name: 'Canteen Admin', role: 'admin', admin_role: 'owner', status: 'active', canteen_id: 'can1' }];
+  fakeDb.rpcHandlers.super_admin_platform_stats = () => ({ data: { total_canteens: 1, active_canteens: 1 } });
+  const invokes: any[] = [];
+  fakeDb.functionHandlers['manage-canteen-login'] = (body: any) => {
+    invokes.push(body);
+    if (body.action === 'set_login_id') {
+      const row = fakeDb.db.canteens.find((c: any) => c.id === body.canteen_id);
+      if (row) { row.login_id = String(body.login_id || '').toUpperCase(); row.login_user_id = row.login_user_id || 'login-user-1'; }
+    }
+    return { data: { ok: true, login_id: String(body.login_id || '').toUpperCase(), created: body.action === 'set_login_id' } };
+  };
+  const { host } = await mount(createElement(M.SuperAdminDashboard));
+  await tick(8);
+  await click(byText(host, 'button', /^Canteens$/));
+  await tick(4);
+  await click(byText(host, 'button', /^Details$/));
+  await tick(4);
+  assert.match(host.textContent || '', /Canteen login/);
+  assert.ok(host.querySelector('input[placeholder="Canteen ID (e.g. KOCHI01)"]'));
+  await type(host.querySelector('input[placeholder="Canteen ID (e.g. KOCHI01)"]'), 'KOCHI01');
+  await type(host.querySelector('input[placeholder="Initial password"]'), 'startpass1');
+  await click(byText(host, 'button', /^Save$/));
+  await tick(6);
+  assert.equal(invokes.length, 1);
+  assert.equal(invokes[0].action, 'set_login_id');
+  assert.equal(invokes[0].canteen_id, 'can1');
+  assert.equal(invokes[0].login_id, 'KOCHI01');
+  assert.equal(invokes[0].password, 'startpass1');
+  assert.match(host.textContent || '', /Canteen ID login created|Canteen ID saved|Reset password/i);
+});
+
+test('Admin Settings: Change password is shown only for Canteen-ID sessions', async () => {
+  fakeDb.reset(); standard();
+  auth.user = { id: 'A1', identityId: 'a1', name: 'Priya', role: 'admin', adminRole: 'owner', authProvider: 'google', canteenName: 'Kochi' };
+  auth.perms = ['dashboard', 'payments', 'time_management', 'members'];
+  const google = await mount(createElement(M.AdminDashboard));
+  await tick(8);
+  await click(byText(google.host.querySelector('main > nav'), 'button', /^Settings$/));
+  await tick(4);
+  assert.equal(byText(google.host, 'button', /^Password$/), undefined);
+  assert.doesNotMatch(google.host.textContent || '', /This password is for Canteen ID/);
+  await act(async () => google.root.unmount());
+
+  auth.user = { id: 'KOCHI01', identityId: 'login-user-1', name: 'Canteen admin', role: 'admin', adminRole: 'staff_admin', authProvider: 'canteen_id', canteenName: 'Kochi', canteenId: 'can1' };
+  const canteen = await mount(createElement(M.AdminDashboard));
+  await tick(8);
+  await click(byText(canteen.host.querySelector('main > nav'), 'button', /^Settings$/));
+  await tick(4);
+  const passwordTab = byText(canteen.host, 'button', /^Password$/);
+  assert.ok(passwordTab);
+  await click(passwordTab);
+  await tick(3);
+  assert.match(canteen.host.textContent || '', /Change password/);
+  assert.match(canteen.host.textContent || '', /Canteen ID KOCHI01/);
+  assert.ok(canteen.host.querySelector('input[placeholder="Current password"]'));
+  assert.ok(canteen.host.querySelector('input[placeholder="New password"]'));
+  assert.ok(canteen.host.querySelector('input[placeholder="Confirm new password"]'));
 });
