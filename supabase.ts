@@ -28,6 +28,14 @@ export const normalizeMobileNumber = (value: string) => {
   return /^91[6-9][0-9]{9}$/.test(digits) ? digits.slice(-10) : digits;
 };
 
+export const CANTEEN_LOGIN_EMAIL_DOMAIN = 'canteen.gocanteen.online';
+export const normalizeCanteenLoginId = (id: string) => String(id || '').trim().toUpperCase();
+export const isValidCanteenLoginId = (id: string) => {
+  const normalized = normalizeCanteenLoginId(id);
+  return /^[A-Z0-9]{3,16}$/.test(normalized) && /[A-Z]/.test(normalized);
+};
+export const canteenLoginEmail = (id: string) => `${normalizeCanteenLoginId(id).toLowerCase()}@${CANTEEN_LOGIN_EMAIL_DOMAIN}`;
+
 export const internalEmailForLogin = (id: string) => {
   const normalizedId = normalizeMobileNumber(id);
   // Preserve the existing legacy Admin Auth identity while exposing 229132 as

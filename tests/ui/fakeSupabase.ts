@@ -6,12 +6,17 @@ export const SUPABASE_PUBLISHABLE_KEY = 'fake';
 export const GOOGLE_REDIRECT_URL = 'http://fake.local';
 export const normalizeMobileNumber = (v: string) => v;
 export const internalEmailForLogin = (id: string) => `${id}@fake.local`;
+export const CANTEEN_LOGIN_EMAIL_DOMAIN = 'canteen.gocanteen.online';
+export const normalizeCanteenLoginId = (id: string) => String(id || '').trim().toUpperCase();
+export const isValidCanteenLoginId = (id: string) => { const n = normalizeCanteenLoginId(id); return /^[A-Z0-9]{3,16}$/.test(n) && /[A-Z]/.test(n); };
+export const canteenLoginEmail = (id: string) => `${normalizeCanteenLoginId(id).toLowerCase()}@${CANTEEN_LOGIN_EMAIL_DOMAIN}`;
 export const db: Record<string, any[]> = {};
 export const calls: any[] = [];
 export let authUid: string | null = null;
 export function setAuthUid(id: string | null) { authUid = id; }
 export const rpcHandlers: Record<string, (args: any) => { data?: any; error?: any }> = {};
-export function reset() { for (const k of Object.keys(db)) delete db[k]; calls.length = 0; for (const k of Object.keys(rpcHandlers)) delete rpcHandlers[k]; authUid = null; }
+export const functionHandlers: Record<string, (body: any) => { data?: any; error?: any }> = {};
+export function reset() { for (const k of Object.keys(db)) delete db[k]; calls.length = 0; for (const k of Object.keys(rpcHandlers)) delete rpcHandlers[k]; for (const k of Object.keys(functionHandlers)) delete functionHandlers[k]; authUid = null; }
 const match = (r: any, ops: any[]) => ops.every(([op, a]) => {
   if (op === 'eq') return !(a[0] in r) || r[a[0]] === a[1];
   if (op === 'in') return a[1].includes(r[a[0]]);
@@ -44,6 +49,7 @@ function from(table: string) {
 export const supabase: any = {
   from,
   rpc: async (name: string, args: any) => { calls.push({ rpc: name, args }); return rpcHandlers[name] ? { data: null, error: null, ...rpcHandlers[name](args) } : { data: null, error: null }; },
-  auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), getUser: async () => ({ data: { user: authUid ? { id: authUid } : null } }) },
+  functions: { invoke: async (name: string, opts: any) => { calls.push({ fn: name, body: opts?.body }); return functionHandlers[name] ? { data: null, error: null, ...functionHandlers[name](opts?.body) } : { data: { ok: true }, error: null }; } },
+  auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), getUser: async () => ({ data: { user: authUid ? { id: authUid } : null } }), signInWithPassword: async (creds: any) => { calls.push({ auth: 'signInWithPassword', creds }); return { data: { user: null }, error: { message: 'not stubbed' } }; } },
   channel: () => ({ on() { return this; }, subscribe() { return this; }, unsubscribe() { return Promise.resolve('ok'); } }), removeChannel() { return Promise.resolve('ok'); },
 };
